@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>フォーム解析ラボ 使い方</title>
+<meta name="theme-color" content="#0d1412">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="使い方">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="icon" type="image/png" href="./icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* ライトを既定にし、システム設定と明示指定の両方でダークに切り替わるようにする。グラウンドで日差しの下でも読めるように、屋外ではライトが要る。 */
+  :root{
+    --ground:#f2f5f1; --panel:#ffffff; --panel-2:#e9efe9;
+    --line:#d5dfd6; --line-soft:#e4ebe4;
+    --ink:#14201b; --ink-dim:#55655d; --ink-faint:#8a978f;
+    --turf:#2c7a52; --turf-bg:#e6f2ea;
+    --amber:#8a5e00; --amber-bg:#fbf1dc;
+    --alert:#b3382c; --alert-bg:#fbeae7;
+    --sky:#1c6f7d; --sky-bg:#e2f0f2;
+    --shadow:0 1px 2px rgba(20,32,27,.06), 0 4px 14px rgba(20,32,27,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0d1412; --panel:#182420; --panel-2:#141d1a;
+      --line:#26362f; --line-soft:#1e2b25;
+      --ink:#e9ede9; --ink-dim:#8fa39a; --ink-faint:#5f6f68;
+      --turf:#3fa876; --turf-bg:#14291f;
+      --amber:#f2b632; --amber-bg:#2b2313;
+      --alert:#e05a4e; --alert-bg:#2b1815;
+      --sky:#48c9d8; --sky-bg:#12262a;
+      --shadow:none;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0d1412; --panel:#182420; --panel-2:#141d1a;
+    --line:#26362f; --line-soft:#1e2b25;
+    --ink:#e9ede9; --ink-dim:#8fa39a; --ink-faint:#5f6f68;
+    --turf:#3fa876; --turf-bg:#14291f;
+    --amber:#f2b632; --amber-bg:#2b2313;
+    --alert:#e05a4e; --alert-bg:#2b1815;
+    --sky:#48c9d8; --sky-bg:#12262a;
+    --shadow:none;
+  }
+
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:'Noto Sans JP',system-ui,sans-serif;
+    font-size:15px; line-height:1.95; -webkit-font-smoothing:antialiased;
+  }
+  .shell{
+    display:grid; grid-template-columns:1fr; gap:0;
+    max-width:1180px; margin:0 auto;
+    padding:0 clamp(16px,4vw,32px) 96px;
+  }
+  @media (min-width:1000px){
+    .shell{grid-template-columns:210px minmax(0,1fr); gap:56px; padding-top:8px;}
+  }
+
+  /* ---- 目次 ---- */
+  nav.toc{display:none;}
+  @media (min-width:1000px){
+    nav.toc{
+      display:block; position:sticky; top:0; align-self:start;
+      max-height:100vh; overflow-y:auto; padding:40px 0 40px;
+    }
+    nav.toc ol{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px;}
+    nav.toc a{
+      display:block; padding:5px 10px; border-radius:6px; text-decoration:none;
+      color:var(--ink-dim); font-size:12.5px; line-height:1.5;
+      border-left:2px solid transparent;
+    }
+    nav.toc a:hover{color:var(--ink); background:var(--panel-2);}
+    nav.toc .toc-head{
+      font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.16em;
+      color:var(--ink-faint); padding:0 10px 10px; text-transform:uppercase;
+    }
+  }
+  main{min-width:0; padding-top:40px;}
+
+  /* ---- 見出し ---- */
+  header.top{margin-bottom:52px;}
+  /* アプリへ戻る導線。説明書を読んで、そのまま使い始められるように */
+  .applinks{display:flex; flex-wrap:wrap; gap:8px; margin-top:24px;}
+  .applinks a{
+    font-size:12.5px; text-decoration:none; color:var(--ink);
+    border:1px solid var(--line); border-radius:999px; padding:7px 14px;
+    background:var(--panel); transition:border-color .15s;
+  }
+  .applinks a:hover{border-color:var(--turf);}
+  .applinks a .ar{color:var(--turf); font-weight:700;}
+  .eyebrow{
+    font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:.18em;
+    color:var(--turf); margin:0 0 10px;
+  }
+  h1{
+    font-family:'Oswald',sans-serif; font-weight:700; letter-spacing:.01em;
+    font-size:clamp(30px,5.5vw,44px); line-height:1.18; margin:0 0 16px;
+    text-wrap:balance;
+  }
+  .lede{
+    font-size:16px; color:var(--ink-dim); max-width:62ch; margin:0;
+    line-height:2.0;
+  }
+  section{margin:0 0 60px; scroll-margin-top:24px;}
+  h2{
+    font-family:'Oswald',sans-serif; font-weight:600; letter-spacing:.02em;
+    font-size:22px; line-height:1.35; margin:0 0 6px; text-wrap:balance;
+  }
+  .sec-num{
+    font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:.16em;
+    color:var(--ink-faint); display:block; margin-bottom:4px;
+  }
+  h2 + .sub{color:var(--ink-dim); font-size:13.5px; margin:0 0 22px; max-width:62ch;}
+  h3{
+    font-family:'Oswald',sans-serif; font-weight:600; font-size:16px; letter-spacing:.02em;
+    margin:32px 0 8px; color:var(--ink);
+  }
+  p{margin:0 0 14px; max-width:66ch;}
+  ul,ol{margin:0 0 14px; padding-left:1.35em; max-width:66ch;}
+  li{margin-bottom:6px;}
+  strong{font-weight:700;}
+  a{color:var(--sky);}
+  hr{border:0; border-top:1px solid var(--line-soft); margin:40px 0;}
+
+  /* ---- チップ ---- */
+  .chip{
+    display:inline-block; font-family:'JetBrains Mono',monospace; font-size:10px;
+    font-weight:500; letter-spacing:.06em; padding:2px 7px; border-radius:4px;
+    border:1px solid currentColor; vertical-align:2px; white-space:nowrap;
+  }
+  .chip.pitch{color:var(--sky);}
+  .chip.bat{color:var(--amber);}
+  .chip.both{color:var(--ink-faint);}
+  kbd{
+    font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:500;
+    background:var(--panel); border:1px solid var(--line); border-bottom-width:2px;
+    border-radius:4px; padding:1px 6px; color:var(--ink); white-space:nowrap;
+  }
+  code{
+    font-family:'JetBrains Mono',monospace; font-size:12.5px;
+    background:var(--panel-2); padding:1px 5px; border-radius:4px; color:var(--ink);
+  }
+
+  /* ---- 手順 ---- */
+  ol.steps{list-style:none; padding:0; margin:0; counter-reset:st; max-width:none;}
+  ol.steps > li{
+    counter-increment:st; position:relative; padding-left:44px; margin-bottom:26px;
+  }
+  ol.steps > li::before{
+    content:counter(st); position:absolute; left:0; top:1px;
+    width:28px; height:28px; border-radius:50%;
+    background:var(--turf); color:var(--panel);
+    font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+  }
+  :root[data-theme="dark"] ol.steps > li::before,
+  :root:not([data-theme="light"]) ol.steps > li::before{color:#0d1412;}
+  ol.steps h3{margin:0 0 4px; font-size:15.5px;}
+  ol.steps p{margin:0 0 8px;}
+
+  /* ---- カード / 注意書き ---- */
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:18px 20px; margin:0 0 16px; box-shadow:var(--shadow);
+  }
+  .card > :last-child{margin-bottom:0;}
+  .note{
+    border-left:3px solid var(--amber); background:var(--amber-bg);
+    border-radius:0 8px 8px 0; padding:14px 18px; margin:0 0 16px;
+  }
+  .note > :last-child{margin-bottom:0;}
+  .note .lbl{
+    font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.14em;
+    color:var(--amber); display:block; margin-bottom:6px;
+  }
+  .limit{
+    border-left:3px solid var(--alert); background:var(--alert-bg);
+    border-radius:0 8px 8px 0; padding:14px 18px; margin:0 0 16px;
+  }
+  .limit > :last-child{margin-bottom:0;}
+  .limit .lbl{
+    font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.14em;
+    color:var(--alert); display:block; margin-bottom:6px;
+  }
+  .good{
+    border-left:3px solid var(--turf); background:var(--turf-bg);
+    border-radius:0 8px 8px 0; padding:14px 18px; margin:0 0 16px;
+  }
+  .good > :last-child{margin-bottom:0;}
+  .good .lbl{
+    font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.14em;
+    color:var(--turf); display:block; margin-bottom:6px;
+  }
+
+  /* ---- 表 ---- */
+  .tw{overflow-x:auto; margin:0 0 18px; -webkit-overflow-scrolling:touch;}
+  table{
+    border-collapse:collapse; width:100%; min-width:460px;
+    font-size:13.5px; line-height:1.7;
+  }
+  th,td{
+    text-align:left; padding:10px 14px 10px 0; vertical-align:top;
+    border-bottom:1px solid var(--line-soft);
+  }
+  th{
+    font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:.1em;
+    color:var(--ink-faint); font-weight:500; text-transform:uppercase;
+    border-bottom:1px solid var(--line); padding-bottom:8px; white-space:nowrap;
+  }
+  td.k{white-space:nowrap; font-weight:500;}
+  td.num{font-family:'JetBrains Mono',monospace; font-variant-numeric:tabular-nums; white-space:nowrap;}
+  table.kb td:first-child{white-space:nowrap; width:1%; padding-right:22px;}
+
+  /* ---- タブ名 ---- */
+  .tabname{
+    font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:500;
+    background:var(--panel-2); border:1px solid var(--line);
+    padding:1px 8px; border-radius:5px; white-space:nowrap;
+  }
+  .dl{display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px 18px; margin:0 0 16px;}
+  .dl dt{font-weight:700; font-size:13.5px; white-space:nowrap;}
+  .dl dd{margin:0; font-size:13.5px; color:var(--ink-dim); line-height:1.8;}
+  @media (max-width:560px){
+    .dl{grid-template-columns:1fr; gap:2px 0;}
+    .dl dd{margin-bottom:10px;}
+  }
+  :focus-visible{outline:2px solid var(--turf); outline-offset:2px; border-radius:3px;}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<nav class="toc" aria-label="目次">
+  <div class="toc-head">目次</div>
+  <ol>
+    <li><a href="#what">これは何か</a></li>
+    <li><a href="#shoot">1 — 撮る</a></li>
+    <li><a href="#first">2 — 最初の1回だけ</a></li>
+    <li><a href="#flow">3 — 練習1回の流れ</a></li>
+    <li><a href="#tabs">4 — 画面の見かた</a></li>
+    <li><a href="#numbers">5 — 数値の読みかた</a></li>
+    <li><a href="#chain">6 — 運動連鎖</a></li>
+    <li><a href="#save">7 — データを失わない</a></li>
+    <li><a href="#trouble">8 — 困ったとき</a></li>
+    <li><a href="#limits">9 — 測れないもの</a></li>
+    <li><a href="#keys">キーボード操作</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <p class="eyebrow">FORM ANALYSIS LAB — 取扱説明書</p>
+  <h1>フォーム解析ラボ 使い方</h1>
+  <p class="lede">
+    スマホやパソコンのブラウザだけで、投球と打撃の動作を数値にします。動画は端末の外に出ません。解析はすべてブラウザの中で行われます。この説明書は、はじめて使う日から現場で数値を読むところまでを順に説明します。
+  </p>
+  <div class="applinks">
+    <a href="./index.html"><span class="ar">←</span> 入口</a>
+    <a href="./pitching-analyzer.html">投球動作解析 Ver.1</a>
+    <a href="./batting-analyzer.html">打撃動作解析 Ver.1A</a>
+    <a href="./formanalyzer.html">解析をはじめる</a>
+  </div>
+</header>
+
+<section id="what">
+  <span class="sec-num">はじめに</span>
+  <h2>これは何か。そして何ではないか</h2>
+  <p class="sub">最初にここを読んでください。ここを誤解したまま使うと、数値が害になります。</p>
+
+  <div class="good">
+    <span class="lbl">このソフトがすること</span>
+    <p><strong>測って、その選手の過去と比べて、違いを示すところまで。</strong>今日の投球が本人のいつもと違うか、練習の後半で動作が変わってきたか、を数値で出します。</p>
+  </div>
+
+  <div class="limit">
+    <span class="lbl">このソフトがしないこと</span>
+    <p><strong>良し悪しの判定も、原因の特定も、練習メニューの提案もしません。</strong>「この角度が正しい」という基準値は一切持っていません。他人の値や一般的な目安とも比べません。数値が動いた理由が体調なのか、意識して変えたのか、単なる測定のばらつきなのかは、このソフトには区別できません。<strong>解釈と判断は指導者が行ってください。</strong></p>
+  </div>
+
+  <h3>3つのアプリ</h3>
+  <div class="tw"><table>
+    <thead><tr><th>ページ</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td class="k">投球動作解析 Ver.1</td>
+          <td>投球専用。選手管理・較正・イベント6点・運動連鎖・本人比・アラート・出力まで。<strong>本命はこちら。</strong></td></tr>
+      <tr><td class="k">打撃動作解析 Ver.1A</td>
+          <td>打撃専用。打者管理・較正・イベント5点・タイミング・本人比・アラート・出力まで。</td></tr>
+      <tr><td class="k">解析をはじめる</td>
+          <td>旧版。投球／打撃を切り替えて使う簡易版。2つの動画を並べて見たいときに使えます。</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note">
+    <span class="lbl">重要</span>
+    <p><strong>投球版と打撃版で「身長比」の物差しが違います。</strong>投球版は「足首〜鼻の距離」、打撃版は「胴体長」を基準にしています。打者は構えからフォロースルーまで一度も直立しないため、足首〜鼻では沈み込みで10%以上縮んでしまうからです。<strong>2つのアプリの身長比の数値を直接比べないでください。</strong></p>
+  </div>
+</section>
+
+<hr>
+
+<section id="shoot">
+  <span class="sec-num">STEP 1</span>
+  <h2>撮る</h2>
+  <p class="sub">ここでほとんど決まります。撮り方が違うと、あとの数値はすべて意味を失います。</p>
+
+  <h3>カメラの位置</h3>
+  <div class="tw"><table>
+    <thead><tr><th>　</th><th>置く場所</th></tr></thead>
+    <tbody>
+      <tr><td class="k"><span class="chip pitch">投球</span></td>
+          <td><strong>投球方向に対して直角</strong>の側面（一塁側または三塁側）。全身が切れない画角で三脚に固定。</td></tr>
+      <tr><td class="k"><span class="chip bat">打撃</span></td>
+          <td><strong>投手－捕手を結ぶ線に対して直角</strong>で、<strong>打者の正面側</strong>（右打ちなら一塁側）。背中側でも幾何は同じですが、前膝とグリップが体で隠れやすくなります。</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>フレームレート（いちばん効きます）</h3>
+  <p>スマホの<strong>スローモーション</strong>で撮ってください。iPhone なら 1080p / 120fps か 240fps です。</p>
+  <div class="tw"><table>
+    <thead><tr><th>fps</th><th>1コマ</th><th>できること</th></tr></thead>
+    <tbody>
+      <tr><td class="num">30</td><td class="num">33.3 ms</td>
+          <td>角度・距離は測れます。<strong>タイミング系の比較とアラートは自動的に止まります。</strong></td></tr>
+      <tr><td class="num">60</td><td class="num">16.7 ms</td>
+          <td>タイミングの本人比が使えるようになります。<strong>ここが最低ライン。</strong></td></tr>
+      <tr><td class="num">120</td><td class="num">8.3 ms</td>
+          <td>運動連鎖の順番が読めるようになります。<strong>推奨。</strong></td></tr>
+      <tr><td class="num">240</td><td class="num">4.2 ms</td>
+          <td>いちばん確実。ただし解析できる長さが約5秒までになります（下の注意）。</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note">
+    <span class="lbl">240fps で撮るときの注意</span>
+    <p>1回の解析で扱えるのは <strong>1200コマまで</strong>です。240fps だと <strong>5.0秒</strong>しかありません。超えるとその先は解析されず、画面に「範囲が長すぎるため、先頭◯秒分だけ解析しました」と出ます。<strong>トリミングを短く切ってください。</strong>投球1球なら3秒あれば足ります。</p>
+  </div>
+
+  <h3>撮影チェックリスト</h3>
+  <ul>
+    <li>全身（頭から足先まで）が画角に入っている</li>
+    <li>極端に暗くない。逆光でない</li>
+    <li>カメラが水平（傾いていない）</li>
+    <li>動作の方向に対して直角の位置から撮っている</li>
+  </ul>
+  <p><span class="chip bat">打撃</span> 打撃版ではこのチェックリストが画面にあり、チェックの状態がスイングと一緒に保存されます。あとで数値がおかしいとき、撮影条件が原因かを切り分けるためです。</p>
+</section>
+
+<hr>
+
+<section id="first">
+  <span class="sec-num">STEP 2</span>
+  <h2>最初の1回だけ</h2>
+  <p class="sub">選手ごとに1回やれば、次からは不要です。</p>
+
+  <ol class="steps">
+    <li>
+      <h3>選手を登録する</h3>
+      <p><span class="tabname">選手・撮影</span>／<span class="tabname">打者・撮影</span> タブで、<strong>名前・身長・投球腕（打席）</strong>を入れて登録します。</p>
+      <p><strong>身長は必須です。</strong>ストライド長やリリース位置を身長比で出すために使います。身長比にすると、撮影距離が変わっても比べられるようになります。</p>
+      <div class="note">
+        <span class="lbl">同姓の選手がいるとき</span>
+        <p>同じ名前で登録しようとすると確認が出ます。<strong>「キャンセル」を選ぶと別人として登録</strong>されます。うっかり「OK」を押すと先に登録した選手の身長と利き手が書き換わり、その選手の過去の記録が狂います。</p>
+      </div>
+    </li>
+    <li>
+      <h3>較正する（できればやる）</h3>
+      <p>「較正する」を押し、画面内で<strong>長さが分かっているもの</strong>の両端をタップして、実際の長さを入れます。</p>
+      <ul>
+        <li><span class="chip pitch">投球</span> 投球板の横幅 = <code>60.96</code> cm。<strong>選手がまっすぐ立っているコマ</strong>で行ってください。</li>
+        <li><span class="chip bat">打撃</span> ホームベースの幅 = <code>43.2</code> cm。姿勢は問いません。</li>
+      </ul>
+      <p><strong>既知の長さは、選手と同じ奥行きに置いてください。</strong>手前や奥に置くと換算がずれます。</p>
+      <p>較正しなくても身長比は出ます（人体比の既定値<code>0.89</code> ／ <code>0.288</code> を使い「未較正」と表示されます）。同じ選手の中で比べる分には影響しませんが、<strong>cm の絶対値には数%の誤差</strong>が乗ります。打撃版は未較正だと cm 表示そのものを出しません。</p>
+      <p>おかしな値を入れると「較正値が不自然です」と理由付きで拒否されるので、安心してやり直せます。</p>
+    </li>
+  </ol>
+</section>
+
+<hr>
+
+<section id="flow">
+  <span class="sec-num">STEP 3</span>
+  <h2>練習1回の流れ</h2>
+  <p class="sub">ここからは毎回の作業です。1球（1スイング）ごとに繰り返します。</p>
+
+  <ol class="steps">
+    <li>
+      <h3>セッションを開始する</h3>
+      <p><span class="tabname">解析</span> タブで「セッション開始」。ブルペン1本、打撃練習1回を1セッションとして扱います。10球ブロックごとの変化はこの単位で見ます。</p>
+      <p><strong>選手を切り替えると、そのセッションは自動的に閉じます。</strong>別の選手のセッションに記録が混ざらないようにするためです。切り替えたら開始し直してください。</p>
+    </li>
+    <li>
+      <h3>動画を読み込む</h3>
+      <p>「動画を選択」またはドラッグ＆ドロップ。読み込んだら<strong>画面の fps 表示を必ず確認</strong>してください。</p>
+      <div class="note">
+        <span class="lbl">スロー撮影のとき</span>
+        <p>スローモーションは、書き出し方によっては「遅くした状態」で焼き込まれます。
+        240fps で撮ったのに fps 表示が 30 なら、<span class="tabname">設定</span> タブの「撮影時のfps」で <code>240</code> を選んでください。<strong>これを設定しないと、時間に関わる数値がすべて8倍ずれます。</strong>角度・距離・比率は影響を受けません。</p>
+      </div>
+    </li>
+    <li>
+      <h3>トリミングする</h3>
+      <p>解析する範囲を切ります。<kbd>I</kbd> で開始、<kbd>O</kbd> で終了。</p>
+      <ul>
+        <li><span class="chip pitch">投球</span> 開始は<strong>始動前</strong>、終了は<strong>投げ終わったあと</strong>。</li>
+        <li><span class="chip bat">打撃</span> <strong>開始は「構え」のコマに合わせてください。</strong>頭部移動量は構えの位置を原点にして測るので、ここがずれると頭部の値もそのままずれます。</li>
+      </ul>
+      <p>短く切るほど解析が速く、上限にも引っかかりません。</p>
+    </li>
+    <li>
+      <h3>この範囲を解析する</h3>
+      <p>範囲を1コマずつ解析し、平滑化した骨格を作ります。以降の角度・位置・速度はすべてこの平滑化後の値から計算されます。</p>
+      <p>終わったら「検出できたコマ」を見てください。<strong>90%を切っていたら撮影条件を疑ってください。</strong></p>
+    </li>
+    <li>
+      <h3>イベントを確定する</h3>
+      <p>「候補を検出」を押すと、自動で候補が出ます。<strong>自動検出は候補にすぎません。必ず目で確認してください。</strong></p>
+      <p>各イベントの「選ぶ」を押すと前後±5コマがサムネイルで並びます。正しいコマをタップすれば確定です。コマ送りで動かしてから「いま表示しているコマで確定」でも構いません。</p>
+      <div class="tw"><table>
+        <thead><tr><th>　</th><th>イベント</th><th>確定</th></tr></thead>
+        <tbody>
+          <tr><td class="k"><span class="chip pitch">投球</span></td>
+              <td>セット / 最大脚上げ / 前足接地 / Arm Peak / <strong>リリース</strong> / フィニッシュ</td>
+              <td>任意（未確定の球は集計から除かれます）</td></tr>
+          <tr><td class="k"><span class="chip bat">打撃</span></td>
+              <td>構え / <strong>始動</strong> / 踏み込み足接地 / <strong>インパクト</strong> / フォロー</td>
+              <td><strong>始動・接地・インパクトは必須</strong></td></tr>
+        </tbody>
+      </table></div>
+      <div class="note">
+        <span class="lbl">とくに気をつけるところ</span>
+        <p><span class="chip bat">打撃</span> <strong>インパクトは手動確定が必須です。</strong>自動候補は「グリップ速度が最大のコマ」ですが、これはボール接触のコマとは一致しません（手の減速がヘッドの加速に寄与するため、グリップ速度のピークは手前に出ます）。
+        3点が確定するまでスイングは保存できません。</p>
+        <p><strong>接地の候補は、実際の接地より1コマほど後ろに出ます。</strong>足が止まったことを速度で判定する以上、平滑化のぶんだけ必ず遅れます。前のコマも見てください。</p>
+        <p><span class="chip pitch">投球</span> <strong>リリース</strong>も、手の速度が最大になるコマとボールが離れるコマが数コマずれることがあります。</p>
+      </div>
+    </li>
+    <li>
+      <h3>数値を確認して記録する</h3>
+      <p><span class="tabname">指標</span> タブで数値を見ます。<span class="chip pitch">投球</span> スピードガンの値があれば手入力します（自動計測はしません）。<span class="chip bat">打撃</span> 打球初速・打ち出し角・方向は任意入力です。</p>
+      <p>「セッションに記録」で保存します。イベント時の全ランドマークも一緒に保存されるので、あとから較正値や定義を変えても計算し直せます。</p>
+    </li>
+  </ol>
+</section>
+
+<hr>
+
+<section id="tabs">
+  <span class="sec-num">STEP 4</span>
+  <h2>画面の見かた</h2>
+  <p class="sub">タブは9つ。上の流れで使うのは最初の3つだけで、残りは溜まったデータを見るためのものです。</p>
+
+  <dl class="dl">
+    <dt>選手・撮影</dt><dd>選手の登録、較正、撮影チェックリスト。最初の1回だけ使います。</dd>
+    <dt>解析</dt><dd>セッション、トリミング、事前解析、イベントの検出と確定。毎回の作業場所。</dd>
+    <dt>指標</dt><dd>この1球（1スイング）の数値。測定信頼度と、記録ボタン。</dd>
+    <dt>連鎖 <span class="chip pitch">投球</span></dt>
+      <dd>キネマティック・シークエンス。骨盤→胸郭→上腕→手の角速度と順番、ブレーキ。</dd>
+    <dt>タイミング <span class="chip bat">打撃</span></dt>
+      <dd>始動→接地→インパクトの時間配分と、トップ（割れ）のタイムラグ。</dd>
+    <dt>再現性</dt><dd>平均・中央値・SD・CV と本人比、アラート。<strong>ここがこのソフトの本体です。</strong></dd>
+    <dt>比較</dt><dd>保存済みの2件を選んで骨格を重ね、指標の差を並べます。動画がもう無くても比べられます。</dd>
+    <dt>変化・出力</dt><dd>セッションの概要、10球ブロックごとの推移、CSV / JSON の書き出しと読み込み。</dd>
+    <dt>設定</dt><dd>撮影fps、鏡像、検出しきい値、<strong>アラートのしきい値</strong>、解析精度。</dd>
+  </dl>
+
+  <h3>比較タブの使いかた</h3>
+  <p>2件とも<strong>それぞれの身長比で割ってから</strong>重ねるので、撮影距離やカメラ位置が違っても比べられます。重ねる基準点は3つから選べます。</p>
+  <ul>
+    <li><strong>両足首の中点</strong> — 全身の位置関係を見る</li>
+    <li><strong>骨盤（股関節）中点</strong> — 手足の使い方を見る</li>
+    <li><strong>肩中点</strong> — 上半身の形を見る</li>
+  </ul>
+  <div class="limit">
+    <span class="lbl">できないこと</span>
+    <p><strong>カメラの角度が違うと、形そのものが変わります。</strong>撮影距離とカメラ位置の違いは身長比で消えますが、<strong>角度の違いは補正できません。</strong>同じ位置から撮った動画どうしで比べてください。</p>
+  </div>
+</section>
+
+<hr>
+
+<section id="numbers">
+  <span class="sec-num">STEP 5</span>
+  <h2>数値の読みかた</h2>
+
+  <h3>本人比が出るまで</h3>
+  <p>記録が溜まるまで、比較もアラートも出しません。少ない本数の平均は、たまたま出た値に強く引きずられるからです。</p>
+  <div class="tw"><table>
+    <thead><tr><th>記録数</th><th>扱い</th></tr></thead>
+    <tbody>
+      <tr><td class="num">5未満</td><td><strong>比較もアラートも出しません。</strong>「データ蓄積中（あと◯本）」と表示されます。</td></tr>
+      <tr><td class="num">5〜9</td><td>参考値として比較します。「参考」ラベルが付きます。</td></tr>
+      <tr><td class="num">10以上</td><td>通常の比較を行います。</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>主に見るのは「直近10本との差」</strong>です。全体平均との差は副次的に併記しています。</p>
+
+  <div class="note">
+    <span class="lbl">アラートのしきい値は、必ず自分で調整してください</span>
+    <p>初期値は<strong>外部から与えた数字</strong>で、その選手に適切である保証はありません。
+    10〜30本たまった時点で <span class="tabname">再現性</span> タブに出る<strong>本人のSD</strong>を見て、<span class="tabname">設定</span> タブで設定し直してください。<strong>SDより小さいしきい値にすると、ただの測定のばらつきで鳴り続けます。</strong></p>
+  </div>
+
+  <h3>4つの段階</h3>
+  <p>画面は「測定 → 比較 → 判定 → 解釈」の4段階に分けてあります。このソフトが行うのは<strong>判定まで</strong>です。</p>
+  <div class="tw"><table>
+    <thead><tr><th>段階</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td class="k">① 測定</td><td>数値をそのまま出す</td></tr>
+      <tr><td class="k">② 比較</td><td>本人の直近10本との差</td></tr>
+      <tr><td class="k">③ 判定</td><td>しきい値を超えたかどうか。<strong>段階だけ</strong>で、文章にはしません</td></tr>
+      <tr><td class="k">④ 解釈</td><td><strong>事実の記述だけ。</strong>良し悪しも原因も判定しません</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>急な変化とゆるやかな変化</h3>
+  <p>アラートは<strong>直近10本との差</strong>を見ます。じわじわ落ちていくと、直近10本の平均も一緒に下がるので鳴りません。</p>
+  <p><strong>ゆるやかな変化は <span class="tabname">変化・出力</span> タブの10本ブロックの推移で見てください。</strong>アラートは急な変化用、ブロック表はゆるやかな変化用です。</p>
+
+  <h3>言葉づかいについて</h3>
+  <p>誤解を招く言い方を避けています。画面に出てくる名前は次の意味です。</p>
+  <div class="tw"><table>
+    <thead><tr><th>使っていない語</th><th>画面に出る名前</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td class="k">バット速度</td><td>グリップ速度（手首移動速度）</td><td>バットは追跡していません。手首が遅くてもヘッドが速いことがあります</td></tr>
+      <tr><td class="k">体重配分</td><td>支持基底内の身体中心位置</td><td>体重は測っていません</td></tr>
+      <tr><td class="k">エクステンション</td><td>リリース前後位置（軸足基準）</td><td>投球板からの距離ではありません</td></tr>
+      <tr><td class="k">肩の最大外旋（MER）</td><td>Arm Peak（2D近似）</td><td>側面2Dでは真の外旋角度は測れません</td></tr>
+      <tr><td class="k">Hip-Shoulder Separation</td><td>トップのタイムラグ</td><td>3次元の回旋角度差ではありません</td></tr>
+      <tr><td class="k">疲労</td><td>後半における動作変化</td><td>変化の原因は疲労とは限りません</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<hr>
+
+<section id="chain">
+  <span class="sec-num">STEP 6</span>
+  <h2>運動連鎖 <span class="chip pitch">投球</span></h2>
+  <p class="sub">キネマティック・シークエンス。下半身から生まれた力が鞭のように伝わっているかを見ます。</p>
+
+  <p>骨盤・胸郭・上腕・前腕（手）の角速度を重ねて表示します。<strong>縦軸は deg/秒 の実数値</strong>です（順番を見やすくしたいときは正規化表示に切り替えられます）。</p>
+
+  <h3>見るところ</h3>
+  <ol>
+    <li><strong>ピークが「骨盤 → 胸郭 → 上腕 → 手」の順に並んでいるか。</strong>並んでいなければ「逆順」と表示されます。</li>
+    <li><strong>隣り合う部位がほぼ同時にピークになっていないか。</strong>同時なら、そこでエネルギーが分離できていません。「同時」と表示されます。</li>
+    <li><strong>前の部位が減速している最中に、次がピークを迎えているか。</strong>表の右端が減速の鋭さ（deg/秒²）、その下の各行に「前が減速中 ✓」と出ます。</li>
+  </ol>
+
+  <div class="note">
+    <span class="lbl">120fps 以上が必要です</span>
+    <p>実際のピーク間の差は <strong>20〜50ms 程度</strong>です。30fps（1コマ33ms）では小さな差を「同時」としか出せません。ただし1コマを超える差（はっきりした逆転など）は 30fps でも読めます。</p>
+  </div>
+
+  <div class="limit">
+    <span class="lbl">この数値の限界</span>
+    <ul>
+      <li><strong>骨盤と胸郭</strong>は、体が回ると左右の股関節（肩）の<strong>見かけの幅が縮む</strong>ことを使って回旋角を復元しています。側面から骨盤線の「傾き」を見ても回旋は捉えられないためです。</li>
+      <li><strong>上腕と前腕は画面内の2D角速度</strong>です。腕の動きは3次元なので、奥行き方向の成分は入りません。</li>
+      <li><strong>研究で引用される絶対値（600〜1200 deg/秒 等）とは比較できません。</strong>測り方が違います。</li>
+      <li><strong>ピーク角速度は平滑化のぶんだけ低めに出ます</strong>（骨盤 −7%、手 −17% 程度）。ただし<strong>ピークの時刻はほとんどずれない</strong>ので、順番の判定には影響しません。</li>
+      <li>体が画像面と平行に近い区間は復元の誤差が大きく増幅されるため、角速度を出していません（除外コマ数を表示します）。</li>
+      <li>区間は<strong>最大脚上げ〜リリース</strong>です。以降は回旋が90°を越えて復元が折り返してしまいます。</li>
+    </ul>
+  </div>
+</section>
+
+<hr>
+
+<section id="save">
+  <span class="sec-num">STEP 7</span>
+  <h2>データを失わないために</h2>
+
+  <div class="limit">
+    <span class="lbl">必ず読んでください</span>
+    <p><strong>iPhone の Safari は、しばらくサイトを開かないと保存データを勝手に消すことがあります。</strong>「ホーム画面に追加」して定期的に使えば消えにくくなりますが、保証はありません。</p>
+    <p><strong>練習が終わったら、毎回 JSON を書き出して手元に残してください。</strong>これは端末の移行用ではなく、<strong>消失を防ぐための必須の運用</strong>です。</p>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>形式</th><th>中身</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td class="k">JSON</td>
+          <td>選手・セッション・全記録＋<strong>イベント時の全ランドマーク</strong></td>
+          <td><strong>バックアップと端末移行。</strong>読み込めば完全に元へ戻ります。定義を変えても計算し直せます</td></tr>
+      <tr><td class="k">CSV</td>
+          <td>1球（1スイング）1行の数値表。UTF-8（BOM付き）</td>
+          <td>Excel や表計算ソフトで見る用</td></tr>
+    </tbody>
+  </table></div>
+  <p>書き出しも読み込みも端末内で完結します。<strong>外部には一切送信しません。</strong></p>
+
+  <div class="note">
+    <span class="lbl">「この端末ではデータを保存できません」と出たら</span>
+    <p>プライベートブラウズで開いています。<strong>通常のウィンドウで開き直してください。</strong>そのままでも解析と数値の表示は使えますが、記録は残りません。</p>
+  </div>
+</section>
+
+<hr>
+
+<section id="trouble">
+  <span class="sec-num">STEP 8</span>
+  <h2>困ったとき</h2>
+  <div class="tw"><table>
+    <thead><tr><th>症状</th><th>対処</th></tr></thead>
+    <tbody>
+      <tr><td class="k">動画が再生できない</td>
+          <td><strong>mp4（H.264）に変換</strong>してください。形式によっては読めません。</td></tr>
+      <tr><td class="k">「解析ライブラリを取得できませんでした」</td>
+          <td>初回だけネット接続が要ります。つながる場所で一度開けば、次からオフラインでも動きます。この状態でも動画の再生とコマ送りは使えます。</td></tr>
+      <tr><td class="k">「範囲が長すぎるため、先頭◯秒分だけ…」</td>
+          <td><strong>トリミングを短く</strong>してやり直してください。1200コマが上限です。</td></tr>
+      <tr><td class="k">「投球方向を選んでください」</td>
+          <td>体の移動が小さく自動判定できませんでした。<strong>手動で左右を選んで</strong>ください。</td></tr>
+      <tr><td class="k">「イベントを検出し直してください」</td>
+          <td>利き手（打席）を変えたので、前のイベントを取り消しました。もう一度「候補を検出」してください。</td></tr>
+      <tr><td class="k">「範囲の外に出た◯件のイベントは取り消しました」</td>
+          <td>トリミングを狭めて解析し直したためです。もう一度「候補を検出」してください。</td></tr>
+      <tr><td class="k">「較正値が不自然です」</td>
+          <td>入れた長さか、選んだコマが違います。メッセージに理由が出るので、それに従ってやり直してください。</td></tr>
+      <tr><td class="k">骨格の検出率が低い</td>
+          <td>暗い・逆光・全身が入っていない・服が背景と同色、のいずれかを疑ってください。<span class="tabname">設定</span> の「解析精度」を「高精度」にすると改善することがあります。</td></tr>
+      <tr><td class="k">時間の数値が明らかにおかしい</td>
+          <td>スロー撮影の補正が未設定です。<span class="tabname">設定</span> の「撮影時のfps」を合わせてください。</td></tr>
+      <tr><td class="k">数値が急に「--」になった</td>
+          <td>イベントが未確定か、解析範囲の外に出ています。<span class="tabname">解析</span> タブを確認してください。</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<hr>
+
+<section id="limits">
+  <span class="sec-num">STEP 9</span>
+  <h2>測れないもの</h2>
+  <p class="sub">ここに挙げたものは、このソフトでは測っていません。測ったように扱わないでください。</p>
+
+  <div class="limit">
+    <span class="lbl">原理的に測れない</span>
+    <ul>
+      <li><strong>3次元の角度・回旋角速度の絶対値。</strong>側面カメラ1台なので、奥行き方向は分かりません。</li>
+      <li><strong>バットの速度・軌道。</strong>バットは追跡していません。追っているのは手首です。</li>
+      <li><strong>体重・地面反力。</strong>「支持基底内の身体中心位置」は体重配分ではありません。</li>
+      <li><strong>打者の左右方向の頭の動き。</strong>側面からは前後と上下しか測れません。</li>
+      <li><strong>肩甲骨と胸郭の分離。</strong>胸郭の回旋は肩の線から求めています。</li>
+    </ul>
+  </div>
+
+  <div class="limit">
+    <span class="lbl">やっていない</span>
+    <ul>
+      <li><strong>良し悪しの判定。</strong>「この角度が正しい」という基準値は持っていません。</li>
+      <li><strong>他人との比較。</strong>プロ選手や平均値とは比べません。</li>
+      <li><strong>原因の特定。</strong>数値が動いた理由は判定していません。</li>
+      <li><strong>練習メニューの提案。</strong>指導内容の提示はこのソフトの役目ではないと考えています。</li>
+      <li><strong>医療的な判断・故障予測。</strong>一切行いません。</li>
+    </ul>
+  </div>
+
+  <div class="note">
+    <span class="lbl">まだ検証できていないこと</span>
+    <p>このソフトの計算は、正解を仕込んだ合成データで検証してあります（指標は独立実装と 0.00〜0.18% 一致、鏡像や縦向き動画でも同じ値になることを確認済み）。</p>
+    <p>ただし<strong>実際の動画での検証はまだできていません。</strong>とくに<strong>イベント検出のしきい値</strong>（接地の判定など）と<strong>アラートの初期値</strong>は、実データで確かめられていません。最初に使うときは、
+    ①イベント候補が目で見た位置とどれくらいずれるか、
+    ②10〜30本撮って出る本人のSD、の2点を確認してください。</p>
+  </div>
+</section>
+
+<hr>
+
+<section id="keys">
+  <span class="sec-num">付録</span>
+  <h2>キーボード操作</h2>
+  <p class="sub">パソコンで使うときのショートカット。イベントの確定が速くなります。</p>
+  <div class="tw"><table class="kb">
+    <thead><tr><th>キー</th><th>動作</th></tr></thead>
+    <tbody>
+      <tr><td><kbd>Space</kbd></td><td>再生 / 一時停止</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>0.1秒 戻る / 進む</td></tr>
+      <tr><td><kbd>Shift</kbd> + <kbd>←</kbd> <kbd>→</kbd></td><td>0.01秒</td></tr>
+      <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td><strong>1コマ</strong>（確実に1コマだけ動きます）</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>0.001秒（1コマより細かいので画が変わらないことがあります）</td></tr>
+      <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>トリミングの開始 / 終了</td></tr>
+    </tbody>
+  </table></div>
+  <p>画面のボタンは<strong>長押しで連続送り</strong>になります。イベントを探すときはこれが速いです。</p>
+
+  <h3>iPhone で使うとき</h3>
+  <ol>
+    <li>Safari で入口ページを開く</li>
+    <li>下の共有ボタン（□に↑）をタップ</li>
+    <li>「ホーム画面に追加」を選ぶ</li>
+  </ol>
+  <p>アプリのように全画面で開き、保存したデータも消えにくくなります。一度開いておけば、<strong>電波の弱いグラウンドでもオフラインで動きます</strong>（この説明書も読めます）。</p>
+</section>
+
+</main>
+</div>
+</body>
+</html>

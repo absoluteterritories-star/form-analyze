@@ -1,0 +1,17 @@
+{
+  "name": "フォーム解析ラボ",
+  "short_name": "フォーム解析",
+  "description": "投球・打撃フォームをブラウザ内で解析します。動画は外部に送信されません。",
+  "start_url": "./formanalyzer.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1412",
+  "theme_color": "#0d1412",
+  "lang": "ja",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

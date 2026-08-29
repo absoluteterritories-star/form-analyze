@@ -1,0 +1,3352 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>打撃動作解析システム Ver.1A</title>
+<meta name="theme-color" content="#0d1412">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="打撃解析">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="icon" type="image/png" href="./icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-0:#0d1412; --bg-1:#141d1a; --panel:#182420; --panel-line:#26362f;
+    --dirt:#3a2c22; --turf:#3fa876; --chalk:#e9ede9; --chalk-dim:#8fa39a;
+    --amber:#f2b632; --sky:#48c9d8; --alert:#e05a4e; --violet:#9b7ede; --tap:44px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:radial-gradient(ellipse at 20% -10%,#1c2a24 0,transparent 55%),var(--bg-0);
+    color:var(--chalk);font-family:'Noto Sans JP',sans-serif;min-height:100vh;
+    -webkit-font-smoothing:antialiased;overscroll-behavior-y:contain;
+  }
+  button{font-family:inherit;}
+  button,.tab,.switch{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+  .wrap{
+    max-width:1360px;margin:0 auto;
+    padding:calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+            calc(48px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+  }
+  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    padding:4px 2px 14px;border-bottom:1px solid var(--panel-line);margin-bottom:16px;}
+  header .eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;
+    color:var(--sky);background:rgba(72,201,216,.08);border:1px solid rgba(72,201,216,.35);
+    padding:3px 8px;border-radius:3px;flex:none;}
+  h1{font-family:'Oswald',sans-serif;font-weight:700;font-size:21px;margin:0;}
+  .status-line{display:flex;align-items:center;gap:8px;margin-left:auto;
+    font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--chalk-dim);
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:20px;
+    padding:5px 12px;max-width:100%;}
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--chalk-dim);flex:none;}
+  .status-dot.ok{background:var(--turf);box-shadow:0 0 6px var(--turf);}
+  .status-dot.busy{background:var(--amber);box-shadow:0 0 6px var(--amber);animation:pulse 1s infinite;}
+  .status-dot.err{background:var(--alert);box-shadow:0 0 6px var(--alert);}
+  @keyframes pulse{50%{opacity:.35;}}
+
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:18px;align-items:start;}
+  @media (max-width:980px){ .layout{grid-template-columns:1fr;} }
+  @media (min-width:981px){
+    .stage-card{position:sticky;top:12px;}
+    .sidebar{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;padding-right:2px;}
+  }
+
+  .stage-card{background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;overflow:hidden;}
+  .stage{position:relative;width:100%;
+    background:repeating-linear-gradient(0deg,#241a13 0 2px,#2a1f16 2px 42px),var(--dirt);
+    display:flex;align-items:center;justify-content:center;aspect-ratio:9/13;max-height:64vh;overflow:hidden;}
+  .stage.dragover{outline:2px dashed var(--amber);outline-offset:-6px;}
+  .pane{position:relative;flex:1 1 0;height:100%;min-width:0;}
+  video{display:block;width:100%;height:100%;object-fit:contain;background:#000;}
+  video.mirrored{transform:scaleX(-1);}
+  canvas.overlay{position:absolute;left:0;top:0;pointer-events:none;}
+  canvas.overlay.calib{pointer-events:auto;cursor:crosshair;}
+  .drop{text-align:center;padding:32px 22px;color:var(--chalk-dim);}
+  .drop .glyph{font-family:'Oswald',sans-serif;font-size:15px;letter-spacing:.16em;color:var(--sky);display:block;margin-bottom:10px;}
+  .drop .hint{font-size:12px;margin-top:10px;color:#5f6f68;line-height:1.7;}
+  .btn-amber{font-size:13.5px;font-weight:600;color:var(--bg-0);background:var(--amber);
+    border:none;padding:0 18px;min-height:var(--tap);border-radius:8px;cursor:pointer;}
+  .btn-amber:hover{filter:brightness(1.08);}
+  .calib-banner{
+    position:absolute;left:0;right:0;top:0;z-index:5;background:rgba(242,182,50,.92);color:#0d1412;
+    font-size:12.5px;font-weight:600;padding:8px 12px;text-align:center;display:none;
+  }
+  .calib-banner.show{display:block;}
+
+  /* transport */
+  .transport{padding:10px 12px 12px;border-top:1px solid var(--panel-line);display:none;}
+  .transport.show{display:block;}
+  .seek-wrap{position:relative;padding:6px 0 2px;}
+  .seek{width:100%;-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;
+    background:var(--panel-line);outline:none;margin:0;display:block;position:relative;z-index:2;}
+  .seek::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;
+    background:var(--amber);cursor:pointer;box-shadow:0 0 0 3px rgba(242,182,50,.22);}
+  .seek-trim{position:absolute;left:0;right:0;top:6px;height:5px;pointer-events:none;z-index:1;}
+  .seek-trim i{position:absolute;top:0;height:5px;background:rgba(13,20,18,.72);border-radius:3px;}
+  .tline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--chalk-dim);margin:8px 0 10px;}
+  .tline b{color:var(--chalk);font-weight:500;font-size:14px;}
+  .chip{border:1px solid var(--panel-line);border-radius:5px;padding:2px 7px;font-size:10.5px;}
+  .tline .right{margin-left:auto;display:flex;gap:8px;align-items:center;}
+  .steps{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-bottom:8px;}
+  .steps.fine-row{grid-template-columns:auto auto minmax(0,1fr);}
+  .fine-note{font-size:10.5px;line-height:1.5;color:var(--chalk-dim);align-self:center;font-family:'JetBrains Mono',monospace;}
+  .tbtn{font-family:'JetBrains Mono',monospace;background:var(--bg-1);border:1px solid var(--panel-line);
+    color:var(--chalk);min-height:var(--tap);padding:4px 6px;border-radius:8px;cursor:pointer;
+    font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:3px;user-select:none;-webkit-user-select:none;}
+  .tbtn:hover{border-color:var(--amber);color:var(--amber);}
+  .tbtn:active{background:rgba(242,182,50,.18);border-color:var(--amber);transform:translateY(1px);}
+  .tbtn.play{background:var(--amber);color:var(--bg-0);border:none;font-weight:700;font-size:13.5px;}
+  .tbtn.fine{font-size:11.5px;flex-direction:column;gap:0;line-height:1.25;}
+  .tbtn.fine em{font-style:normal;font-size:9.5px;color:var(--chalk-dim);}
+  @media (max-width:560px){
+    .steps{grid-template-columns:repeat(3,minmax(0,1fr));}
+    .steps .tbtn.play{grid-column:span 3;order:-1;min-height:52px;}
+    .steps.fine-row{grid-template-columns:1fr 1fr;}
+    .fine-note{grid-column:span 2;}
+  }
+  .transport-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  select.mini{font-family:'JetBrains Mono',monospace;background:var(--bg-1);border:1px solid var(--panel-line);
+    color:var(--chalk);padding:0 8px;min-height:36px;border-radius:7px;font-size:12px;}
+  .ghost{font-size:12px;background:var(--bg-1);border:1px solid var(--panel-line);color:var(--chalk);
+    min-height:36px;padding:0 12px;border-radius:7px;cursor:pointer;}
+  .ghost:hover{border-color:var(--amber);color:var(--amber);}
+
+  /* panels */
+  .panel{background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;margin-bottom:14px;overflow:hidden;}
+  .panel h2{font-family:'Oswald',sans-serif;font-size:12.5px;letter-spacing:.1em;font-weight:600;
+    color:var(--chalk-dim);margin:0;padding:11px 14px 9px;border-bottom:1px solid var(--panel-line);
+    display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .panel h2 .tag{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--amber);letter-spacing:0;}
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+  .tab{background:var(--panel);border:1px solid var(--panel-line);color:var(--chalk-dim);
+    min-height:40px;border-radius:8px;font-size:12.5px;cursor:pointer;flex:1 1 30%;padding:0 6px;}
+  .tab.active{background:rgba(242,182,50,.12);border-color:var(--amber);color:var(--amber);font-weight:600;}
+  .tabpage{display:none;}
+  .tabpage.active{display:block;}
+  .opt-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:9px 12px;font-size:12.5px;min-height:44px;}
+  .opt-row .lab{color:var(--chalk);}
+  .field{padding:8px 12px;}
+  .field label{display:block;font-size:11.5px;color:var(--chalk-dim);margin-bottom:6px;}
+  .field input[type=text], .field input[type=number]{
+    width:100%;background:var(--bg-1);border:1px solid var(--panel-line);color:var(--chalk);
+    border-radius:7px;min-height:44px;padding:0 12px;font-size:14px;font-family:inherit;
+  }
+  .toolbar{padding:0 12px 12px;display:flex;gap:8px;flex-wrap:wrap;}
+  .toolbar button, .toolbar select.mini{
+    background:var(--bg-1);color:var(--chalk);border:1px solid var(--panel-line);
+    font-size:12.5px;min-height:40px;padding:0 14px;border-radius:8px;cursor:pointer;flex:1 1 auto;}
+  .toolbar button:hover{border-color:var(--amber);color:var(--amber);}
+  .toolbar button.primary{background:var(--amber);color:var(--bg-0);border:none;font-weight:600;}
+  .toolbar button:disabled{opacity:.4;cursor:not-allowed;}
+  .legend{padding:0 12px 12px;font-size:11.5px;color:var(--chalk-dim);line-height:1.8;}
+  .legend b{color:#b9c7c0;}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:8px 12px 12px;
+    font-family:'JetBrains Mono',monospace;font-size:11.5px;}
+  .kv .k{color:var(--chalk-dim);font-family:'Noto Sans JP',sans-serif;}
+  .kv .v{color:var(--chalk);text-align:right;}
+  .kv .v.na{color:#3d4a45;}
+  .kv .v.ok{color:var(--turf);}
+  .kv .v.warn{color:var(--alert);}
+  .kv .v.mid{color:var(--amber);}
+  .rowlist{padding:8px 12px 4px;display:flex;flex-direction:column;gap:6px;}
+  .rowitem{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;
+    background:var(--bg-1);border:1px solid var(--panel-line);border-radius:8px;padding:9px 10px;}
+  .rowitem.sel{border-color:var(--amber);}
+  .rowitem .nm{font-size:12.5px;}
+  .rowitem .sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--chalk-dim);}
+  .rowitem button{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--panel);
+    border:1px solid var(--panel-line);color:var(--chalk);min-height:36px;padding:0 10px;border-radius:7px;cursor:pointer;}
+  .range-set{padding:10px 12px 8px;border-bottom:1px solid var(--panel-line);}
+  .range-set-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;margin-bottom:6px;}
+  .range-set-time{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--amber);}
+  .mini-btn{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-1);
+    border:1px solid var(--panel-line);color:var(--chalk);min-height:36px;padding:0 10px;
+    border-radius:7px;cursor:pointer;white-space:nowrap;}
+  .mini-btn:hover{border-color:var(--amber);color:var(--amber);}
+  .switch{position:relative;width:38px;height:22px;flex:none;}
+  .switch input{opacity:0;width:0;height:0;}
+  .slider-toggle{position:absolute;cursor:pointer;inset:0;background:#2a3a34;border-radius:20px;transition:.15s;}
+  .slider-toggle::before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;
+    background:var(--chalk-dim);border-radius:50%;transition:.15s;}
+  input:checked + .slider-toggle{background:rgba(242,182,50,.35);}
+  input:checked + .slider-toggle::before{transform:translateX(16px);background:var(--amber);}
+  .range-row{padding:4px 12px 12px;}
+  .range-row label{font-size:12px;color:var(--chalk-dim);display:flex;justify-content:space-between;margin-bottom:8px;}
+  .range-row label b{color:var(--chalk);font-family:'JetBrains Mono',monospace;font-weight:500;}
+  input[type=range].thin{width:100%;-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;
+    background:var(--panel-line);outline:none;}
+  input[type=range].thin::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;
+    border-radius:50%;background:var(--sky);cursor:pointer;}
+  .bar{height:6px;background:var(--bg-1);border-radius:3px;overflow:hidden;margin:0 12px 12px;}
+  .bar i{display:block;height:100%;background:var(--amber);width:0;transition:width .15s;}
+  .graph-wrap{padding:6px 12px 8px;}
+  #tgraph,#blockChart,#cmpCanvas{width:100%;height:auto;display:block;border-radius:8px;background:var(--bg-1);
+    border:1px solid var(--panel-line);cursor:crosshair;touch-action:none;}
+  .tblwrap{padding:6px 12px 4px;overflow-x:auto;}
+  table.mtable{border-collapse:collapse;width:100%;font-family:'JetBrains Mono',monospace;font-size:11px;}
+  table.mtable th,table.mtable td{padding:5px 6px;text-align:center;border-bottom:1px solid var(--panel-line);white-space:nowrap;}
+  table.mtable th{color:var(--chalk-dim);font-weight:500;font-size:10px;}
+  table.mtable td.nm{text-align:left;font-family:'Noto Sans JP',sans-serif;font-size:11.5px;color:var(--chalk-dim);}
+  table.mtable td.v{color:var(--chalk);}
+  table.mtable td.v.na{color:#3d4a45;}
+  .thumbs{display:flex;gap:6px;overflow-x:auto;padding:0 12px 10px;scroll-snap-type:x mandatory;}
+  .thumb{flex:none;scroll-snap-align:center;background:var(--bg-1);border:2px solid var(--panel-line);
+    border-radius:8px;padding:3px;cursor:pointer;text-align:center;}
+  .thumb.cur{border-color:var(--amber);}
+  .thumb canvas{display:block;border-radius:5px;background:#000;}
+  .thumb .lb{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--chalk-dim);padding-top:3px;}
+  .thumb.cur .lb{color:var(--amber);}
+  .ev-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:7px;
+    background:var(--bg-1);border:1px solid var(--panel-line);border-radius:8px;padding:7px 9px;}
+  .ev-row.sel{border-color:var(--sky);}
+  .ev-row.need{border-left:3px solid var(--alert);}
+  .ev-row .nm{font-size:12.5px;}
+  .ev-row .sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--chalk-dim);}
+  .ev-row .sub.set{color:var(--amber);}
+  .ev-row .sub.ok{color:var(--turf);}
+  .ev-row button{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--panel);
+    border:1px solid var(--panel-line);color:var(--chalk);min-height:38px;padding:0 10px;
+    border-radius:7px;cursor:pointer;white-space:nowrap;}
+  .ev-row button.pick{background:var(--amber);color:var(--bg-0);border:none;font-weight:600;}
+  .cand-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px;
+    background:var(--bg-1);border:1px solid var(--panel-line);border-radius:8px;padding:8px 10px;cursor:pointer;}
+  .cand-row.sel{border-color:var(--amber);background:rgba(242,182,50,.08);}
+  .cand-row .dot{width:9px;height:9px;border-radius:50%;flex:none;}
+  .cand-row .nm{font-size:12.5px;}
+  .cand-row .tv{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--chalk-dim);}
+  .lab-badge{font-family:'JetBrains Mono',monospace;font-size:9.5px;padding:1px 5px;border-radius:4px;
+    border:1px solid currentColor;margin-left:5px;}
+  .lab-Good{color:var(--turf);} .lab-Fair{color:var(--amber);}
+  .lab-Poor{color:#7d8c86;} .lab-Invalid{color:var(--alert);}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(12px);
+    background:var(--panel);border:1px solid var(--amber);color:var(--chalk);padding:10px 16px;
+    border-radius:24px;font-size:12.5px;z-index:50;opacity:0;pointer-events:none;
+    transition:opacity .2s,transform .2s;max-width:88vw;text-align:center;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  kbd{font-family:'JetBrains Mono',monospace;font-size:10.5px;background:var(--bg-1);
+    border:1px solid var(--panel-line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:var(--chalk);}
+  .checklist{padding:4px 12px 12px;display:flex;flex-direction:column;gap:2px;}
+  .checklist label{display:flex;gap:9px;align-items:flex-start;font-size:12px;line-height:1.6;
+    min-height:38px;padding:6px 0;cursor:pointer;}
+  .checklist input{margin-top:3px;width:18px;height:18px;flex:none;accent-color:var(--amber);}
+  @media (pointer: coarse){
+    select.mini,.ghost,.mini-btn,.tab,.toolbar select.mini,.toolbar button,.rowitem button{min-height:44px;}
+  }
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="eyebrow">BAT LAB Ver.1A</span>
+    <h1>打撃動作解析システム</h1>
+    <div class="status-line">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">モデル未読み込み</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div class="stage-card">
+      <div class="stage" id="stage">
+        <div class="calib-banner" id="calibBanner"></div>
+        <div class="drop" id="dropUI">
+          <span class="glyph">VIDEO INPUT</span>
+          打撃動画(側面から撮影)を選択、またはここにドラッグ&amp;ドロップ<br>
+          <button id="pickBtn" class="btn-amber" style="margin-top:16px;">動画を選択</button>
+          <div class="hint">
+            解析はすべてブラウザ内で行われ、動画は外部に送信されません<br>
+            投手－捕手を結ぶ線に対して<b>直角</b>の位置、打者の<b>正面側</b>から撮影してください
+          </div>
+        </div>
+        <div class="pane" id="paneA" style="display:none;">
+          <video id="video" playsinline preload="auto"></video>
+          <canvas class="overlay" id="overlay"></canvas>
+        </div>
+      </div>
+
+      <div class="transport" id="transport">
+        <div class="seek-wrap">
+          <div class="seek-trim" id="seekTrim"></div>
+          <input type="range" class="seek" id="seek" min="0" max="1000" value="0" step="1" aria-label="再生位置">
+        </div>
+        <div class="tline">
+          <b id="timeRead">0.000</b><span>/ <span id="durRead">0.000</span> s</span>
+          <span class="chip" id="frameRead">コマ 0</span>
+          <span class="chip" id="fpsRead">fps --</span>
+          <span class="chip" id="realRead" style="display:none;">実 --</span>
+          <span class="chip" id="posRead" style="display:none;">位置 --</span>
+          <span class="chip" id="sameChip" style="display:none;border-color:var(--sky);color:var(--sky);">同じコマ</span>
+          <span class="chip" id="outOfTrim" style="display:none;border-color:var(--alert);color:var(--alert);">範囲外</span>
+          <span class="right">
+            <label for="speed" style="font-size:11px;">速度</label>
+            <select class="mini" id="speed">
+              <option value="0.1">0.1×</option><option value="0.25" selected>0.25×</option>
+              <option value="0.5">0.5×</option><option value="1">1×</option>
+            </select>
+          </span>
+        </div>
+        <div class="steps">
+          <button class="tbtn fine" data-step="-0.1"  title="0.1秒戻る (←)">−0.1<em>秒</em></button>
+          <button class="tbtn fine" data-step="-0.01" title="0.01秒戻る (Shift+←)">−0.01<em>秒</em></button>
+          <button class="tbtn"      data-frame="-1"   title="1コマ戻る (,)">◀|</button>
+          <button class="tbtn play" id="btnPlay" title="再生/一時停止 (Space)">▶ 再生</button>
+          <button class="tbtn"      data-frame="1"    title="1コマ進む (.)">|▶</button>
+          <button class="tbtn fine" data-step="0.01"  title="0.01秒進む (Shift+→)">＋0.01<em>秒</em></button>
+          <button class="tbtn fine" data-step="0.1"   title="0.1秒進む (→)">＋0.1<em>秒</em></button>
+        </div>
+        <div class="steps fine-row">
+          <button class="tbtn fine" data-nudge="-0.001" title="0.001秒戻る ([)">−0.001<em>秒</em></button>
+          <button class="tbtn fine" data-nudge="0.001"  title="0.001秒進む (])">＋0.001<em>秒</em></button>
+          <span class="fine-note" id="fineNote"></span>
+        </div>
+        <div class="transport-row">
+          <button class="ghost" id="btnToStart">|◀◀ 先頭</button>
+          <button class="ghost" id="btnToTrim">範囲の開始へ</button>
+          <button class="ghost" id="pickBtn2" style="margin-left:auto;">別の動画</button>
+        </div>
+      </div>
+      <input type="file" id="fileInput" accept="video/*">
+    </div>
+
+    <div class="sidebar">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="setup" role="tab">打者・撮影</button>
+        <button class="tab" data-tab="analyze" role="tab">解析</button>
+        <button class="tab" data-tab="metrics" role="tab">指標</button>
+        <button class="tab" data-tab="timing" role="tab">タイミング</button>
+        <button class="tab" data-tab="repeat" role="tab">再現性</button>
+        <button class="tab" data-tab="compare" role="tab">比較</button>
+        <button class="tab" data-tab="change" role="tab">変化・出力</button>
+        <button class="tab" data-tab="config" role="tab">設定</button>
+        <button class="tab" data-tab="help" role="tab">使い方</button>
+      </div>
+
+      <!-- ===== 打者・撮影 ===== -->
+      <div class="tabpage active" id="tab-setup">
+        <div class="panel" id="storageWarn" style="display:none;border-color:var(--alert);">
+          <h2 style="color:var(--alert);">保存できません</h2>
+          <div class="legend" id="storageWarnText"></div>
+        </div>
+        <div class="panel">
+          <h2>打者 <span class="tag" id="batterTag">未選択</span></h2>
+          <div class="rowlist" id="batterList"></div>
+          <div class="field">
+            <label>名前</label>
+            <input type="text" id="bName" placeholder="例: 山田">
+          </div>
+          <div class="field">
+            <label>身長(cm) — 距離の指標に使います(必須)</label>
+            <input type="number" id="bHeight" min="100" max="220" step="0.5" placeholder="例: 165">
+          </div>
+          <div class="opt-row">
+            <span class="lab">打席</span>
+            <select class="mini" id="bBats"><option value="R">右打ち</option><option value="L">左打ち</option></select>
+          </div>
+          <div class="toolbar">
+            <button id="btnAddBatter" class="primary">この内容で登録 / 更新</button>
+          </div>
+          <div class="legend">
+            打席は<b>自動判定しません</b>。踏み込み足(前足)は打席の反対側として扱います
+            (右打ちなら左足が前足、右足が軸足)。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>較正 <span class="tag" id="calibTag">未較正</span></h2>
+          <div class="kv">
+            <span class="k">k_torso(胴体長 ÷ 身長)</span><span class="v" id="kTorsoVal">0.288 (既定)</span>
+            <span class="k">いまのコマの胴体長 T</span><span class="v na" id="tNowVal">--</span>
+            <span class="k">身長ピクセル長 H_norm</span><span class="v na" id="hNormVal">--</span>
+          </div>
+          <div class="toolbar">
+            <button id="btnCalib" class="primary">較正する(既知の長さを2点で指定)</button>
+            <button id="btnCalibReset">既定に戻す</button>
+          </div>
+          <div class="legend">
+            <b>打撃版は「胴体長(肩中点〜股関節中点)」を距離の基準にしています。</b>
+            打者は構えからフォロースルーまで一度も直立しないため、
+            投球版で使っている「足首〜鼻」は沈み込みで10%以上縮んでしまい使えません。
+            胴体長は沈み込んでも変わりません。<br>
+            <b>手順</b>: 画面内で<b>長さが分かっているもの</b>(ホームベースの幅 43.2cm、メジャー等)の
+            両端をタップ → 実際の長さを入力。姿勢は問いません。
+            ただし<b>既知長は打者と同じ奥行きに置いてください</b>。<br>
+            先に「この範囲を解析する」を実行してから較正すると、範囲全体の胴体長(90パーセンタイル)を
+            使うのでより安定します。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>撮影チェックリスト</h2>
+          <div class="checklist" id="checklist">
+            <label><input type="checkbox" data-ck="frame">全身(頭〜足先、バットの先も可能なら)が画角に入っている</label>
+            <label><input type="checkbox" data-ck="light">極端に暗くない／逆光でない</label>
+            <label><input type="checkbox" data-ck="level">カメラが水平(傾いていない)</label>
+            <label><input type="checkbox" data-ck="angle">投手－捕手の線に対して直角の位置から撮っている</label>
+          </div>
+          <div class="legend">
+            チェックの状態はスイングの記録に一緒に保存されます。
+            あとから数値を見直すときに、撮影条件が原因かどうかを切り分けるためです。
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 解析 ===== -->
+      <div class="tabpage" id="tab-analyze">
+        <div class="panel">
+          <h2>セッション <span class="tag" id="sessionTag">未開始</span></h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnSessionStart" class="primary">セッション開始</button>
+            <button id="btnSessionEnd">終了</button>
+          </div>
+          <div class="rowlist" id="sessionList"></div>
+          <div class="legend">
+            1回の打撃練習を1セッションとして扱います。10本ブロックごとの動作変化はこの単位で見ます。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>トリミング</h2>
+          <div class="range-set">
+            <div class="range-set-row">
+              <span>開始(構え)</span>
+              <span class="range-set-time" id="trimStartTime">0.000s</span>
+              <button class="mini-btn" id="btnTrimStart">現在地点</button>
+            </div>
+            <div class="range-set-row">
+              <span>終了(フォロー後)</span>
+              <span class="range-set-time" id="trimEndTime">動画の最後</span>
+              <button class="mini-btn" id="btnTrimEnd">現在地点</button>
+            </div>
+            <div class="toolbar" style="padding:6px 0 2px;">
+              <button class="mini-btn" id="btnTrimReset">リセット</button>
+            </div>
+          </div>
+          <div class="legend">
+            <b>開始は「構え」のコマに合わせてください。</b>頭部移動量は構えの位置を原点にして測るため、
+            開始位置がずれると頭部の値もそのままずれます。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>事前解析 <span class="tag" id="analyzeTag">未実行</span></h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnAnalyze" class="primary">この範囲を解析する</button>
+          </div>
+          <div class="bar"><i id="analyzeBar"></i></div>
+          <div class="kv">
+            <span class="k">解析フレーム数</span><span class="v na" id="kFrames">--</span>
+            <span class="k">平滑化の窓</span><span class="v na" id="kWindow">--</span>
+            <span class="k">胴体長 T_norm</span><span class="v na" id="kTnorm">--</span>
+            <span class="k">身長ピクセル長 H_norm</span><span class="v na" id="kHnorm">--</span>
+            <span class="k">投手方向</span><span class="v na" id="kDir">--</span>
+            <span class="k">検出できたコマ</span><span class="v na" id="kDetected">--</span>
+            <span class="k">1コマの実時間</span><span class="v na" id="kFrameMs">--</span>
+          </div>
+          <div class="legend">
+            範囲全体を1コマずつ解析し、<b>平滑化した骨格</b>を作ります。
+            以降の角度・位置・速度はこの平滑化後の値から計算します
+            (生の座標をそのまま微分すると検出のブレが増幅されるため)。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>イベント <span class="tag" id="eventTag">未検出</span></h2>
+          <div class="opt-row" id="dirManualRow" style="display:none;">
+            <span class="lab" style="color:var(--alert);">投手方向を選んでください</span>
+            <select class="mini" id="dirSel">
+              <option value="">未選択</option>
+              <option value="1">画面の右</option>
+              <option value="-1">画面の左</option>
+            </select>
+          </div>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnDetectEvents" class="primary">候補を検出</button>
+          </div>
+
+          <div id="commitWrap" style="display:none;">
+            <div class="legend" style="padding:6px 12px 6px;">
+              <b>始動(Commit)の候補 — 4つ並べています。</b>
+              どれを採用するかは指導者が選んでください(自動では1つに決めません)。
+            </div>
+            <div class="rowlist" id="commitCands"></div>
+          </div>
+
+          <div class="rowlist" id="eventList"></div>
+          <div id="thumbWrap" style="display:none;">
+            <div class="legend" id="thumbTitle" style="padding:8px 12px 6px;"></div>
+            <div class="thumbs" id="thumbs"></div>
+            <div class="legend" style="padding-top:8px;">
+              正しいコマをタップすると確定します。コマ送り(<b>◀| |▶</b>)で動かしてから
+              「現在のコマで確定」でも構いません。
+            </div>
+          </div>
+          <div class="toolbar" id="confirmHereWrap" style="display:none;">
+            <button id="btnConfirmHere">いま表示しているコマで確定</button>
+          </div>
+          <div class="legend">
+            自動検出は<b>候補の提示</b>です。<br>
+            ⚠️ <b>インパクトは手動確定が必須です。</b>
+            自動候補は「グリップ速度が最大のコマ」ですが、これはボール接触のコマとは一致しません
+            (手の減速がヘッドの加速に寄与するため、グリップ速度のピークはインパクトより手前に出ます)。
+            <b>始動・接地・インパクトの3点が確定するまでスイングは保存できません。</b><br>
+            <b>接地(FS)の候補は、実際の接地より1コマ程度あとに出る傾向があります。</b>
+            足が止まったことを速度で判定する以上、平滑化と中心差分のぶんだけ必ず遅れるためです
+            (合成データでの実測: 補正前2コマ、補正後1コマ)。サムネイルで前のコマも確認してください。
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 指標 ===== -->
+      <div class="tabpage" id="tab-metrics">
+        <div class="panel">
+          <h2>指標 <span class="tag" id="metricsTag">--</span></h2>
+          <div class="kv" id="metricsList"></div>
+          <div class="legend" id="metricsNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>品質 <span class="tag" id="qualityTag">--</span></h2>
+          <div class="kv" id="qualityKv"></div>
+          <div class="legend" id="qualityNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>打球データ <span class="tag">任意入力</span></h2>
+          <div class="field">
+            <label>打球初速(km/h)</label>
+            <input type="number" id="exitVelo" min="0" max="250" step="0.1" placeholder="例: 118.5">
+          </div>
+          <div class="field">
+            <label>打ち出し角(度)</label>
+            <input type="number" id="launchAngle" min="-90" max="90" step="0.5" placeholder="例: 18">
+          </div>
+          <div class="opt-row">
+            <span class="lab">打球方向</span>
+            <select class="mini" id="sprayDir">
+              <option value="">未入力</option>
+              <option value="L">左</option><option value="C">中</option><option value="R">右</option>
+            </select>
+          </div>
+          <div class="legend">
+            Ver.1A では<b>記録するだけ</b>です。フォーム指標との相関分析は行いません。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>このスイングを記録 <span class="tag" id="swingCountTag">0本</span></h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnSaveSwing" class="primary">セッションに記録</button>
+          </div>
+          <div class="rowlist" id="swingList"></div>
+          <div class="legend">
+            記録するとイベント時のランドマークも一緒に保存されるので、
+            較正値や定義を変えたあとでも計算し直せます。<br>
+            複数スイングの平均・SD・CV、CSV出力、アラートは Phase 5 以降で追加します。
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== タイミング ===== -->
+      <div class="tabpage" id="tab-timing">
+        <div class="panel">
+          <h2>タイミング <span class="tag" id="timingTag">--</span></h2>
+          <div class="graph-wrap"><canvas id="tgraph" width="680" height="330"></canvas></div>
+          <div class="legend" id="tgraphLegend" style="padding-bottom:6px;"></div>
+          <div class="tblwrap"><table class="mtable" id="timingTable"></table></div>
+          <div class="legend">
+            4つの量を<b>それぞれの最大値で割って</b>重ねています。縦の目盛りに意味はありません。
+            見るのは<b>「いつ動き出したか」の順序</b>です。<br>
+            グラフをタップするとその時刻へ移動します。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>トップ(割れ)のタイムラグ <span class="tag" id="topLagTag">--</span></h2>
+          <div class="kv" id="topLagKv"></div>
+          <div class="legend" id="topLagNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>前膝の使い方</h2>
+          <div class="kv" id="kneeUse"></div>
+          <div class="legend" id="kneeNote"></div>
+        </div>
+      </div>
+
+      <!-- ===== 再現性(比較レイヤー) ===== -->
+      <div class="tabpage" id="tab-repeat">
+        <div class="panel">
+          <h2>ベースライン <span class="tag" id="maturityTag">--</span></h2>
+          <div class="kv" id="maturityKv"></div>
+          <div class="bar"><i id="maturityBar"></i></div>
+          <div class="legend" id="maturityNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>集計 <span class="tag">測定レイヤー</span></h2>
+          <div class="tblwrap"><table class="mtable" id="statTable"></table></div>
+          <div class="legend">
+            <b>n は常に併記しています。</b>本数が少ないうちは平均もSDも当てになりません。<br>
+            SD は n≥3 のときだけ、CV(変動係数)は<b>0をまたがない量にだけ</b>出しています
+            (頭部移動量や膝の伸展量は平均が0付近になりうるため、CVが発散して無意味になります)。<br>
+            測定信頼度が <b>Invalid</b> の値は集計から除いています。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>本人比 <span class="tag" id="deltaTag">比較レイヤー</span></h2>
+          <div class="tblwrap"><table class="mtable" id="deltaTable"></table></div>
+          <div class="legend">
+            いま画面に出ているスイングと、<b>本人の平均</b>および<b>直近10本の平均</b>との差です。<br>
+            他人の値や一般的な目安とは比べていません。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>アラート <span class="tag" id="alertTag">判定レイヤー</span></h2>
+          <div class="rowlist" id="alertList"></div>
+          <div class="legend" id="alertNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>解釈 <span class="tag">人が行う</span></h2>
+          <div class="legend">
+            <b>このソフトは解釈を行いません。</b>
+            上のアラートは「本人のいつもと違う」と言っているだけで、
+            それが良いことなのか悪いことなのか、原因が何なのかは判定していません。<br>
+            数値が動いた理由は、体調・意識して変えた・相手の球種・単なる測定のばらつき など何通りもあります。
+            <b>解釈と、次に何をするかの判断は指導者が行ってください。</b>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 2スイングの比較 ===== -->
+      <div class="tabpage" id="tab-compare">
+        <div class="panel">
+          <h2>2スイングを並べて比べる <span class="tag" id="cmpTag">--</span></h2>
+          <div class="field">
+            <label>A(基準)</label>
+            <select class="mini" id="cmpA" style="width:100%;"></select>
+          </div>
+          <div class="field">
+            <label>B(比べる方)</label>
+            <select class="mini" id="cmpB" style="width:100%;"></select>
+          </div>
+          <div class="opt-row">
+            <span class="lab">見るイベント</span>
+            <select class="mini" id="cmpEvent"></select>
+          </div>
+          <div class="opt-row">
+            <span class="lab">重ねる基準点</span>
+            <select class="mini" id="cmpAnchor">
+              <option value="ankleP">両足首の中点(地面)で合わせる</option>
+              <option value="pelvis">股関節中点で合わせる</option>
+              <option value="shoulder">肩中点で合わせる</option>
+            </select>
+          </div>
+          <div class="graph-wrap"><canvas id="cmpCanvas" width="440" height="520"></canvas></div>
+          <div class="legend" id="cmpLegend" style="padding-bottom:4px;"></div>
+          <div class="legend">
+            2スイングとも<b>それぞれの身長ピクセル長(胴体長基準)で割ってから</b>重ねています。
+            撮影距離やカメラ位置が違っても比べられますが、
+            <b>カメラの角度が違うと形そのものが変わります</b>。同じ位置から撮った動画どうしで比べてください。<br>
+            保存したイベントのコマの骨格だけを使うので、動画がもう手元になくても比べられます。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>指標の差 <span class="tag" id="cmpDiffTag">--</span></h2>
+          <div class="tblwrap"><table class="mtable" id="cmpTable"></table></div>
+          <div class="legend">
+            差は <b>B − A</b> です。どちらが良いかは判定していません。
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 変化・出力 ===== -->
+      <div class="tabpage" id="tab-change">
+        <div class="panel">
+          <h2>このセッションの概要 <span class="tag" id="sumTag">--</span></h2>
+          <div class="kv" id="sumKv"></div>
+          <div class="legend" id="sumNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>後半スイングにおける動作変化 <span class="tag" id="blockTag">--</span></h2>
+          <div class="graph-wrap"><canvas id="blockChart" width="680" height="300"></canvas></div>
+          <div class="legend" id="blockLegend" style="padding-bottom:4px;"></div>
+          <div class="tblwrap"><table class="mtable" id="blockTable"></table></div>
+          <div class="legend">
+            セッション内を<b>10本ずつのブロック</b>に区切り、ブロックごとの平均を並べています。<br>
+            ⚠️ <b>ここでは「疲労」という言葉を使いません。</b>
+            後半で数値が動いた理由は、疲れ・慣れ・意識して変えた・球種が変わった など何通りもあり、
+            測定だけでは区別できないためです。疲労かどうかの判断は指導者が行ってください。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>書き出し・読み込み</h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnExportCsv">CSV(スイング一覧)</button>
+            <button id="btnExportJson" class="primary">JSON(まるごと)</button>
+            <button id="btnImportJson">JSONを読み込む</button>
+          </div>
+          <input type="file" id="jsonInput" accept="application/json,.json">
+          <div class="kv">
+            <span class="k">この打者のスイング数</span><span class="v na" id="exportCount">--</span>
+          </div>
+          <div class="legend">
+            ⚠️ <b>iPhone の Safari は、しばらく開かないと保存データを消すことがあります。</b>
+            練習が終わったら JSON を書き出して手元に残してください。これは消失を防ぐための必須の運用です。<br>
+            JSON にはイベント時の全ランドマークが入っているので、
+            較正値や定義を変えたあとでも計算し直せます。CSV は表計算ソフトで見るためのものです。<br>
+            書き出しも読み込みも端末内で完結します。<b>外部へは送信しません。</b>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 設定 ===== -->
+      <div class="tabpage" id="tab-config">
+        <div class="panel">
+          <h2>撮影・計測</h2>
+          <div class="opt-row">
+            <span class="lab">撮影時のfps(スロー撮影)</span>
+            <select class="mini" id="captureFpsSel">
+              <option value="0" selected>自動(動画のまま)</option>
+              <option value="60">60fps</option><option value="120">120fps</option><option value="240">240fps</option>
+            </select>
+          </div>
+          <div class="opt-row">
+            <span class="lab">鏡像動画(インカメラ)</span>
+            <label class="switch"><input type="checkbox" id="mirrorToggle"><span class="slider-toggle"></span></label>
+          </div>
+          <div class="opt-row">
+            <span class="lab">平滑化前の骨格も表示</span>
+            <label class="switch"><input type="checkbox" id="rawToggle"><span class="slider-toggle"></span></label>
+          </div>
+          <div class="range-row">
+            <label>検出しきい値 <b id="visVal">0.40</b></label>
+            <input type="range" class="thin" id="visMin" min="0.1" max="0.8" step="0.05" value="0.4">
+          </div>
+          <div class="legend">
+            <b>撮影時のfps</b>は、スロー撮影の動画が「遅くした状態」で保存されている場合の補正です。
+            画面の fps 表示が撮影設定と違っていたら選んでください。時間に関わる値だけが補正されます。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>接地(FS)の判定しきい値</h2>
+          <div class="range-row">
+            <label>足首の速さ <b id="fsAnkVal">0.15</b> 身長/秒</label>
+            <input type="range" class="thin" id="fsAnk" min="0.05" max="0.40" step="0.01" value="0.15">
+          </div>
+          <div class="range-row">
+            <label>つま先の速さ <b id="fsToeVal">0.20</b> 身長/秒</label>
+            <input type="range" class="thin" id="fsToe" min="0.05" max="0.50" step="0.01" value="0.20">
+          </div>
+          <div class="legend">
+            前足が止まったと判定する速さです。すり足気味の打者では小さめ、
+            大きく踏み出す打者では大きめに調整してください。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>アラートのしきい値 <span class="tag">全て変更できます</span></h2>
+          <div class="tblwrap"><table class="mtable" id="thrTable"></table></div>
+          <div class="toolbar">
+            <button id="btnThrReset">初期値に戻す</button>
+          </div>
+          <div class="legend">
+            ⚠️ <b>初期値は外部から与えた数字であり、その選手に適切である保証はありません。</b>
+            10本程度たまった時点で「再現性」タブの<b>本人のSD</b>を見て、
+            そのばらつきに合わせて設定し直してください。
+            SDより小さいしきい値にすると、ただの測定のばらつきでアラートが鳴り続けます。<br>
+            fps が 60 未満のときは、タイミング系のアラートは自動的に出しません。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>解析精度</h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <select class="mini" id="modelSel" style="flex:1 1 auto;">
+              <option value="lite" selected>標準(軽い・速い)</option>
+              <option value="full">高精度(重い)</option>
+            </select>
+          </div>
+          <div class="legend">スイングは投球より速いため、可能なら「高精度」を使ってください。</div>
+        </div>
+      </div>
+
+      <!-- ===== 使い方 ===== -->
+      <div class="tabpage" id="tab-help">
+        <div class="panel">
+          <h2>説明書</h2>
+          <div class="legend">
+            撮り方・練習1回の流れ・数値の読みかた・うまく測れないときの直し方は
+            <a href="./manual.html" style="color:var(--amber);font-weight:700;">説明書</a>
+            にまとめてあります。一度開いておけば圏外でも読めます。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Ver.1A のこの版でできること</h2>
+          <div class="legend">
+            ① 打者の登録(身長・打席) ② 較正(胴体長基準) ③ セッション管理 ④ トリミング
+            ⑤ 範囲の事前解析と平滑化 ⑥ 骨格の重畳表示とコマ送り
+            ⑦ イベント5点の候補検出と手動確定(始動は4候補から選択)
+            ⑧ 各指標の算出と測定信頼度 ⑨ スイングの記録
+            ⑩ タイミングとトップのタイムラグの可視化
+            ⑪ 複数スイングの平均・中央値・SD・CV・n と成熟度判定
+            ⑫ 本人比とアラート(しきい値は変更可) ⑬ 10本ブロックごとの動作変化
+            ⑭ CSV / JSON の書き出しと読み込み
+            ⑮ セッション概要 ⑯ 2スイングの比較(骨格の重ね + 指標の差)
+            ⑰ 品質画面(ランドマーク信頼度・チェックリスト・fps警告)
+            ⑱ 10本ブロックの推移グラフ<br><br>
+            <b>Ver.1A の予定範囲はこれで一通り入りました。</b>
+            実際の動画で試して、検出のしきい値やアラートのしきい値を詰めていく段階です。<br><br>
+            <b>入れていないもの</b>: 3D解析・バット追跡・真の Hip-Shoulder Separation・
+            打球データとの相関分析・自動の良し悪し判定。
+            これらは側面カメラ1台では測れないか、Ver.1A の範囲外です。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>キーボード操作</h2>
+          <div class="legend">
+            <table style="width:100%;line-height:2.1;">
+              <tr><td><kbd>Space</kbd></td><td>再生 / 一時停止</td></tr>
+              <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>0.1秒</td></tr>
+              <tr><td><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd></td><td>0.01秒</td></tr>
+              <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>1コマ(確実に1コマ)</td></tr>
+              <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>0.001秒</td></tr>
+              <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>トリミングの開始 / 終了</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>撮影について</h2>
+          <div class="legend">
+            <b>投手－捕手を結ぶ線に対して直角</b>の位置、<b>打者の正面側</b>(右打ちなら一塁側)に
+            三脚を置きます。背中側でも幾何は同じですが、前膝とグリップが体で隠れやすくなります。<br>
+            <b>iPhone のスローモーション(1080p / 120fps または 240fps)を推奨</b>します。
+            スイングは始動からインパクトまで0.15〜0.2秒しかないため、
+            30fpsでは5〜6コマしか残らずタイミングの比較ができません。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>用語について</h2>
+          <div class="legend">
+            この画面では次の言い方をしていません。誤解を招くためです。<br>
+            ・<b>バット速度</b> → バットは追跡していないので「グリップ速度(手首移動速度)」と呼びます<br>
+            ・<b>体重配分</b> → 体重は測っていないので「支持基底内の身体中心位置(近似)」と呼びます<br>
+            ・<b>Hip-Shoulder Separation</b> → 3次元の回旋角度差を指す用語なので Ver.1A では算出しません<br>
+            ・<b>疲労</b> → 測定の段階では「後半スイングにおける動作変化」と呼びます
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+/* ============================================================
+   打撃動作解析システム Ver.1A
+   仕様: docs/batting-v1a-measurement-spec.md
+   投球版と共通にできる部分は共通にし、打撃で事情が異なる部分
+   (スケール基準・イベント定義・指標)だけを作り直している。
+   ============================================================ */
+
+/* ---- MediaPipe は動的 import(CDN不通でも動画操作は使えるように) ---- */
+const CDN_BASES = [
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14",
+  "https://unpkg.com/@mediapipe/tasks-vision@0.10.14",
+];
+let PoseLandmarker = null, FilesetResolver = null, cdnBase = null;
+async function loadVisionLib(){
+  if (PoseLandmarker) return true;
+  for (const base of CDN_BASES){
+    try{
+      const m = await import(`${base}/vision_bundle.mjs`);
+      PoseLandmarker = m.PoseLandmarker; FilesetResolver = m.FilesetResolver; cdnBase = base;
+      return true;
+    }catch(err){ console.warn("vision bundle load failed:", base, err); }
+  }
+  return false;
+}
+const MODEL_URL = {
+  lite:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+  full:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
+};
+
+/* ---- ランドマーク(仕様書 §3) ---- */
+const L = { nose:0, lShoulder:11, rShoulder:12, lElbow:13, rElbow:14, lWrist:15, rWrist:16,
+            lHip:23, rHip:24, lKnee:25, rKnee:26, lAnkle:27, rAnkle:28,
+            lHeel:29, rHeel:30, lFoot:31, rFoot:32 };
+const SKELETON_LINES = [
+  [L.lShoulder,L.rShoulder],[L.lShoulder,L.lElbow],[L.lElbow,L.lWrist],
+  [L.rShoulder,L.rElbow],[L.rElbow,L.rWrist],
+  [L.lShoulder,L.lHip],[L.rShoulder,L.rHip],[L.lHip,L.rHip],
+  [L.lHip,L.lKnee],[L.lKnee,L.lAnkle],[L.lAnkle,L.lHeel],[L.lAnkle,L.lFoot],[L.lHeel,L.lFoot],
+  [L.rHip,L.rKnee],[L.rKnee,L.rAnkle],[L.rAnkle,L.rHeel],[L.rAnkle,L.rFoot],[L.rHeel,L.rFoot],
+  [L.nose,L.lShoulder],[L.nose,L.rShoulder],
+];
+const COLOR_SKELETON = "#7fe0d4", COLOR_POINT = "#eaf6f2", COLOR_RAW = "rgba(233,237,233,.28)";
+/* 胴体長 ÷ 身長。人体比(肩峰高 0.818 / 大転子高 0.530)から 0.288(仕様書 §1 決定3) */
+const K_TORSO_DEFAULT = 0.288, K_TORSO_MIN = 0.24, K_TORSO_MAX = 0.34;
+
+/* ---- DOM ---- */
+const $ = (id)=>document.getElementById(id);
+const video=$("video"), overlay=$("overlay"), ctx=overlay.getContext("2d"), stage=$("stage");
+const seek=$("seek"), btnPlay=$("btnPlay"), speedSel=$("speed");
+const timeRead=$("timeRead"), durRead=$("durRead"), frameRead=$("frameRead"), fpsRead=$("fpsRead");
+const toastEl=$("toast");
+
+/* ---- 状態 ---- */
+let poseLandmarker=null, modelKind="lite", libFailed=false;
+let VIS_MIN=0.4, mirror=false, showRaw=false, captureFps=0;
+let FS_ANK=0.15, FS_TOE=0.20;
+let videoAR=1, fps=30, fpsLocked=false, fpsMeasured=false;
+let mediaTimeNow=null, frameIndexNow=null, sameFrameFlag=false;
+let prevFrameForCompare=null, stepAnchor=null;
+let rafHandle=null, vfcHandle=null, objectUrl=null, seeking=false;
+let lastLandmarks=null, lastWorld=null;
+let trim={ start:0, end:null };
+let busy=false, cancelBusy=false;
+/* 事前解析の結果 */
+let rawSeries=[];      // [{t, lm, wlm}]  検出そのまま
+let smoothSeries=[];   // [{t, lm}]       平滑化後
+let analysis=null;     // {T_norm, H_norm, dir, window, detected, total}
+/* 較正 */
+let calibMode=0, calibPts=[];
+/* データ */
+let batters=[], sessions=[], currentBatter=null, currentSession=null;
+let currentFileName="";
+
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const slowFactor=()=> (captureFps>0 && fps>0) ? Math.max(1, captureFps/fps) : 1;
+const realSec=(t)=> t/slowFactor();
+function setStatus(kind,text){ $("statusDot").className="status-dot"+(kind?" "+kind:""); $("statusText").textContent=text; }
+/* モデルと動画がそろうまで解析系の操作を無効にする(押しても何も起きない状態を作らない) */
+function refreshReady(){
+  const ready = !!poseLandmarker && !!video.src && isFinite(video.duration);
+  const a=$("btnAnalyze"), d=$("btnDetectEvents");
+  if(a && !busy){ a.disabled=!ready; a.title = ready?"":"モデルの読み込みと動画の準備が終わると押せます"; }
+  if(d){ const okEv = ready && smoothSeries.length>0;
+         d.disabled=!okEv; d.title = okEv?"":"先に「この範囲を解析する」を実行してください"; }
+}
+let toastTimer=null;
+function toast(m){ toastEl.textContent=m; toastEl.classList.add("show");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.classList.remove("show"),1900); }
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* ============ IndexedDB (仕様書 §7) ============ */
+const DB_NAME="battinglab", DB_VER=2;
+let db=null;
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=()=>{
+      const d=r.result;
+      if(!d.objectStoreNames.contains("batters")) d.createObjectStore("batters",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("sessions")) d.createObjectStore("sessions",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("swings")){
+        const s=d.createObjectStore("swings",{keyPath:"id"});
+        s.createIndex("session_id","session_id",{unique:false});
+      }
+    };
+    r.onsuccess=()=>res(r.result);
+    r.onerror=()=>rej(r.error);
+  });
+}
+/* プライベートブラウズやブラウザ設定で localStorage / IndexedDB が
+   使えないことがある。触っただけで例外になる環境もあるので、必ずここを通す。 */
+const lsGet=(k)=>{ try{ return lsGet(k); }catch{ return null; } };
+const lsSet=(k,v)=>{ try{ lsSet(k, v); }catch{} };
+let dbBroken=false;
+function storageFail(msg){
+  const first=!dbBroken;
+  dbBroken=true;
+  const text = msg || "この端末ではデータを保存できません(プライベートブラウズか、ブラウザの設定で保存が無効です)。"
+    + "解析と数値の表示は使えますが、記録は残りません。";
+  /* ステータス行はモデル読み込みなどで上書きされるので、消えないパネルにも出す */
+  const w=$("storageWarn"), t=$("storageWarnText");
+  if(w&&t){ t.innerHTML=text+"<br>通常のウィンドウで開き直すか、ブラウザの設定でサイトデータの保存を許可してください。"; w.style.display="block"; }
+  if(first) setStatus("err", text);
+}
+/* 書き込みを伴う操作の入口で呼ぶ。false なら中断する */
+/* 記録ボタンのダブルタップ(モバイルでは起きやすい)で
+   同じ番号のレコードが複数できるのを防ぐ。押している間はボタンも無効にする。 */
+let busySave=false;
+async function withSaveLock(btnId, fn){
+  if(busySave) return;
+  busySave=true;
+  const btn=$(btnId), prev=btn?btn.disabled:false;
+  if(btn) btn.disabled=true;
+  try{ await fn(); }
+  catch(err){ console.error(err); setStatus("err","保存できませんでした"); }
+  finally{ busySave=false; if(btn) btn.disabled=prev; }
+}
+function dbOk(){
+  if(db) return true;
+  storageFail(); toast("この端末ではデータを保存できません");
+  return false;
+}
+function tx(store,mode){ return db.transaction(store,mode).objectStore(store); }
+const dbPut=(store,val)=>new Promise((res,rej)=>{
+  if(!db){ storageFail(); return rej(new Error("no-db")); }
+  const q=tx(store,"readwrite").put(val);q.onsuccess=()=>res(val);q.onerror=()=>rej(q.error);});
+const dbAll=(store)=>new Promise((res)=>{
+  if(!db) return res([]);                       // 読みは空で返して画面を壊さない
+  const q=tx(store,"readonly").getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>res([]);});
+const dbDel=(store,key)=>new Promise((res,rej)=>{
+  if(!db){ storageFail(); return rej(new Error("no-db")); }
+  const q=tx(store,"readwrite").delete(key);q.onsuccess=()=>res();q.onerror=()=>rej(q.error);});
+
+/* ============ モデル ============ */
+let visionFileset=null;
+async function createLandmarker(kind){
+  if(!visionFileset) visionFileset=await FilesetResolver.forVisionTasks(`${cdnBase}/wasm`);
+  const opts=(delegate)=>({baseOptions:{modelAssetPath:MODEL_URL[kind],delegate},runningMode:"VIDEO",numPoses:1});
+  try{ return await PoseLandmarker.createFromOptions(visionFileset,opts("GPU")); }
+  catch(err){ console.warn("GPU delegate failed, CPU にフォールバック",err);
+    return await PoseLandmarker.createFromOptions(visionFileset,opts("CPU")); }
+}
+async function initModel(kind){
+  modelKind=kind;
+  setStatus("busy",`モデルを読み込み中…(${kind==="full"?"高精度":"標準"})`);
+  if(!(await loadVisionLib())){
+    libFailed=true;
+    setStatus("err","解析ライブラリを取得できませんでした。動画の再生とコマ送りはこのまま使えます");
+    refreshReady();
+    return;
+  }
+  libFailed=false;
+  const prev=poseLandmarker; poseLandmarker=null;
+  try{
+    poseLandmarker=await createLandmarker(kind);
+    setStatus("ok", video.src ? "解析できます" : "準備完了 — 動画を読み込んでください");
+  }catch(err){ console.error(err); setStatus("err","モデルの読み込みに失敗しました"); }
+  refreshReady();
+  try{ prev?.close?.(); }catch{}
+  lastTs=-1;
+  if(poseLandmarker && video.readyState>=2) detectAndRender();
+}
+$("modelSel").addEventListener("change",async(e)=>{
+  if(busy){ e.target.value=modelKind; toast("解析中は変更できません"); return; }
+  video.pause(); await initModel(e.target.value); savePrefs();
+});
+
+/* ============ 検出 ============ */
+let lastTs=-1;
+function nextTimestamp(){ let t=Math.round(performance.now()); if(t<=lastTs) t=lastTs+1; lastTs=t; return t; }
+function detect(){
+  if(!poseLandmarker || video.readyState<2) return null;
+  try{
+    const r=poseLandmarker.detectForVideo(video,nextTimestamp());
+    if(!r||!r.landmarks||!r.landmarks.length) return null;
+    return { lm:r.landmarks[0], wlm:r.worldLandmarks?r.worldLandmarks[0]:null };
+  }catch(err){ console.warn("detection skipped",err); return undefined; }
+}
+function detectAndRender(){
+  const r=detect();
+  if(r!==undefined){ lastLandmarks=r?r.lm:null; lastWorld=r?r.wlm:null; }
+  draw();
+  renderCalib();
+}
+
+/* ============ 平滑化(仕様書 §2-2) ============ */
+/* 50ms に最も近い奇数フレーム数(最小3)。60fps→3, 120fps→7, 240fps→13 */
+function smoothWindow(f){
+  let n=Math.round(0.050*f);
+  if(n%2===0) n+=1;
+  return Math.max(3,n);
+}
+function smoothLandmarkSeries(series, W){
+  const half=(W-1)/2;
+  return series.map((f,i)=>{
+    if(!f.lm) return {t:f.t, lm:null};
+    const out=new Array(33).fill(null);
+    for(let j=0;j<33;j++){
+      let sx=0,sy=0,sv=0,n=0;
+      for(let k=Math.max(0,i-half);k<=Math.min(series.length-1,i+half);k++){
+        const p=series[k].lm && series[k].lm[j];
+        if(!p) continue;
+        sx+=p.x; sy+=p.y; sv+=(p.visibility==null?1:p.visibility); n++;
+      }
+      if(n) out[j]={x:sx/n,y:sy/n,visibility:sv/n};
+    }
+    return {t:f.t, lm:out};
+  });
+}
+function smoothedAt(t){
+  if(!smoothSeries.length) return null;
+  let lo=0, hi=smoothSeries.length-1;
+  while(lo<hi){ const mid=(lo+hi)>>1; if(smoothSeries[mid].t < t) lo=mid+1; else hi=mid; }
+  const a=smoothSeries[Math.max(0,lo-1)], b=smoothSeries[lo];
+  const pick=(Math.abs(a.t-t)<=Math.abs(b.t-t))?a:b;
+  return (Math.abs(pick.t-t) <= 1.5/fps) ? pick.lm : null;
+}
+function indexAt(t){
+  if(!smoothSeries.length) return -1;
+  let lo=0, hi=smoothSeries.length-1;
+  while(lo<hi){ const mid=(lo+hi)>>1; if(smoothSeries[mid].t < t) lo=mid+1; else hi=mid; }
+  const a=Math.max(0,lo-1);
+  return (Math.abs(smoothSeries[a].t-t)<=Math.abs(smoothSeries[lo].t-t))?a:lo;
+}
+
+/* ============ 幾何 ============ */
+const isoX=(p)=>p.x*videoAR;
+function midOf(lm,a,b){
+  const A=lm&&lm[a],B=lm&&lm[b];
+  if(!A||!B) return null;
+  return { x:(isoX(A)+isoX(B))/2, y:(A.y+B.y)/2 };
+}
+/* 胴体長(仕様書 §2-5)。打撃では「足首〜鼻」ではなくこれを基準にする */
+function torsoLen(lm){
+  const sh=midOf(lm,L.lShoulder,L.rShoulder), hp=midOf(lm,L.lHip,L.rHip);
+  if(!sh||!hp) return null;
+  const d=Math.hypot(sh.x-hp.x, sh.y-hp.y);
+  return d>1e-6 ? d : null;
+}
+const hNormFromTorso=(T,k)=> (T!=null && T>0) ? T/(k||K_TORSO_DEFAULT) : null;
+function angle2(A,B,C){
+  const v1x=A.x-B.x, v1y=A.y-B.y, v2x=C.x-B.x, v2y=C.y-B.y;
+  const m1=Math.hypot(v1x,v1y), m2=Math.hypot(v2x,v2y);
+  if(m1<1e-9||m2<1e-9) return null;
+  return Math.acos(clamp((v1x*v2x+v1y*v2y)/(m1*m2),-1,1))*180/Math.PI;
+}
+function pct(arr,p){
+  if(!arr.length) return null;
+  const s=[...arr].sort((a,b)=>a-b);
+  return s[Math.min(s.length-1, Math.floor(s.length*p))];
+}
+
+/* ============ 描画 ============ */
+function fitOverlay(){
+  const vw=video.videoWidth, vh=video.videoHeight, r=video.getBoundingClientRect();
+  if(!vw||!vh||!r.width||!r.height) return;
+  const sc=Math.min(r.width/vw, r.height/vh), dw=vw*sc, dh=vh*sc;
+  const pr=$("paneA").getBoundingClientRect();
+  overlay.style.left=(r.left-pr.left+(r.width-dw)/2)+"px";
+  overlay.style.top =(r.top -pr.top +(r.height-dh)/2)+"px";
+  overlay.style.width=dw+"px"; overlay.style.height=dh+"px";
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  const w=Math.max(1,Math.round(dw*dpr)), h=Math.max(1,Math.round(dh*dpr));
+  if(overlay.width!==w||overlay.height!==h){ overlay.width=w; overlay.height=h; }
+}
+function layout(){
+  if(video.videoWidth&&video.videoHeight){
+    const ar=`${video.videoWidth} / ${video.videoHeight}`;
+    if(stage.style.aspectRatio!==ar) stage.style.aspectRatio=ar;
+  }
+  fitOverlay(); draw();
+}
+function drawSkeleton(c,cv,lm,color,width,dots){
+  if(!lm) return;
+  const P=(i)=>({x:lm[i].x*cv.width, y:lm[i].y*cv.height});
+  c.strokeStyle=color; c.lineWidth=width; c.lineCap="round";
+  SKELETON_LINES.forEach(([i,j])=>{
+    const A=lm[i],B=lm[j]; if(!A||!B) return;
+    if((A.visibility!=null&&A.visibility<0.3)||(B.visibility!=null&&B.visibility<0.3)) return;
+    const a=P(i),b=P(j); c.beginPath(); c.moveTo(a.x,a.y); c.lineTo(b.x,b.y); c.stroke();
+  });
+  if(!dots) return;
+  lm.forEach((p,i)=>{ if(i>32||!p) return;
+    if(p.visibility!=null&&p.visibility<0.3) return;
+    const q=P(i); c.fillStyle=COLOR_POINT; c.beginPath(); c.arc(q.x,q.y,3,0,Math.PI*2); c.fill(); });
+}
+/* グリップ(両手首中点)を強調する。打撃ではここが基準点になるため */
+function drawGrip(c,cv,lm){
+  if(!lm) return;
+  const a=lm[L.lWrist], b=lm[L.rWrist];
+  if(!a||!b) return;
+  const x=(a.x+b.x)/2*cv.width, y=(a.y+b.y)/2*cv.height;
+  c.strokeStyle="#f2b632"; c.lineWidth=2;
+  c.beginPath(); c.arc(x,y,7,0,Math.PI*2); c.stroke();
+}
+function draw(){
+  ctx.clearRect(0,0,overlay.width,overlay.height);
+  ctx.save();
+  if(mirror){ ctx.translate(overlay.width,0); ctx.scale(-1,1); }
+  const sm=smoothedAt(video.currentTime);
+  if(showRaw || !sm) drawSkeleton(ctx,overlay,lastLandmarks, sm?COLOR_RAW:COLOR_SKELETON, sm?2:3, !sm);
+  if(sm) drawSkeleton(ctx,overlay,sm,COLOR_SKELETON,3,true);
+  drawGrip(ctx,overlay, sm||lastLandmarks);
+  if(calibPts.length){
+    ctx.strokeStyle="#f2b632"; ctx.fillStyle="#f2b632"; ctx.lineWidth=2;
+    if(calibPts.length===2){
+      ctx.beginPath();
+      ctx.moveTo(calibPts[0].x*overlay.width, calibPts[0].y*overlay.height);
+      ctx.lineTo(calibPts[1].x*overlay.width, calibPts[1].y*overlay.height);
+      ctx.stroke();
+    }
+    calibPts.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x*overlay.width,p.y*overlay.height,6,0,Math.PI*2); ctx.fill(); });
+  }
+  ctx.restore();
+}
+window.addEventListener("resize",layout);
+if("ResizeObserver" in window) new ResizeObserver(layout).observe(stage);
+
+/* ============ 動画の読み込み ============ */
+function openPicker(){ $("fileInput").click(); }
+$("pickBtn").addEventListener("click",openPicker);
+$("pickBtn2").addEventListener("click",openPicker);
+$("fileInput").addEventListener("change",()=>{ const f=$("fileInput").files[0]; $("fileInput").value=""; if(f) loadFile(f); });
+["dragenter","dragover"].forEach(ev=>stage.addEventListener(ev,e=>{e.preventDefault();stage.classList.add("dragover");}));
+["dragleave","drop"].forEach(ev=>stage.addEventListener(ev,e=>{e.preventDefault();stage.classList.remove("dragover");}));
+stage.addEventListener("drop",e=>{ const f=e.dataTransfer?.files?.[0];
+  if(f&&f.type.startsWith("video/")) loadFile(f); else if(f) toast("動画ファイルを選んでください"); });
+
+function formatWarning(file){
+  if(file.type && video.canPlayType(file.type)===""){
+    return `この形式(${file.type||"不明"})は再生できない可能性があります。mp4(H.264)に変換してお試しください`;
+  }
+  return null;
+}
+function loadFile(file){
+  currentFileName=(file.name||"").replace(/\.[^.]+$/,"").slice(0,60);
+  const w=formatWarning(file); if(w) setStatus("err",w);
+  events={}; commitCands=null; commitSource="grip"; selectedEvent=null; dirManual=null;
+  if(objectUrl) URL.revokeObjectURL(objectUrl);
+  objectUrl=URL.createObjectURL(file);
+  lastLandmarks=null; lastWorld=null;
+  rawSeries=[]; smoothSeries=[]; analysis=null; signals=null; renderAnalysis();
+  fps=30; fpsLocked=false; fpsMeasured=false; fpsSamples.length=0; noteFrameTime.last=null;
+  mediaTimeNow=null; frameIndexNow=null; stepAnchor=null;
+  trim={start:0,end:null};
+  $("thumbWrap").style.display="none"; $("commitWrap").style.display="none";
+  $("confirmHereWrap").style.display="none";
+  $("dropUI").style.display="none"; $("paneA").style.display="block";
+  $("transport").classList.add("show");
+  video.src=objectUrl; video.load();
+  refreshReady(); renderEvents(); renderMetrics(); drawTiming(); loadDraft();
+}
+video.addEventListener("loadedmetadata",()=>{
+  if(video.videoWidth&&video.videoHeight) videoAR=video.videoWidth/video.videoHeight;
+  seek.max=Math.max(1,Math.floor(video.duration*1000));
+  video.playbackRate=parseFloat(speedSel.value);
+  updateTrimDisplay(); layout(); showFps(false); updateTimeRead();
+  setStatus("ok","解析できます — トリミングしてから「この範囲を解析する」");
+  refreshReady();
+});
+video.addEventListener("loadeddata",()=>{ layout(); detectAndRender(); });
+video.addEventListener("error",()=>{
+  const c=video.error&&video.error.code;
+  setStatus("err", c===4 ? "この形式/コーデックを再生できません。mp4(H.264)に変換してお試しください"
+                         : "動画を再生できませんでした");
+});
+
+/* ============ fps 実測 ============ */
+const fpsSamples=[];
+const COMMON_FPS=[23.976,24,25,29.97,30,50,59.94,60,120,240];
+function noteFrameTime(mt){
+  const last=noteFrameTime.last; noteFrameTime.last=mt;
+  if(last==null) return;
+  const d=mt-last; if(d<=0.0005||d>0.5) return;
+  fpsSamples.push(d); if(fpsSamples.length>40) fpsSamples.shift();
+  if(fpsSamples.length>=8 && !fpsLocked){
+    const s=[...fpsSamples].sort((a,b)=>a-b); const med=s[Math.floor(s.length/2)];
+    let f=1/med;
+    /* 一覧の「最初に見つかったもの」ではなく「いちばん近いもの」に合わせる。
+       29.97 と 30 のように近接する値があるため、先着順だと取り違える。 */
+    let near=null, bestD=Infinity;
+    for(const c of COMMON_FPS){ const d=Math.abs(c-f)/c; if(d<0.06 && d<bestD){ bestD=d; near=c; } }
+    if(near) f=near;
+    fps=f; if(fpsSamples.length>=20) fpsLocked=true;
+    fpsMeasured=true; showFps(true); updateTimeRead();
+  }
+}
+function showFps(measured){
+  const f=slowFactor(), ms=1000/fps/f;
+  fpsRead.textContent=(measured?"fps ":"fps ~")+fps.toFixed(fps%1?2:0)+(f>1?` ×${f.toFixed(0)}`:"")
+    +" / 1コマ "+ms.toFixed(1)+"ms";
+  const n=$("fineNote");
+  if(n) n.innerHTML=`1コマ = <b style="color:#b9c7c0;">${ms.toFixed(1)}ms</b>`
+    +(f>1?`(実時間)`:"")+`。0.001秒は1コマより細かいため、押しても画が変わらないことがあります。`
+    +`確実に1コマ送るには <b style="color:#b9c7c0;">◀| |▶</b>。`;
+}
+
+/* ============ コマ送り(投球版と同じ実装) ============ */
+function captureMediaTime(){
+  const finish=()=>{ sameFrameFlag=(prevFrameForCompare!=null&&frameIndexNow===prevFrameForCompare);
+    prevFrameForCompare=null; updateTimeRead(); };
+  const fallback=()=>{ mediaTimeNow=video.currentTime; frameIndexNow=Math.round(mediaTimeNow*fps);
+    stepAnchor=mediaTimeNow; finish(); };
+  if(!("requestVideoFrameCallback" in HTMLVideoElement.prototype)){ fallback(); return; }
+  let done=false;
+  const timer=setTimeout(()=>{ if(!done){done=true;fallback();} },250);
+  video.requestVideoFrameCallback((_n,meta)=>{
+    if(done) return; done=true; clearTimeout(timer);
+    mediaTimeNow=meta.mediaTime; frameIndexNow=Math.round(mediaTimeNow*fps);
+    stepAnchor=mediaTimeNow; finish();
+  });
+}
+const shownTime=()=> (mediaTimeNow!=null?mediaTimeNow:video.currentTime);
+function seekForStep(t){
+  prevFrameForCompare=frameIndexNow;
+  video.currentTime=clamp(t,0,Math.max(0,video.duration-0.0001));
+  updateTimeRead();
+}
+function stepBy(dt){ if(!video.src||!isFinite(video.duration)) return;
+  if(!video.paused) video.pause(); seekForStep(video.currentTime+dt); }
+function stepFrames(n){
+  if(!video.src||!isFinite(video.duration)) return;
+  if(!video.paused) video.pause();
+  const f=1/fps;
+  const base=(stepAnchor!=null)?stepAnchor:(mediaTimeNow!=null?mediaTimeNow:video.currentTime);
+  stepAnchor=base+n*f;                 // mediaTime はコマの開始時刻。前後とも +0.25f 内側へ
+  seekForStep(stepAnchor+f*0.25);
+}
+function nudgeBy(dt){ if(!video.src||!isFinite(video.duration)) return;
+  if(!video.paused) video.pause();
+  seekForStep(Math.round((video.currentTime+dt)*1000)/1000); }
+function bindRepeat(btn,action){
+  let hold=null,rep=null,viaPointer=false;
+  const stop=()=>{clearTimeout(hold);clearInterval(rep);hold=rep=null;};
+  btn.addEventListener("pointerdown",e=>{ if(e.button!=null&&e.button!==0) return;
+    e.preventDefault(); viaPointer=true; action();
+    hold=setTimeout(()=>{ rep=setInterval(action,90); },420); });
+  ["pointerup","pointercancel","pointerleave"].forEach(ev=>btn.addEventListener(ev,stop));
+  window.addEventListener("pointerup",stop);
+  btn.addEventListener("click",()=>{ if(viaPointer){viaPointer=false;return;} action(); });
+}
+document.querySelectorAll("[data-step]").forEach(b=>bindRepeat(b,()=>stepBy(parseFloat(b.dataset.step))));
+document.querySelectorAll("[data-frame]").forEach(b=>bindRepeat(b,()=>stepFrames(parseInt(b.dataset.frame,10))));
+document.querySelectorAll("[data-nudge]").forEach(b=>bindRepeat(b,()=>nudgeBy(parseFloat(b.dataset.nudge))));
+
+/* ============ 再生 ============ */
+function startLoop(){
+  stopLoop();
+  if("requestVideoFrameCallback" in HTMLVideoElement.prototype){
+    const step=(_n,meta)=>{ if(video.paused||video.ended) return;
+      noteFrameTime(meta.mediaTime); mediaTimeNow=meta.mediaTime;
+      frameIndexNow=Math.round(mediaTimeNow*fps); stepAnchor=mediaTimeNow;
+      if(!smoothSeries.length) detectAndRender(); else draw();
+      updateTimeRead(); enforceTrim();
+      vfcHandle=video.requestVideoFrameCallback(step); };
+    vfcHandle=video.requestVideoFrameCallback(step);
+  }else{
+    const step=()=>{ if(video.paused||video.ended) return;
+      if(!smoothSeries.length) detectAndRender(); else draw();
+      updateTimeRead(); enforceTrim(); rafHandle=requestAnimationFrame(step); };
+    rafHandle=requestAnimationFrame(step);
+  }
+}
+function stopLoop(){ if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
+  if(vfcHandle&&video.cancelVideoFrameCallback){video.cancelVideoFrameCallback(vfcHandle);vfcHandle=null;} }
+video.addEventListener("play",()=>{ btnPlay.textContent="❚❚ 停止"; startLoop(); });
+video.addEventListener("pause",()=>{ btnPlay.textContent="▶ 再生"; stopLoop(); detectAndRender(); });
+video.addEventListener("ended",()=>{ btnPlay.textContent="▶ 再生"; stopLoop(); });
+btnPlay.addEventListener("click",()=>{
+  if(!video.src) return;
+  if(video.paused){
+    const end=trim.end??video.duration;
+    if(video.currentTime>=end-0.01||video.currentTime<trim.start-0.05) video.currentTime=trim.start;
+    video.play().catch(()=>{});
+  } else video.pause();
+});
+speedSel.addEventListener("change",()=>{ video.playbackRate=parseFloat(speedSel.value); savePrefs(); });
+seek.addEventListener("input",()=>{ seeking=true; if(!video.paused) video.pause();
+  video.currentTime=parseFloat(seek.value)/1000; updateTimeRead(); });
+video.addEventListener("timeupdate",()=>{ if(!seeking) seek.value=Math.floor(video.currentTime*1000); updateTimeRead(); });
+let seekPending=false;
+video.addEventListener("seeked",()=>{
+  seeking=false;
+  if(seekPending) return; seekPending=true;
+  requestAnimationFrame(()=>{
+    seekPending=false;
+    if(!video.paused) return;
+    if(!smoothSeries.length) detectAndRender(); else { const r=detect(); if(r!==undefined){lastLandmarks=r?r.lm:null;lastWorld=r?r.wlm:null;} draw(); renderCalib(); }
+    captureMediaTime();
+    if(isTimingVisible()) drawTiming();
+  });
+});
+function enforceTrim(){
+  if(video.paused) return;
+  const end=trim.end??video.duration;
+  if(video.currentTime<trim.start-0.05){ video.currentTime=trim.start; return; }
+  if(video.currentTime>=end-0.005){ video.pause(); video.currentTime=Math.max(trim.start,end-0.005); }
+}
+function updateTimeRead(){
+  const d=video.duration; if(!d||isNaN(d)) return;
+  const shown=shownTime();
+  timeRead.textContent=shown.toFixed(3);
+  durRead.textContent=d.toFixed(3);
+  frameRead.textContent="コマ "+(frameIndexNow!=null?frameIndexNow:Math.round(shown*fps));
+  const f=slowFactor();
+  $("realRead").style.display=f>1?"inline-block":"none";
+  if(f>1) $("realRead").textContent="実 "+realSec(shown).toFixed(3)+"s";
+  const gap=Math.abs(video.currentTime-shown);
+  $("posRead").style.display=gap>0.0005?"inline-block":"none";
+  if(gap>0.0005) $("posRead").textContent="位置 "+video.currentTime.toFixed(3);
+  $("sameChip").style.display=sameFrameFlag?"inline-block":"none";
+  const tEnd=trim.end??d;
+  $("outOfTrim").style.display=(video.currentTime<trim.start-0.001||video.currentTime>tEnd+0.001)?"inline-block":"none";
+}
+document.addEventListener("keydown",(e)=>{
+  const tag=(e.target.tagName||"").toLowerCase();
+  if(tag==="input"||tag==="select"||tag==="textarea") return;
+  if(e.metaKey||e.ctrlKey||e.altKey||!video.src) return;
+  const k=e.key;
+  if(k===" "){e.preventDefault();btnPlay.click();}
+  else if(k==="ArrowLeft"){e.preventDefault();stepBy(e.shiftKey?-0.01:-0.1);}
+  else if(k==="ArrowRight"){e.preventDefault();stepBy(e.shiftKey?0.01:0.1);}
+  else if(k===","){e.preventDefault();stepFrames(-1);}
+  else if(k==="."){e.preventDefault();stepFrames(1);}
+  else if(k==="["){e.preventDefault();nudgeBy(-0.001);}
+  else if(k==="]"){e.preventDefault();nudgeBy(0.001);}
+  else if(k==="i"||k==="I"){e.preventDefault();$("btnTrimStart").click();}
+  else if(k==="o"||k==="O"){e.preventDefault();$("btnTrimEnd").click();}
+});
+$("btnToStart").addEventListener("click",()=>{ video.pause(); video.currentTime=0; });
+$("btnToTrim").addEventListener("click",()=>{ video.pause(); video.currentTime=trim.start; });
+
+/* ============ トリミング ============ */
+const fmt=(t)=> (t==null||isNaN(t))?"--":t.toFixed(3)+"s";
+function updateTrimDisplay(){
+  $("trimStartTime").textContent=fmt(trim.start);
+  $("trimEndTime").textContent=trim.end==null?"動画の最後":fmt(trim.end);
+  if(!video.duration||isNaN(video.duration)){ $("seekTrim").innerHTML=""; return; }
+  const pos=(t)=>clamp(t/video.duration,0,1)*100;
+  const e=trim.end??video.duration;
+  $("seekTrim").innerHTML=`<i style="left:0;width:${pos(trim.start)}%"></i><i style="left:${pos(e)}%;right:0"></i>`;
+}
+$("btnTrimStart").addEventListener("click",()=>{
+  const t=video.currentTime;
+  if(trim.end!=null&&t>=trim.end){ toast("開始は終了より前にしてください"); return; }
+  trim.start=t; updateTrimDisplay(); toast("開始(構え)を設定しました");
+});
+$("btnTrimEnd").addEventListener("click",()=>{
+  const t=video.currentTime;
+  if(t<=trim.start){ toast("終了は開始より後にしてください"); return; }
+  trim.end=t; updateTrimDisplay(); toast("終了を設定しました");
+});
+$("btnTrimReset").addEventListener("click",()=>{ trim={start:0,end:null}; updateTrimDisplay(); });
+
+/* ============ 較正(仕様書 §2-5) ============ */
+function calibBanner(msg){
+  const b=$("calibBanner");
+  if(msg){ b.textContent=msg; b.classList.add("show"); } else b.classList.remove("show");
+}
+$("btnCalib").addEventListener("click",()=>{
+  if(!dbOk()) return;
+  if(!currentBatter){ toast("先に打者を登録・選択してください"); return; }
+  if(!video.src){ toast("先に動画を読み込んでください"); return; }
+  if(!analysis && !lastLandmarks){ toast("骨格が検出できているコマで実行してください"); return; }
+  calibMode=1; calibPts=[];
+  overlay.classList.add("calib");
+  calibBanner("① 長さが分かるものの「片端」をタップ");
+  draw();
+});
+overlay.addEventListener("pointerdown",(e)=>{
+  if(!calibMode) return;
+  const r=overlay.getBoundingClientRect();
+  let nx=(e.clientX-r.left)/r.width, ny=(e.clientY-r.top)/r.height;
+  if(mirror) nx=1-nx;
+  calibPts.push({x:clamp(nx,0,1), y:clamp(ny,0,1)});
+  if(calibPts.length===1){ calibBanner("② もう片方の端をタップ"); draw(); return; }
+  calibMode=0; overlay.classList.remove("calib"); calibBanner(null); draw();
+  finishCalibration();
+});
+function finishCalibration(){
+  const [a,b]=calibPts;
+  const d=Math.hypot((a.x-b.x)*videoAR, a.y-b.y);   // 等方座標での距離
+  if(d<1e-4){ toast("2点が近すぎます"); calibPts=[]; draw(); return; }
+  const input=prompt("いま指定した2点の実際の長さ(cm)を入力してください\n例: ホームベースの幅 = 43.2", "43.2");
+  if(input==null){ calibPts=[]; draw(); return; }
+  const Lcm=parseFloat(input);
+  if(!isFinite(Lcm)||Lcm<=0){ toast("数値を入力してください"); calibPts=[]; draw(); return; }
+  const cmPerUnit=Lcm/d;                      // cm / 等方単位
+  /* 事前解析済みなら範囲全体の 90 パーセンタイル、無ければ現在のコマの胴体長 */
+  const T = (analysis&&analysis.T_norm) ? analysis.T_norm : torsoLen(lastLandmarks);
+  const src = (analysis&&analysis.T_norm) ? "解析範囲全体" : "いまのコマ";
+  if(T==null){ toast("肩・股関節が検出できていません"); calibPts=[]; draw(); return; }
+  const k = T*cmPerUnit/currentBatter.height_cm;
+  if(!(k>K_TORSO_MIN&&k<K_TORSO_MAX)){
+    const why = k<K_TORSO_MIN
+      ? "指定した長さが実際より長い、または胴体が大きく短縮して見えるコマの可能性があります"
+      : "指定した長さが実際より短い可能性があります。既知長は打者と同じ奥行きに置いてください";
+    setStatus("err",`較正値が不自然です(k_torso=${k.toFixed(3)} / 妥当範囲 ${K_TORSO_MIN}〜${K_TORSO_MAX})。${why}`);
+    toast("較正できませんでした"); calibPts=[]; draw(); return;
+  }
+  currentBatter.k_torso=k; currentBatter.calibrated=true; currentBatter.cm_per_unit=cmPerUnit;
+  dbPut("batters",currentBatter).then(()=>{
+    if(analysis){ analysis.k_torso=k; analysis.calibrated=true;
+      analysis.H_norm=hNormFromTorso(analysis.T_norm,k); renderAnalysis(); renderMetrics(); }
+    renderCalib(); toast(`較正しました (k_torso=${k.toFixed(3)} / ${src}の胴体長を使用)`);
+  });
+  calibPts=[]; draw();
+}
+$("btnCalibReset").addEventListener("click",()=>{
+  if(!currentBatter) return;
+  if(!dbOk()) return;
+  currentBatter.k_torso=K_TORSO_DEFAULT; currentBatter.calibrated=false; currentBatter.cm_per_unit=null;
+  dbPut("batters",currentBatter).then(()=>{
+    if(analysis){ analysis.k_torso=K_TORSO_DEFAULT; analysis.calibrated=false;
+      analysis.H_norm=hNormFromTorso(analysis.T_norm,K_TORSO_DEFAULT); renderAnalysis(); renderMetrics(); }
+    renderCalib(); toast("既定値に戻しました");
+  });
+});
+function renderCalib(){
+  const k=currentBatter?(currentBatter.k_torso||K_TORSO_DEFAULT):K_TORSO_DEFAULT;
+  const cal=!!(currentBatter&&currentBatter.calibrated);
+  $("calibTag").textContent=cal?"較正済み":"未較正";
+  $("kTorsoVal").textContent=k.toFixed(3)+(cal?"":" (既定)");
+  const T=torsoLen(smoothedAt(video.currentTime)||lastLandmarks);
+  const e1=$("tNowVal"); e1.textContent=T?T.toFixed(4):"--"; e1.className="v"+(T?"":" na");
+  const hn=(analysis&&analysis.H_norm)?analysis.H_norm:hNormFromTorso(T,k);
+  const e2=$("hNormVal");
+  e2.textContent=hn?hn.toFixed(4)+((analysis&&analysis.H_norm)?" (範囲全体)":" (いまのコマ)"):"--";
+  e2.className="v"+(hn?(cal?" ok":""):" na");
+}
+
+/* ============ 打者 ============ */
+async function reloadBatters(){
+  batters=await dbAll("batters");
+  const wrap=$("batterList");
+  wrap.innerHTML=batters.length?batters.map(p=>`
+    <div class="rowitem${currentBatter&&currentBatter.id===p.id?" sel":""}" data-id="${p.id}">
+      <span><span class="nm">${escapeHtml(p.name)}</span>
+        <span class="sub">${p.height_cm}cm / ${p.bats==="R"?"右":"左"}打ち / ${p.calibrated?"較正済":"未較正"}</span></span>
+      <button class="pick">選択</button>
+    </div>`).join("")
+    :`<div class="legend" style="padding:0;">まだ登録がありません。下の欄に入力して登録してください。</div>`;
+  $("batterTag").textContent=currentBatter?currentBatter.name:"未選択";
+  renderCalib();
+}
+/* 打者を切り替えるときは、必ずこれを通す。
+   ⚠️ セッションは打者に属する。別の打者のセッションを開いたまま記録すると、
+   「打者Bのスイングが打者Aのセッションに入る」レコードができてしまう。 */
+/* 打席が変わると、前足・軸足が入れ替わり、投手方向 dir も変わる。
+   ⚠️ イベント時刻をそのままにして指標だけ左右を入れ替えると、
+   もっともらしいが意味のない数値になる。イベントは捨てて検出し直してもらう。 */
+function invalidateOnHandChange(){
+  if(!analysis) return false;
+  const now = currentBatter ? currentBatter.bats : null;
+  if(analysis.handed==null || analysis.handed===now) return false;
+  analysis.handed=now;
+  const d=computeDir(analysis.H_norm);      // 前足が変わるので方向も取り直す
+  analysis.dir=d.dir; analysis.dirAmb=d.dirAmb;
+  dirManual=null; signals=null;
+  events={}; commitCands=null; selectedEvent=null;
+  $("thumbWrap").style.display="none"; $("commitWrap").style.display="none";
+  $("confirmHereWrap").style.display="none";
+  $("dirManualRow").style.display = analysis.dirAmb ? "flex" : "none";
+  renderAnalysis(); renderEvents(); saveDraft(); drawTiming();
+  setStatus("err","打席が変わったので、イベントを検出し直してください");
+  toast("イベントを検出し直してください");
+  return true;
+}
+async function setCurrentBatter(p){
+  currentBatter=p||null;
+  invalidateOnHandChange();
+  if(p){
+    lsSet("battinglab.lastBatter", p.id);
+    $("bName").value=p.name; $("bHeight").value=p.height_cm; $("bBats").value=p.bats;
+  }
+  if(currentSession && (!p || currentSession.batter_id!==p.id)) currentSession=null;
+  await reloadBatters();
+  await reloadSessions();
+  await renderSwingList();
+  await refreshData();
+  renderMetrics();
+}
+$("batterList").addEventListener("click",async(e)=>{
+  const row=e.target.closest(".rowitem"); if(!row) return;
+  const p=batters.find(x=>x.id===row.dataset.id); if(!p) return;
+  const hadSession=!!currentSession;
+  await setCurrentBatter(p);
+  if(hadSession&&!currentSession) toast("別の打者に切り替えたので、セッションを閉じました");
+});
+$("btnAddBatter").addEventListener("click",async()=>{
+  if(!dbOk()) return;
+  const name=$("bName").value.trim();
+  const h=parseFloat($("bHeight").value);
+  if(!name){ toast("名前を入力してください"); return; }
+  if(!isFinite(h)||h<100||h>220){ toast("身長を100〜220cmで入力してください"); return; }
+  const hand=$("bBats").value;
+  /* 同姓の別人を黙って上書きしないようにする。
+     ⚠️ 上書きすると、その名前で保存済みの記録が、身長も利き手も違う
+     プロフィールに紐づいたままになり、cm 換算も左右も狂う。 */
+  let target=null;
+  if(currentBatter && currentBatter.name===name) target=currentBatter;                 // 選択中の本人を更新
+  else {
+    const same=batters.filter(x=>x.name===name);
+    if(same.length){
+      const e=same[0];
+      const differs=(e.height_cm!==h || e.bats!==hand);
+      if(!differs) target=e;
+      else target=confirm(
+        `「${name}」はすでに登録されています(${e.height_cm}cm / ${e.bats==="R"?"右":"左"}打ち)。\n\n`
+        +`OK: この選手の情報を書き換える\n`
+        +`キャンセル: 同姓の別人として新しく登録する`) ? e : null;
+    }
+  }
+  const exist=!!target;
+  const p= target ? {...target, height_cm:h, bats:hand}
+                 : { id:String(Date.now()), name, height_cm:h, bats:hand,
+                     k_torso:K_TORSO_DEFAULT, calibrated:false, cm_per_unit:null };
+  await dbPut("batters",p);
+  const hadSession=!!currentSession;
+  await setCurrentBatter(p);
+  toast(exist?"更新しました":"登録しました");
+  if(hadSession&&!currentSession) toast("別の打者に切り替えたので、セッションを閉じました");
+});
+
+/* ============ セッション ============ */
+async function reloadSessions(){
+  sessions=(await dbAll("sessions")).sort((a,b)=>b.started_at-a.started_at);
+  const mine=currentBatter?sessions.filter(s=>s.batter_id===currentBatter.id).slice(0,8):[];
+  $("sessionList").innerHTML=mine.length?mine.map(s=>{
+    const d=new Date(s.started_at);
+    const label=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    return `<div class="rowitem${currentSession&&currentSession.id===s.id?" sel":""}">
+      <span><span class="nm">${label}</span>
+        <span class="sub">${s.ended_at?"終了":"進行中"} / ${(s.swing_ids||[]).length}本</span></span>
+      <span style="display:flex;gap:6px;">
+        <button class="ssel" data-id="${s.id}">開く</button>
+        <button class="del" data-id="${s.id}">削除</button></span></div>`;
+  }).join("") : `<div class="legend" style="padding:0;">${
+      currentBatter?"この打者のセッションはまだありません。":"先に打者を選択してください。"}</div>`;
+  $("sessionTag").textContent=currentSession?(currentSession.ended_at?"終了":"進行中"):"未開始";
+}
+$("sessionList").addEventListener("click",async(e)=>{
+  /* 過去のセッションを開いて見直せるようにする。
+     JSONを読み込んだ直後は進行中のセッションが無いので、これが無いと
+     10本ブロックの推移もスイング一覧も見られない。 */
+  if(!dbOk()) return;
+  const sel=e.target.closest(".ssel");
+  if(sel){
+    const s=sessions.find(x=>x.id===sel.dataset.id);
+    if(!s) return;
+    currentSession=s;
+    await reloadSessions(); await renderSwingList(); await refreshData();
+    toast(s.ended_at?"終了したセッションを開きました(記録は追加できます)":"セッションを開きました");
+    return;
+  }
+  const b=e.target.closest(".del"); if(!b) return;
+  await dbDel("sessions",b.dataset.id);
+  if(currentSession&&currentSession.id===b.dataset.id) currentSession=null;
+  await reloadSessions(); await renderSwingList(); await refreshData();
+});
+function checklistState(){
+  const o={};
+  document.querySelectorAll("#checklist input").forEach(i=>{ o[i.dataset.ck]=i.checked; });
+  return o;
+}
+$("btnSessionStart").addEventListener("click",()=>withSaveLock("btnSessionStart",async()=>{
+  if(!dbOk()) return;
+  if(!currentBatter){ toast("先に打者を選択してください"); return; }
+  currentSession={ id:String(Date.now()), batter_id:currentBatter.id,
+    date:new Date().toISOString().slice(0,10), place:"", started_at:Date.now(), ended_at:null,
+    checklist:checklistState(), swing_ids:[] };
+  await dbPut("sessions",currentSession);
+  await reloadSessions(); await renderSwingList(); toast("セッションを開始しました");
+}));
+$("btnSessionEnd").addEventListener("click",async()=>{
+  if(!dbOk()) return;
+  if(!currentSession){ toast("進行中のセッションがありません"); return; }
+  currentSession.ended_at=Date.now();
+  await dbPut("sessions",currentSession);
+  currentSession=null; await reloadSessions(); toast("セッションを終了しました");
+});
+
+/* ============ 事前解析 ============ */
+function seekTo(t){
+  return new Promise(res=>{
+    const dur=video.duration;
+    const target=clamp(t,0,(isFinite(dur)&&dur>0)?Math.max(0,dur-0.001):t);
+    if(Math.abs(video.currentTime-target)<1e-4){ res(); return; }
+    let done=false;
+    const fin=()=>{ if(done) return; done=true; video.removeEventListener("seeked",fin); clearTimeout(tm); res(); };
+    const tm=setTimeout(fin,2000);
+    video.addEventListener("seeked",fin);
+    video.currentTime=target;
+  });
+}
+$("btnAnalyze").addEventListener("click",async()=>{
+  if(busy){ cancelBusy=true; return; }
+  if(!video.duration||isNaN(video.duration)){ toast("先に動画を読み込んでください"); return; }
+  if(!poseLandmarker){ setStatus("err", libFailed?"解析ライブラリを取得できていません":"モデルを読み込み中です"); return; }
+  video.pause();
+  busy=true; cancelBusy=false;
+  $("btnAnalyze").textContent="中止"; $("btnAnalyze").disabled=false;
+  const start=clamp(trim.start,0,video.duration);
+  const end=trim.end!=null?Math.min(video.duration,trim.end):video.duration;
+  const dur=Math.max(0.1,end-start);
+  const step=1/fps;
+  /* メモリと時間の上限。240fps なら 1200コマ = 5.0秒しかない。
+     ⚠️ ここで黙って切り詰めると、範囲の後半が解析されないまま
+     「完了」と表示されてしまうので、切り詰めたことを必ず伝える。 */
+  const FRAME_CAP=1200;
+  const wanted=Math.max(1,Math.round(dur/step));
+  const total=Math.min(FRAME_CAP,wanted);
+  const truncated=wanted>FRAME_CAP;
+  const series=[];
+  try{
+    for(let i=0;i<=total;i++){
+      if(cancelBusy) break;
+      const t=start+Math.min(dur-0.001,i*step);
+      await seekTo(t);
+      const r=detect();
+      const got=(r===undefined)?null:r;
+      series.push({ t:video.currentTime, lm:got?got.lm:null, wlm:got?got.wlm:null });
+      if(i%4===0){
+        const pct2=Math.round(i/total*100);
+        $("analyzeBar").style.width=pct2+"%";
+        setStatus("busy",`解析中… ${pct2}%`);
+      }
+    }
+    rawSeries=series;
+    const W=smoothWindow(fps);
+    smoothSeries=smoothLandmarkSeries(series,W);
+    const detected=series.filter(f=>f.lm).length;
+
+    /* 胴体長(仕様書 §2-5)。
+       体幹が画面と平行に近いコマほど短縮が小さく胴体長は大きく出るので、
+       最大値ではなく 90 パーセンタイルを採る(外れ値1枚に引きずられないため)。 */
+    const k=currentBatter?(currentBatter.k_torso||K_TORSO_DEFAULT):K_TORSO_DEFAULT;
+    const ts=smoothSeries.map(f=>torsoLen(f.lm)).filter(v=>v!=null);
+    const T=pct(ts,0.90);
+    const H=hNormFromTorso(T,k);
+    const tSpread=ts.length&&T ? (Math.max(...ts)-Math.min(...ts))/T : 0;
+
+    /* 投手方向(仕様書 §2-4): 前足首が構えからいちばん離れた向き */
+    const d0=computeDir(H);
+    analysis={ T_norm:T, H_norm:H, tSpread, dir:d0.dir, dirAmb:d0.dirAmb,
+               window:W, detected, total:series.length,
+               truncated, coveredSec:total*step, requestedSec:dur,
+               k_torso:k, calibrated:!!(currentBatter&&currentBatter.calibrated),
+               handed:currentBatter?currentBatter.bats:null };
+    signals=null;
+    /* 範囲を狭めて解析し直すと、前の範囲で決めたイベントが解析範囲の外に出る。
+       そのまま残すと「確定済み」に見えるのに指標だけ消える状態になるので捨てる。 */
+    let droppedEv=[];
+    if(smoothSeries.length){
+      const w0=smoothSeries[0].t, w1=smoothSeries[smoothSeries.length-1].t;
+      droppedEv=Object.keys(events).filter(k=>events[k].t<w0-1e-6||events[k].t>w1+1e-6);
+      if(droppedEv.length){
+        droppedEv.forEach(k=>delete events[k]);
+        selectedEvent=null;
+        const tw=$("thumbWrap"); if(tw) tw.style.display="none";
+        renderEvents(); saveDraft();
+      }
+    }
+    renderAnalysis();
+    $("dirManualRow").style.display = (analysis.dirAmb && dirManual==null) ? "flex" : "none";
+    renderCalib(); renderMetrics(); drawTiming();
+    await seekTo(start);
+    detectAndRender();
+    if(truncated&&!cancelBusy){
+      setStatus("err",`範囲が長すぎるため、先頭 ${(total*step).toFixed(1)}秒 分だけ解析しました`
+        +`(指定は ${dur.toFixed(1)}秒)。トリミングを短くしてやり直してください`);
+      toast("範囲が長すぎます。先頭だけ解析しました");
+    }else{
+      setStatus("ok", cancelBusy?"解析を中止しました"
+        :`解析 完了 — ${detected}/${series.length} コマで骨格を検出`
+         +(droppedEv.length?` / 範囲の外に出た ${droppedEv.length} 件のイベントは取り消しました`:""));
+      if(!cancelBusy) toast(droppedEv.length
+        ? "範囲外になったイベントを取り消しました。検出し直してください" : "解析が完了しました");
+    }
+  }catch(err){
+    console.error(err); setStatus("err","解析中にエラーが発生しました");
+  }finally{
+    busy=false; $("btnAnalyze").textContent="この範囲を解析する"; $("analyzeBar").style.width="0";
+    refreshReady();
+  }
+});
+function renderAnalysis(){
+  const set=(id,val,cls)=>{ const e=$(id); e.textContent=val; e.className="v"+(cls?" "+cls:""); };
+  if(!analysis){
+    $("analyzeTag").textContent="未実行";
+    ["kFrames","kWindow","kTnorm","kHnorm","kDir","kDetected","kFrameMs"].forEach(id=>set(id,"--","na"));
+    return;
+  }
+  $("analyzeTag").textContent=analysis.truncated?"一部のみ":"完了";
+  $("analyzeTag").style.color=analysis.truncated?"var(--alert)":"";
+  set("kFrames", analysis.truncated
+    ? `${analysis.total} コマ (先頭 ${analysis.coveredSec.toFixed(1)}s / 指定 ${analysis.requestedSec.toFixed(1)}s)`
+    : `${analysis.total} コマ`, analysis.truncated?"warn":"");
+  set("kWindow", `${analysis.window} コマ (約${Math.round(analysis.window/fps*1000)}ms)`);
+  set("kTnorm", analysis.T_norm?analysis.T_norm.toFixed(4)+" (90%点)":"--", analysis.T_norm?"":"na");
+  set("kHnorm", analysis.H_norm?analysis.H_norm.toFixed(4)+(analysis.calibrated?"":" (未較正)"):"--",
+      analysis.H_norm?(analysis.calibrated?"ok":""):"na");
+  set("kDir", analysis.dirAmb?"判定不能":(analysis.dir==null?"--":(analysis.dir>0?"画面の右":"画面の左")),
+      analysis.dirAmb?"warn":(analysis.dir==null?"na":""));
+  const ratio=analysis.total?analysis.detected/analysis.total:0;
+  set("kDetected", `${analysis.detected} / ${analysis.total} (${Math.round(ratio*100)}%)`,
+      ratio>=0.9?"ok":(ratio>=0.7?"":"warn"));
+  set("kFrameMs", (1000/fps/slowFactor()).toFixed(1)+"ms");
+}
+
+/* ============ 設定 ============ */
+const PREF="battinglab.prefs.v1";
+function savePrefs(){
+  try{ lsSet(PREF, JSON.stringify({
+    modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value, FS_ANK, FS_TOE })); }catch{}
+}
+(function applyPrefs(){
+  let p={}; try{ p=JSON.parse(lsGet(PREF)||"{}"); }catch{}
+  if(p.modelKind==="full"||p.modelKind==="lite") modelKind=p.modelKind;
+  if(typeof p.VIS_MIN==="number") VIS_MIN=clamp(p.VIS_MIN,0.1,0.8);
+  if(typeof p.mirror==="boolean") mirror=p.mirror;
+  if(typeof p.showRaw==="boolean") showRaw=p.showRaw;
+  if(typeof p.captureFps==="number") captureFps=p.captureFps;
+  if(typeof p.FS_ANK==="number") FS_ANK=clamp(p.FS_ANK,0.05,0.40);
+  if(typeof p.FS_TOE==="number") FS_TOE=clamp(p.FS_TOE,0.05,0.50);
+  if(p.speed) speedSel.value=p.speed;
+  $("modelSel").value=modelKind; $("visMin").value=String(VIS_MIN);
+  $("visVal").textContent=VIS_MIN.toFixed(2);
+  $("mirrorToggle").checked=mirror; video.classList.toggle("mirrored",mirror);
+  $("rawToggle").checked=showRaw; $("captureFpsSel").value=String(captureFps||0);
+  $("fsAnk").value=String(FS_ANK); $("fsAnkVal").textContent=FS_ANK.toFixed(2);
+  $("fsToe").value=String(FS_TOE); $("fsToeVal").textContent=FS_TOE.toFixed(2);
+})();
+$("visMin").addEventListener("input",e=>{ VIS_MIN=parseFloat(e.target.value);
+  $("visVal").textContent=VIS_MIN.toFixed(2); savePrefs(); draw(); });
+/* 結果に効く設定を変えたら、指標・タイミング・集計をまとめて計算し直す */
+function recomputeAll(){
+  signals=null;                      // 左右が変わると時系列も作り直しになる
+  renderMetrics(); drawTiming(); refreshData();
+}
+$("mirrorToggle").addEventListener("change",e=>{ mirror=e.target.checked;
+  video.classList.toggle("mirrored",mirror); savePrefs(); draw(); recomputeAll(); });
+$("rawToggle").addEventListener("change",e=>{ showRaw=e.target.checked; savePrefs(); draw(); });
+$("fsAnk").addEventListener("input",e=>{ FS_ANK=parseFloat(e.target.value);
+  $("fsAnkVal").textContent=FS_ANK.toFixed(2); savePrefs(); });
+$("fsToe").addEventListener("input",e=>{ FS_TOE=parseFloat(e.target.value);
+  $("fsToeVal").textContent=FS_TOE.toFixed(2); savePrefs(); });
+$("captureFpsSel").addEventListener("change",e=>{
+  captureFps=parseFloat(e.target.value)||0; savePrefs();
+  showFps(fpsMeasured); updateTimeRead(); renderAnalysis(); recomputeAll();
+  const f=slowFactor();
+  toast(f>1?`実時間 = 動画時間 ÷ ${f.toFixed(0)} として計算します`:"時間の補正なし");
+});
+document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll(".tabpage").forEach(x=>x.classList.remove("active"));
+  t.classList.add("active"); $("tab-"+t.dataset.tab).classList.add("active");
+  if(t.dataset.tab==="timing") drawTiming();
+  if(t.dataset.tab==="repeat"||t.dataset.tab==="change") refreshData();
+  if(t.dataset.tab==="compare") reloadCompare();
+}));
+document.addEventListener("visibilitychange",()=>{ if(document.hidden&&!video.paused) video.pause(); });
+
+/* ============ Service Worker ============ */
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("./sw.js").then(reg=>{
+      reg.addEventListener("updatefound",()=>{
+        const sw=reg.installing; if(!sw) return;
+        sw.addEventListener("statechange",()=>{
+          if(sw.state==="installed"&&navigator.serviceWorker.controller)
+            toast("新しいバージョンがあります。再読み込みしてください");
+        });
+      });
+    }).catch(err=>console.warn("sw registration failed",err));
+  });
+}
+
+
+/* ============================================================
+   イベント(仕様書 §4)
+   自動検出は「候補の生成」。確定は必ず手動。
+   インパクトは手動確定が必須(未確定のスイングは保存できない)。
+   ============================================================ */
+const EVENTS = [
+  { id:"setup",  label:"構え (Setup)",        need:false },
+  { id:"commit", label:"始動 (Commit)",       need:true  },
+  { id:"fs",     label:"踏み込み足接地 (FS)", need:true  },
+  { id:"impact", label:"インパクト",          need:true  },
+  { id:"finish", label:"フォロースルー",      need:false },
+];
+const REQUIRED=EVENTS.filter(e=>e.need).map(e=>e.id);
+let events={};          // id -> {t, frame, confirmed, auto}
+let commitCands=null;   // {grip:{t,i}, pelvis:..., front_foot:..., shoulder:...}
+let commitSource="grip";
+let dirManual=null;
+let selectedEvent=null;
+let signals=null;       // タイミング用の各種時系列
+
+/* 鏡像のときは解剖学的な側 → MediaPipe のラベル側 に入れ替える */
+const mpSide=(anat)=> mirror ? (anat==="R"?"L":"R") : anat;
+function batsSide(){ return currentBatter ? currentBatter.bats : "R"; }
+function frontSideAnat(){ return batsSide()==="R" ? "L" : "R"; }   // 前足は打席の反対
+function backSideAnat(){ return batsSide(); }                       // 軸足は打席と同じ側
+const IDX={ ankle:{R:L.rAnkle,L:L.lAnkle}, foot:{R:L.rFoot,L:L.lFoot},
+            knee:{R:L.rKnee,L:L.lKnee}, hip:{R:L.rHip,L:L.lHip},
+            wrist:{R:L.rWrist,L:L.lWrist}, shoulder:{R:L.rShoulder,L:L.lShoulder} };
+const idxOf=(part,anat)=>IDX[part][mpSide(anat)];
+function effectiveDir(){
+  if(dirManual!=null) return dirManual;
+  return (analysis && !analysis.dirAmb) ? analysis.dir : null;
+}
+
+/* 投手方向。前足がどちら側なので、打席が変わると結果も変わる */
+function computeDir(H){
+  let dir=null, dirAmb=false;
+  const front=idxOf("ankle",frontSideAnat());
+  const first=smoothSeries.find(f=>f.lm&&f.lm[front]);
+  if(first&&H){
+    const x0=first.lm[front].x*videoAR;
+    let ex=0;
+    smoothSeries.forEach(f=>{ if(!f.lm||!f.lm[front]) return;
+      const dx=f.lm[front].x*videoAR-x0; if(Math.abs(dx)>Math.abs(ex)) ex=dx; });
+    if(Math.abs(ex)/H<0.02) dirAmb=true; else dir=Math.sign(ex);
+  }
+  return {dir,dirAmb};
+}
+
+/* ---- 時系列の共通道具 ---- */
+function buildSignals(){
+  if(!smoothSeries.length||!analysis||!analysis.H_norm) return null;
+  const dir=effectiveDir(); if(dir==null) return null;
+  const S=smoothSeries, N=S.length, H=analysis.H_norm;
+  const lm=(i)=>S[i]&&S[i].lm;
+  const P=(i,j)=>{ const p=lm(i)&&lm(i)[j]; return p?{x:p.x*videoAR,y:p.y}:null; };
+  const gripAt=(i)=>midOf(lm(i),L.lWrist,L.rWrist);
+  const dt2=(i)=> realSec(S[i+1].t-S[i-1].t);
+
+  /* 位置系列 */
+  const grip=[], hipW=[], shW=[], frontAnk=[], frontToe=[];
+  const fA=idxOf("ankle",frontSideAnat()), fT=idxOf("foot",frontSideAnat());
+  for(let i=0;i<N;i++){
+    grip.push(gripAt(i));
+    const lh=P(i,L.lHip), rh=P(i,L.rHip);
+    hipW.push((lh&&rh)?Math.abs(lh.x-rh.x):null);
+    const ls=P(i,L.lShoulder), rs=P(i,L.rShoulder);
+    shW.push((ls&&rs)?Math.abs(ls.x-rs.x):null);
+    frontAnk.push(P(i,fA)); frontToe.push(P(i,fT));
+  }
+  /* 速さ(中心差分・実時間・身長比) */
+  const speedOf=(pos)=>{ const v=new Array(N).fill(null);
+    for(let i=1;i<N-1;i++){ const a=pos[i-1], b=pos[i+1], d=dt2(i);
+      if(!a||!b||d<=0) continue; v[i]=Math.hypot(b.x-a.x,b.y-a.y)/H/d; } return v; };
+  /* スカラーの増加速度(正の部分のみ) */
+  const riseOf=(arr,scale)=>{ const v=new Array(N).fill(null);
+    for(let i=1;i<N-1;i++){ const a=arr[i-1], b=arr[i+1], d=dt2(i);
+      if(a==null||b==null||d<=0) continue; v[i]=Math.max(0,(b-a)/(scale||1)/d); } return v; };
+
+  const gripSpeed=speedOf(grip);
+  const frontAnkSpeed=speedOf(frontAnk), frontToeSpeed=speedOf(frontToe);
+  const hipOpen=riseOf(hipW,H), shOpen=riseOf(shW,H);
+  /* グリップの投手方向成分の速度(トップのタイムラグ用。符号つき) */
+  const gripFwd=new Array(N).fill(null);
+  for(let i=1;i<N-1;i++){ const a=grip[i-1], b=grip[i+1], d=dt2(i);
+    if(!a||!b||d<=0) continue; gripFwd[i]=dir*(b.x-a.x)/H/d; }
+
+  return { N, H, dir, S, grip, hipW, shW, frontAnk, frontToe,
+           gripSpeed, frontAnkSpeed, frontToeSpeed, hipOpen, shOpen, gripFwd };
+}
+function ensureSignals(){ if(!signals) signals=buildSignals(); return signals; }
+
+/* 「その量が動き出した最初のコマ」= 区間の最大の20%を2コマ連続で超えた最初(仕様書 §4-1) */
+function onsetIndex(v, from, to){
+  let pv=-Infinity;
+  for(let i=Math.max(1,from);i<=to;i++) if(v[i]!=null&&v[i]>pv) pv=v[i];
+  if(!(pv>1e-9)) return -1;
+  for(let i=Math.max(1,from);i<to;i++){
+    if(v[i]==null||v[i+1]==null) continue;
+    if(v[i]>=pv*0.2 && v[i+1]>=pv*0.2) return i;
+  }
+  return -1;
+}
+function argmax(v, from, to){
+  let bi=-1, bv=-Infinity;
+  for(let i=Math.max(0,from);i<=to;i++) if(v[i]!=null&&v[i]>bv){ bv=v[i]; bi=i; }
+  return bi;
+}
+
+const COMMIT_DEFS=[
+  { key:"grip",       label:"① グリップの速さ",             color:"#f2b632", sig:"gripSpeed" },
+  { key:"pelvis",     label:"② 見かけの股関節幅の増加速度", color:"#48c9d8", sig:"hipOpen" },
+  { key:"front_foot", label:"③ 前足首の速さ",               color:"#5fbf7a", sig:"frontAnkSpeed" },
+  { key:"shoulder",   label:"④ 見かけの肩幅の増加速度",     color:"#9b7ede", sig:"shOpen" },
+];
+
+function detectEvents(){
+  const sg=ensureSignals();
+  if(!sg){
+    if(!smoothSeries.length||!analysis){ toast("先に「この範囲を解析する」を実行してください"); return null; }
+    $("dirManualRow").style.display="flex"; toast("投手方向を選んでください"); return null;
+  }
+  const { N, S, gripSpeed, frontAnkSpeed, frontToeSpeed, frontAnk } = sg;
+
+  /* ① インパクトの参考位置(§4-3): グリップ速度が最大のコマ。
+     これはボール接触のコマではない。手動確定が必須。 */
+  const impact=argmax(gripSpeed, 1, N-2);
+  if(impact<0){ toast("グリップの速度を計算できませんでした"); return null; }
+
+  /* ② 始動の候補4種(§4-1)。探索区間は 構え〜インパクト */
+  const cands={};
+  COMMIT_DEFS.forEach(d=>{
+    const i=onsetIndex(sg[d.sig], 1, impact);
+    cands[d.key]= i>=0 ? { i, t:S[i].t } : null;
+  });
+  const commit = (cands[commitSource] ? cands[commitSource].i
+                 : (cands.grip ? cands.grip.i : 0));
+
+  /* ③ 踏み込み足接地(§4-2) */
+  const fA=idxOf("ankle",frontSideAnat());
+  const Yank=(i)=>{ const p=S[i].lm&&S[i].lm[fA]; return p?p.y:null; };
+  const yPeakSoFar=(i)=>{ let m=-Infinity; for(let k=0;k<=i;k++){ const y=Yank(k); if(y!=null) m=Math.max(m,y); } return m; };
+  let fs=-1;
+  for(let i=commit+1;i<Math.max(commit+2,impact);i++){
+    const a1=frontAnkSpeed[i], a2=frontAnkSpeed[i+1];
+    const t1=frontToeSpeed[i], t2=frontToeSpeed[i+1];
+    if(a1==null||a2==null) continue;
+    const c1 = a1<FS_ANK && a2<FS_ANK;
+    const c2 = (t1==null||t2==null) ? true : (t1<FS_TOE && t2<FS_TOE);
+    const y=Yank(i);
+    const c3 = y!=null && y>=0.95*yPeakSoFar(i);
+    if(c1&&c2&&c3){ fs=i; break; }
+  }
+  if(fs<0){ // 条件1のみ
+    for(let i=commit+1;i<Math.max(commit+2,impact);i++){
+      const a1=frontAnkSpeed[i], a2=frontAnkSpeed[i+1];
+      if(a1!=null&&a2!=null&&a1<FS_ANK&&a2<FS_ANK){ fs=i; break; }
+    }
+  }
+  if(fs<0){ // Y が最大(=最も低い)のコマ
+    let by=-Infinity;
+    for(let i=commit;i<=impact;i++){ const y=Yank(i); if(y!=null&&y>by){ by=y; fs=i; } }
+  }
+  if(fs<0) fs=commit;
+  /* 速度が下がりきるのを待つ判定は、平滑化(窓の半分)と中心差分(1コマ)のぶんだけ
+     必ず接地より後ろにずれる。実測で30fpsのとき2コマ(67ms)遅れた。
+     足首が「すでに最終位置に来ていた」最初のコマまで戻して、この遅れを取り除く。 */
+  {
+    const EPS=0.01;                       // 身長比。170cmなら約1.7cm
+    const pf=frontAnk[fs];
+    if(pf){
+      let j=fs;
+      while(j>commit){
+        const q=frontAnk[j-1];
+        if(!q || Math.hypot(q.x-pf.x,q.y-pf.y)/sg.H > EPS) break;
+        j--;
+      }
+      fs=j;
+    }
+  }
+
+  /* ④ フォロースルー: インパクト以降、グリップ速度が最大の25%を下回る最初 */
+  let finish=-1;
+  const pv=gripSpeed[impact];
+  for(let i=impact+2;i<N-1;i++){ const v=gripSpeed[i]; if(v!=null&&v<pv*0.25){ finish=i; break; } }
+  if(finish<0) finish=N-1;
+
+  const mk=(i)=> (i>=0&&i<N) ? { t:S[i].t, frame:Math.round(S[i].t*fps), confirmed:false, auto:true } : null;
+  const out={ setup:{ t:S[0].t, frame:Math.round(S[0].t*fps), confirmed:false, auto:true } };
+  const put=(id,i)=>{ const v=mk(i); if(v) out[id]=v; };
+  put("commit",commit); put("fs",fs); put("impact",impact); put("finish",finish);
+  return { events:out, cands };
+}
+
+$("btnDetectEvents").addEventListener("click",()=>{
+  const r=detectEvents();
+  if(!r) return;
+  events=r.events; commitCands=r.cands; selectedEvent=null;
+  $("thumbWrap").style.display="none"; $("confirmHereWrap").style.display="none";
+  renderCommitCands(); renderEvents(); saveDraft(); renderMetrics(); drawTiming();
+  toast("候補を検出しました。始動の候補を選び、5点を確認して確定してください");
+});
+$("dirSel").addEventListener("change",(e)=>{
+  dirManual = e.target.value===""?null:parseFloat(e.target.value);
+  signals=null;
+  if(dirManual!=null){ toast("投手方向を設定しました"); renderMetrics(); drawTiming(); }
+});
+
+function renderCommitCands(){
+  const wrap=$("commitWrap"), list=$("commitCands");
+  if(!commitCands){ wrap.style.display="none"; return; }
+  wrap.style.display="block";
+  list.innerHTML=COMMIT_DEFS.map(d=>{
+    const c=commitCands[d.key];
+    const t=c?`${c.t.toFixed(3)}s / コマ ${Math.round(c.t*fps)}`:"検出できず";
+    return `<div class="cand-row${commitSource===d.key?" sel":""}${c?"":" na"}" data-key="${d.key}">
+      <span class="dot" style="background:${d.color};"></span>
+      <span class="nm">${d.label}</span>
+      <span class="tv">${t}</span></div>`;
+  }).join("");
+}
+$("commitCands").addEventListener("click",(e)=>{
+  const row=e.target.closest(".cand-row"); if(!row) return;
+  const key=row.dataset.key;
+  const c=commitCands&&commitCands[key];
+  if(!c){ toast("この候補は検出できませんでした"); return; }
+  commitSource=key;
+  events.commit={ t:c.t, frame:Math.round(c.t*fps), confirmed:false, auto:true };
+  renderCommitCands(); renderEvents(); saveDraft(); renderMetrics(); drawTiming();
+  toast(`始動を「${COMMIT_DEFS.find(d=>d.key===key).label}」の候補に切り替えました`);
+});
+
+function renderEvents(){
+  const n=Object.keys(events).length;
+  const c=Object.values(events).filter(e=>e.confirmed).length;
+  $("eventTag").textContent = n? `${c}/${n} 確定` : "未検出";
+  $("eventList").innerHTML = EVENTS.map(ev=>{
+    const e=events[ev.id];
+    const needMark = ev.need && (!e||!e.confirmed);
+    const sub = e ? `${e.t.toFixed(3)}s / コマ ${e.frame}${e.confirmed?" ✓確定":"(候補)"}` : "--";
+    const cls = e ? (e.confirmed?"sub ok":"sub set") : "sub";
+    return `<div class="ev-row${selectedEvent===ev.id?" sel":""}${needMark?" need":""}" data-id="${ev.id}">
+      <span><span class="nm">${ev.label}${ev.need?' <span style="color:var(--alert);font-size:10px;">必須</span>':""}</span><br>
+        <span class="${cls}">${sub}</span></span>
+      <button class="go" ${e?"":"disabled"}>移動</button>
+      <button class="pick" ${e?"":"disabled"}>選ぶ</button>
+    </div>`;
+  }).join("");
+}
+$("eventList").addEventListener("click",async(e)=>{
+  const row=e.target.closest(".ev-row"); if(!row) return;
+  const id=row.dataset.id, ev=events[id]; if(!ev) return;
+  if(e.target.closest(".go")){ video.pause(); await seekTo(ev.t+0.25/fps); detectAndRender(); return; }
+  if(e.target.closest(".pick")){ await openThumbs(id); }
+});
+
+/* ---- 前後±5コマのサムネイル(仕様書 §4) ---- */
+let thumbBusy=false;
+async function openThumbs(id){
+  if(thumbBusy) return;
+  const ev=events[id]; if(!ev) return;
+  selectedEvent=id; renderEvents();
+  const wrap=$("thumbWrap"), strip=$("thumbs");
+  wrap.style.display="block"; $("confirmHereWrap").style.display="flex";
+  const label=EVENTS.find(x=>x.id===id).label;
+  $("thumbTitle").innerHTML=`<b>${label}</b> — 正しいコマをタップして確定`
+    + (id==="impact" ? `<br><span style="color:var(--alert);">インパクトは手動確定が必須です。
+       グリップ速度が最大のコマ(候補)はボール接触のコマとは一致しません。</span>` : "");
+  strip.innerHTML=""; thumbBusy=true;
+  video.pause();
+  const f=1/fps, W=132, Hh=Math.round(W/(videoAR||1.333));
+  const items=[];
+  for(let k=-5;k<=5;k++){
+    const d=document.createElement("div");
+    d.className="thumb"+(k===0?" cur":"");
+    d.innerHTML=`<canvas width="${W}" height="${Hh}"></canvas><div class="lb">…</div>`;
+    strip.appendChild(d); items.push({el:d,k});
+  }
+  for(const it of items){
+    const target=ev.t + it.k*f + f*0.25;
+    if(target<0||target>video.duration){ it.el.querySelector(".lb").textContent="—"; it.el.style.opacity=.35; continue; }
+    await seekTo(target);
+    const mt=await new Promise(res=>{
+      if(!("requestVideoFrameCallback" in HTMLVideoElement.prototype)) return res(video.currentTime);
+      let done=false; const tm=setTimeout(()=>{ if(!done){done=true;res(video.currentTime);} },250);
+      video.requestVideoFrameCallback((_n,meta)=>{ if(done) return; done=true; clearTimeout(tm); res(meta.mediaTime); });
+    });
+    const cv=it.el.querySelector("canvas");
+    const c2=cv.getContext("2d");
+    c2.save();
+    if(mirror){ c2.translate(cv.width,0); c2.scale(-1,1); }
+    try{ c2.drawImage(video,0,0,cv.width,cv.height); }catch(err){ console.warn("thumb draw failed",err); }
+    c2.restore();
+    it.t=mt; it.frame=Math.round(mt*fps);
+    it.el.querySelector(".lb").textContent=(it.k===0?"候補 ":"")+"コマ "+it.frame;
+    it.el.addEventListener("click",()=>confirmEvent(id, it.t, it.frame));
+  }
+  thumbBusy=false;
+  await seekTo(ev.t+0.25/fps); detectAndRender();
+}
+$("btnConfirmHere").addEventListener("click",()=>{
+  if(!selectedEvent){ toast("先にイベントを選んでください"); return; }
+  const t=(mediaTimeNow!=null?mediaTimeNow:video.currentTime);
+  confirmEvent(selectedEvent, t, Math.round(t*fps));
+});
+function confirmEvent(id,t,frame){
+  events[id]={ t, frame, confirmed:true, auto:false };
+  renderEvents(); saveDraft(); renderMetrics(); if(isTimingVisible()) drawTiming();
+  toast(`${EVENTS.find(x=>x.id===id).label} を コマ ${frame} で確定`);
+  video.pause(); seekTo(t+0.25/fps).then(detectAndRender);
+}
+const allRequiredConfirmed=()=> REQUIRED.every(id=>events[id]&&events[id].confirmed);
+
+/* ---- 作業中のイベントを一時保存(再読み込みで消えないように) ---- */
+const DRAFT="battinglab.draft.v1";
+function saveDraft(){
+  try{ lsSet(DRAFT, JSON.stringify({ file:currentFileName, events, dirManual, commitSource })); }catch{}
+}
+function loadDraft(){
+  try{
+    const d=JSON.parse(lsGet(DRAFT)||"null");
+    if(d && d.file && d.file===currentFileName && d.events){
+      events=d.events; dirManual=(d.dirManual??null); commitSource=d.commitSource||"grip";
+      renderEvents(); renderMetrics();
+      if(Object.keys(events).length) toast("前回のイベント指定を復元しました");
+    }
+  }catch{}
+}
+
+
+/* ============================================================
+   指標(仕様書 §5)
+   すべて平滑化後の系列・等方座標・身長比。時間は実時間(スロー補正込み)。
+   ============================================================ */
+const METRIC_ROWS = [
+  { k:"step_ratio",        label:"ステップ幅",                  unit:"%",       dec:1, cm:"step_cm", c:"step" },
+  { k:"head_fwd_impact",   label:"頭部の前後移動(インパクト時)", unit:"身長比",  dec:3, signed:true, c:"head" },
+  { k:"head_vert_impact",  label:"頭部の上下移動(インパクト時)", unit:"身長比",  dec:3, signed:true, c:"head" },
+  { k:"head_fwd_max",      label:"頭部の前方移動(最大)",         unit:"身長比",  dec:3, signed:true, c:"head" },
+  { k:"head_vert_drop",    label:"頭部の沈み込み(最大)",         unit:"身長比",  dec:3, signed:true, c:"head" },
+  { k:"knee_fs",           label:"接地時 前膝角度",             unit:"°",       dec:0, c:"knee" },
+  { k:"knee_impact",       label:"インパクト時 前膝角度",        unit:"°",       dec:0, c:"knee" },
+  { k:"knee_ext",          label:"前膝の伸展量",                unit:"°",       dec:0, signed:true, c:"knee" },
+  { k:"back_knee_fs",      label:"接地時 軸足膝角度",           unit:"°",       dec:0, c:"bknee" },
+  { k:"back_knee_impact",  label:"インパクト時 軸足膝角度",      unit:"°",       dec:0, c:"bknee" },
+  { k:"grip_speed_max",    label:"グリップ速度(最大)",          unit:"身長/秒", dec:2, c:"grip" },
+  { k:"grip_speed_impact", label:"グリップ速度(インパクト時)",   unit:"身長/秒", dec:2, c:"grip" },
+  { k:"base_pos_fs",       label:"支持基底内の身体中心(接地時)", unit:"",        dec:2, signed:true, c:"base" },
+  { k:"base_pos_impact",   label:"支持基底内の身体中心(インパクト時)", unit:"",  dec:2, signed:true, c:"base" },
+  { k:"top_lag_ms",        label:"トップのタイムラグ",           unit:"ms",      dec:0, signed:true, c:"top", timing:true },
+  { k:"Commit_to_FS_ms",   label:"始動→接地",                   unit:"ms",      dec:0, timing:true },
+  { k:"FS_to_Impact_ms",   label:"接地→インパクト",              unit:"ms",      dec:0, timing:true },
+  { k:"Commit_to_Impact_ms",label:"始動→インパクト",             unit:"ms",      dec:0, timing:true },
+];
+let metrics=null;
+
+function lmAt(id){ const e=events[id]; return e ? smoothedAt(e.t) : null; }
+const P2=(lm,i)=> (lm&&lm[i]) ? { x:lm[i].x*videoAR, y:lm[i].y } : null;
+const visOf=(lm,i)=> (lm&&lm[i]&&lm[i].visibility!=null) ? lm[i].visibility : (lm&&lm[i]?1:0);
+const minVis=(...pairs)=> pairs.reduce((m,[lm,i])=>Math.min(m, visOf(lm,i)), 1);
+/* 測定信頼度(仕様書 §2-6)。イベント未確定なら生信頼度によらず最大 Fair */
+function confLabel(v, eventsOk){
+  if(v==null||!isFinite(v)) return null;
+  let lab = v>=0.80?"Good" : v>=0.60?"Fair" : v>=0.40?"Poor" : "Invalid";
+  if(!eventsOk && lab==="Good") lab="Fair";
+  return lab;
+}
+
+function computeMetricsAll(){
+  const sg=ensureSignals();
+  if(!sg||!analysis||!analysis.H_norm) return null;
+  const { N, S, H, dir, grip, gripSpeed, hipOpen, gripFwd } = sg;
+  const hcm=currentBatter?currentBatter.height_cm:null;
+  const frontA=frontSideAnat(), backA=backSideAnat();
+  const iAnkF=idxOf("ankle",frontA), iAnkB=idxOf("ankle",backA);
+  const iKneeF=idxOf("knee",frontA), iHipF=idxOf("hip",frontA);
+  const iKneeB=idxOf("knee",backA),  iHipB=idxOf("hip",backA);
+  const A={ setup:lmAt("setup"), commit:lmAt("commit"), fs:lmAt("fs"),
+            impact:lmAt("impact"), finish:lmAt("finish") };
+  const m={}, conf={};
+  const iSetup=events.setup?indexAt(events.setup.t):0;
+  const iImpact=events.impact?indexAt(events.impact.t):-1;
+  const iFs=events.fs?indexAt(events.fs.t):-1;
+  const iCommit=events.commit?indexAt(events.commit.t):-1;
+
+  /* 5-1 ステップ幅 */
+  if(A.fs){
+    const a=P2(A.fs,iAnkF), b=P2(A.fs,iAnkB);
+    if(a&&b){
+      m.step_ratio=Math.abs(a.x-b.x)/H*100;
+      if(hcm) m.step_cm=m.step_ratio/100*hcm;
+      conf.step=minVis([A.fs,iAnkF],[A.fs,iAnkB]);
+    }
+  }
+  /* 5-2 頭部移動量 */
+  if(A.setup){
+    const n0=P2(A.setup,L.nose);
+    const headFwd=(lm)=>{ const n=P2(lm,L.nose); return (n&&n0)?dir*(n.x-n0.x)/H:null; };
+    const headVert=(lm)=>{ const n=P2(lm,L.nose); return (n&&n0)?(n0.y-n.y)/H:null; };
+    if(A.impact){
+      m.head_fwd_impact=headFwd(A.impact);
+      m.head_vert_impact=headVert(A.impact);
+      conf.head=minVis([A.setup,L.nose],[A.impact,L.nose]);
+    }
+    if(iImpact>=0){
+      let fMax=null, vMin=null;
+      for(let i=iSetup;i<=iImpact;i++){
+        const lm=S[i].lm; if(!lm) continue;
+        const f=headFwd(lm), v=headVert(lm);
+        if(f!=null&&(fMax==null||f>fMax)) fMax=f;
+        if(v!=null&&(vMin==null||v<vMin)) vMin=v;
+      }
+      m.head_fwd_max=fMax; m.head_vert_drop=vMin;
+    }
+  }
+  /* 5-3 / 5-4 膝角度 */
+  const kneeOf=(lm,iH,iK,iA)=>{ const h=P2(lm,iH), k=P2(lm,iK), a=P2(lm,iA);
+    return (h&&k&&a)?angle2(h,k,a):null; };
+  if(A.fs){ m.knee_fs=kneeOf(A.fs,iHipF,iKneeF,iAnkF);
+            m.back_knee_fs=kneeOf(A.fs,iHipB,iKneeB,iAnkB); }
+  if(A.impact){ m.knee_impact=kneeOf(A.impact,iHipF,iKneeF,iAnkF);
+                m.back_knee_impact=kneeOf(A.impact,iHipB,iKneeB,iAnkB); }
+  if(m.knee_fs!=null&&m.knee_impact!=null) m.knee_ext=m.knee_impact-m.knee_fs;
+  if(A.fs&&A.impact){
+    conf.knee=minVis([A.fs,iHipF],[A.fs,iKneeF],[A.fs,iAnkF],
+                     [A.impact,iHipF],[A.impact,iKneeF],[A.impact,iAnkF]);
+    conf.bknee=minVis([A.fs,iHipB],[A.fs,iKneeB],[A.fs,iAnkB],
+                      [A.impact,iHipB],[A.impact,iKneeB],[A.impact,iAnkB]);
+  }
+  /* 5-6 グリップ速度 */
+  if(iImpact>=0){
+    const from=iCommit>=0?iCommit:0;
+    let mx=null;
+    for(let i=from;i<=iImpact;i++){ const v=gripSpeed[i]; if(v!=null&&(mx==null||v>mx)) mx=v; }
+    m.grip_speed_max=mx;
+    m.grip_speed_impact=gripSpeed[iImpact]??null;
+    conf.grip=A.impact?minVis([A.impact,L.lWrist],[A.impact,L.rWrist]):null;
+  }
+  /* 5-7 支持基底内の身体中心(近似)。体重配分ではない */
+  const basePos=(lm)=>{
+    const hp=midOf(lm,L.lHip,L.rHip), f=P2(lm,iAnkF), b=P2(lm,iAnkB);
+    if(!hp||!f||!b) return null;
+    const den=f.x-b.x;
+    if(Math.abs(den)<1e-6) return null;
+    return (hp.x-b.x)/den;
+  };
+  if(A.fs) m.base_pos_fs=basePos(A.fs);
+  if(A.impact) m.base_pos_impact=basePos(A.impact);
+  if(A.fs&&A.impact) conf.base=minVis([A.fs,L.lHip],[A.fs,L.rHip],[A.fs,iAnkF],[A.fs,iAnkB]);
+
+  /* 5-5 トップ(割れ)のタイムラグ。
+     ⚠️ 3次元の捻転角度ではない。見かけの股関節幅から骨盤の開き始めを推定した2D近似。 */
+  let tPelvis=null, tGrip=null;
+  if(iImpact>=0){
+    const ip=onsetIndex(hipOpen, Math.max(1,iSetup), iImpact);
+    if(ip>=0) tPelvis=S[ip].t;
+    /* グリップが投手方向へ動き出した最初 */
+    const fwdPos=gripFwd.map(v=> v==null?null:Math.max(0,v));
+    const ig=onsetIndex(fwdPos, Math.max(1,iSetup), iImpact);
+    if(ig>=0) tGrip=S[ig].t;
+  }
+  if(tPelvis!=null&&tGrip!=null){
+    m.top_lag_ms=realSec(tGrip-tPelvis)*1000;
+    m.t_pelvis_open=tPelvis; m.t_grip_fwd=tGrip;
+    conf.top=A.impact?minVis([A.impact,L.lHip],[A.impact,L.rHip],[A.impact,L.lWrist],[A.impact,L.rWrist]):null;
+  }
+  /* 5-8 タイミング(実時間 ms、分解能に丸める) */
+  const resMs=1000/fps/slowFactor();
+  const round=(ms)=> ms==null?null:Math.round(ms/resMs)*resMs;
+  if(events.commit&&events.fs)     m.Commit_to_FS_ms=round(realSec(events.fs.t-events.commit.t)*1000);
+  if(events.fs&&events.impact)     m.FS_to_Impact_ms=round(realSec(events.impact.t-events.fs.t)*1000);
+  if(events.commit&&events.impact) m.Commit_to_Impact_ms=round(realSec(events.impact.t-events.commit.t)*1000);
+  if(m.top_lag_ms!=null) m.top_lag_ms=round(m.top_lag_ms);
+
+  /* 5-9 打球データ(任意入力) */
+  const ev=parseFloat($("exitVelo").value); if(isFinite(ev)) m.exit_velocity_kmh=ev;
+  const la=parseFloat($("launchAngle").value); if(isFinite(la)) m.launch_angle_deg=la;
+  const sd=$("sprayDir").value; if(sd) m.spray_dir=sd;
+
+  const eventsOk=allRequiredConfirmed();
+  const label={};
+  Object.entries(conf).forEach(([k,v])=>{ label[k]=confLabel(v,eventsOk); });
+  return { m, conf, label, resMs, dir, H, eventsOk,
+           calibrated:!!(currentBatter&&currentBatter.calibrated) };
+}
+
+function renderMetrics(){
+  metrics=computeMetricsAll();
+  const list=$("metricsList");
+  if(!metrics){
+    $("metricsTag").textContent="--";
+    list.innerHTML=`<span class="k" style="grid-column:span 2;">解析とイベントの検出が必要です</span>`;
+    $("metricsNote").textContent="";
+    renderTopLag(); renderKneeUse();
+    return;
+  }
+  const {m,conf,label,resMs,eventsOk}=metrics;
+  const n=METRIC_ROWS.filter(r=>m[r.k]!=null&&isFinite(m[r.k])).length;
+  $("metricsTag").textContent=`${n}/${METRIC_ROWS.length} 項目`;
+  list.innerHTML=METRIC_ROWS.map(r=>{
+    const v=m[r.k];
+    let txt="--", cls="na", badge="";
+    if(v!=null&&isFinite(v)){
+      const sign=(r.signed&&v>0)?"+":"";
+      txt=sign+v.toFixed(r.dec)+(r.unit?" "+r.unit:"");
+      if(r.cm&&m[r.cm]!=null) txt+=` (${m[r.cm].toFixed(1)}cm)`;
+      const lab=r.c?label[r.c]:null;
+      cls = lab==="Invalid" ? "warn" : lab==="Poor" ? "" : lab==="Fair" ? "mid" : "ok";
+      if(lab) badge=`<span class="lab-badge lab-${lab}">${lab}</span>`;
+      if(r.timing&&fps<60) cls="";
+    }
+    return `<span class="k">${r.label}</span><span class="v ${cls}">${txt}${badge}</span>`;
+  }).join("");
+  const warns=[];
+  if(!eventsOk) warns.push("<b>始動・接地・インパクトのいずれかが未確定です。</b>確定するまで測定信頼度は最大 Fair に落としています(イベントがずれていれば数値も同じだけずれるため)。この状態では保存できません");
+  if(fps<60) warns.push(`fps が ${fps.toFixed(0)} のため、タイミングの分解能は ±${resMs.toFixed(0)}ms です。<b>タイミング系の比較・判定は行わないでください</b>(スイングは始動からインパクトまで0.15〜0.2秒しかありません)`);
+  if(!metrics.calibrated) warns.push("未較正です。同じ打者の中での比較には影響しませんが、cm の絶対値は数%ずれます");
+  const bad=Object.entries(label).filter(([,v])=>v==="Poor"||v==="Invalid").map(([k])=>k);
+  if(bad.length) warns.push(`検出信頼度が低い項目があります(${bad.join(", ")})。Invalid の値は集計から除外してください`);
+  warns.push("<b>グリップ速度の最大値は平滑化のぶんだけ低めに出ます</b>(合成データでの実測 −5%)。スイングの加速は50msの平滑化窓と同じくらい短いためです。絶対値ではなく<b>本人の過去のスイングとの差</b>で見てください");
+  $("metricsNote").innerHTML=warns.map(w=>"・"+w).join("<br>");
+  renderTopLag(); renderKneeUse(); renderQuality(); renderRepeat();
+}
+
+/* 品質画面(仕様書 §11)。ランドマーク信頼度・測定信頼度・チェックリスト・fps警告 */
+const QUALITY_LM = [
+  { k:"nose",     label:"鼻(頭部)",    i:()=>L.nose },
+  { k:"shoulder", label:"肩(左右)",    i:()=>[L.lShoulder,L.rShoulder] },
+  { k:"wrist",    label:"手首(左右)",  i:()=>[L.lWrist,L.rWrist] },
+  { k:"hip",      label:"股関節(左右)",i:()=>[L.lHip,L.rHip] },
+  { k:"kneeF",    label:"前膝",        i:()=>idxOf("knee",frontSideAnat()) },
+  { k:"ankleF",   label:"前足首",      i:()=>idxOf("ankle",frontSideAnat()) },
+  { k:"ankleB",   label:"軸足首",      i:()=>idxOf("ankle",backSideAnat()) },
+];
+function renderQuality(){
+  const kv=$("qualityKv"), note=$("qualityNote"), tag=$("qualityTag");
+  if(!metrics||!smoothSeries.length){
+    tag.textContent="--";
+    kv.innerHTML=`<span class="k" style="grid-column:span 2;">解析とイベントの検出が必要です</span>`;
+    note.textContent=""; return;
+  }
+  /* イベント各コマのうち最も低い visibility を出す(いちばん厳しい側を見る) */
+  const frames=EVENTS.map(e=>events[e.id]?smoothedAt(events[e.id].t):null).filter(Boolean);
+  const rows=QUALITY_LM.map(d=>{
+    const idxs=[].concat(d.i());
+    let m=null;
+    for(const lm of frames) for(const i of idxs){
+      const v=visOf(lm,i);
+      if(v!=null) m=(m==null)?v:Math.min(m,v);
+    }
+    return {label:d.label, v:m};
+  });
+  const worst=rows.reduce((a,r)=>(r.v!=null&&(a==null||r.v<a))?r.v:a, null);
+  tag.textContent = worst==null?"--":confLabel(worst,true);
+  tag.style.color = worst==null?"":worst>=0.8?"var(--turf)":worst>=0.6?"var(--amber)":"var(--alert)";
+  const cls=(v)=> v==null?"na":v>=0.8?"ok":v>=0.6?"mid":"warn";
+  const ck=currentSession?(currentSession.checklist||{}):checklistState();
+  const CKL={frame:"全身が画角に入っている",light:"暗くない／逆光でない",
+             level:"カメラが水平",angle:"投手－捕手の線に直角"};
+  kv.innerHTML=
+     `<span class="k" style="grid-column:span 2;color:#5f6f68;font-size:11px;">ランドマーク信頼度(イベント各コマの最小)</span>`
+    + rows.map(r=>`<span class="k">${r.label}</span><span class="v ${cls(r.v)}">${
+        r.v==null?"--":r.v.toFixed(3)}</span>`).join("")
+    + `<span class="k" style="grid-column:span 2;color:#5f6f68;font-size:11px;padding-top:6px;">測定信頼度</span>`
+    + Object.entries(metrics.label).map(([k,v])=>
+        `<span class="k">${k}</span><span class="v ${v==="Good"?"ok":v==="Fair"?"mid":v==="Poor"?"":"warn"}">${v}</span>`).join("")
+    + `<span class="k" style="grid-column:span 2;color:#5f6f68;font-size:11px;padding-top:6px;">撮影チェックリスト</span>`
+    + Object.entries(CKL).map(([k,lab])=>
+        `<span class="k">${lab}</span><span class="v ${ck[k]?"ok":"na"}">${ck[k]?"✓":"未確認"}</span>`).join("")
+    + `<span class="k" style="grid-column:span 2;color:#5f6f68;font-size:11px;padding-top:6px;">撮影条件</span>`
+    + `<span class="k">fps</span><span class="v ${fps>=60?"ok":"warn"}">${fps.toFixed(fps%1?2:0)}${fps<60?" (不足)":""}</span>`
+    + `<span class="k">1コマの実時間</span><span class="v">${(1000/fps/slowFactor()).toFixed(1)} ms</span>`
+    + `<span class="k">骨格を検出できたコマ</span><span class="v ${
+        analysis&&analysis.detected/analysis.total>=0.9?"ok":"warn"}">${
+        analysis?`${analysis.detected}/${analysis.total}`:"--"}</span>`;
+  const bad=rows.filter(r=>r.v!=null&&r.v<0.6).map(r=>r.label);
+  const unck=Object.entries(CKL).filter(([k])=>!ck[k]).map(([,v])=>v);
+  const w=[];
+  if(bad.length) w.push(`<b>${bad.join("・")}</b> が隠れているか写っていない可能性があります。この点に依存する指標は参考程度にしてください`);
+  if(fps<60) w.push(`fps が ${fps.toFixed(0)} です。<b>タイミング系の比較・アラートは自動的に止めています</b>`);
+  if(unck.length) w.push(`撮影チェックリストが未確認です(${unck.join("・")})。数値がおかしいときは、まずここを疑ってください`);
+  note.innerHTML = w.length ? w.map(x=>"・"+x).join("<br>")
+    : "撮影条件・検出とも問題は見つかりませんでした。";
+}
+["exitVelo","launchAngle"].forEach(id=>$(id).addEventListener("input",renderMetrics));
+$("sprayDir").addEventListener("change",renderMetrics);
+
+/* ---- スイングの記録(仕様書 §7) ---- */
+$("btnSaveSwing").addEventListener("click",()=>withSaveLock("btnSaveSwing",async()=>{
+  if(!dbOk()) return;
+  if(!metrics){ toast("先に解析とイベントの検出を行ってください"); return; }
+  if(!currentBatter){ toast("先に打者を選択してください"); return; }
+  if(!currentSession){ toast("先にセッションを開始してください"); return; }
+  /* 念のための不変条件。ここが破れると別人のセッションに記録が混ざる */
+  if(currentSession.batter_id!==currentBatter.id){
+    setStatus("err","開いているセッションが別の打者のものです。セッションを開き直してください");
+    toast("セッションの打者が一致しません"); return; }
+  if(!allRequiredConfirmed()){
+    const miss=REQUIRED.filter(id=>!events[id]||!events[id].confirmed)
+      .map(id=>EVENTS.find(e=>e.id===id).label).join("・");
+    setStatus("err",`${miss} が未確定です。確定するまで保存できません`);
+    toast("必須イベントが未確定です"); return;
+  }
+  const pack=(lm)=> lm? lm.map(p=>p?[Math.round(p.x*1e4)/1e4,Math.round(p.y*1e4)/1e4,
+                                     Math.round((p.visibility==null?1:p.visibility)*1e3)/1e3]:null) : null;
+  const evOut={}, lmOut={};
+  EVENTS.forEach(ev=>{
+    const e=events[ev.id]; if(!e) return;
+    evOut[ev.id]={ frame:e.frame, t_sec:e.t, confirmed:!!e.confirmed };
+    lmOut[ev.id]=pack(smoothedAt(e.t));
+  });
+  const rec={
+    id:String(Date.now()), session_id:currentSession.id, batter_id:currentBatter.id,
+    /* 番号はセッションに実在するレコードの「最大値+1」。
+       件数+1 にすると、途中の1件を消したあとに番号が重複する(実測 [1,2,4,5,5])。
+       swing_ids を使わないのは、書き込みが競合すると実体とずれることがあるため */
+    swing_no:(await dbAll("swings")).filter(x=>x.session_id===currentSession.id)
+            .reduce((m,x)=>Math.max(m, x.swing_no||0), 0) + 1,
+    timestamp:Date.now(),
+    video_ref:currentFileName, fps, video_ar:videoAR,
+    calib:{ k_torso:currentBatter.k_torso||K_TORSO_DEFAULT, calibrated:!!currentBatter.calibrated,
+            T_norm:analysis.T_norm, H_norm:analysis.H_norm,
+            cm_per_unit:currentBatter.cm_per_unit??null,
+            dir:metrics.dir, dir_manual:dirManual!=null,
+            capture_fps:captureFps||null, slow_factor:slowFactor() },
+    events:evOut, commit_source:commitSource,
+    metrics:metrics.m, landmarks:lmOut,
+    quality:{ conf:metrics.conf, label:metrics.label,
+              checklist:currentSession.checklist||checklistState(), fps_warning:fps<60 },
+    note:"",
+  };
+  await dbPut("swings",rec);
+  currentSession.swing_ids=[...(currentSession.swing_ids||[]),rec.id];
+  await dbPut("sessions",currentSession);
+  await reloadSessions(); await renderSwingList(); await refreshData();
+  toast(`${rec.swing_no}本目として記録しました`);
+}));
+async function renderSwingList(){
+  const all=await dbAll("swings");
+  const mine=currentSession?all.filter(x=>x.session_id===currentSession.id):[];
+  $("swingCountTag").textContent=`${mine.length}本`;
+  $("swingList").innerHTML=mine.length?mine.slice(-6).reverse().map(x=>{
+    const g=x.metrics.grip_speed_max!=null?`グリップ${x.metrics.grip_speed_max.toFixed(2)}身長/秒`:"グリップ--";
+    const st=x.metrics.step_ratio!=null?` / ステップ${x.metrics.step_ratio.toFixed(0)}%`:"";
+    return `<div class="rowitem"><span><span class="nm">${x.swing_no}本目</span>
+      <span class="sub">${g}${st}</span></span>
+      <button class="sdel" data-id="${x.id}">削除</button></div>`;
+  }).join("") : `<div class="legend" style="padding:0;">まだ記録がありません。</div>`;
+}
+$("swingList").addEventListener("click",async(e)=>{
+  const b=e.target.closest(".sdel"); if(!b) return;
+  if(!dbOk()) return;
+  await dbDel("swings",b.dataset.id);
+  if(currentSession){ currentSession.swing_ids=(currentSession.swing_ids||[]).filter(i=>i!==b.dataset.id);
+    await dbPut("sessions",currentSession); }
+  await reloadSessions(); await renderSwingList(); await refreshData();
+});
+
+
+/* ============================================================
+   タイミングの可視化(仕様書 §11「タイミング」画面)
+   4つの量をそれぞれの最大値で正規化して重ね、動き出しの順序を見る。
+   ============================================================ */
+let timingView=null;
+function drawTiming(){
+  const cv=$("tgraph"), g=cv.getContext("2d"), W=cv.width, Hh=cv.height;
+  g.clearRect(0,0,W,Hh);
+  const PAD={l:34,r:10,t:12,b:24};
+  const sg=signals||ensureSignals();
+  if(!sg||!Object.keys(events).length){
+    $("timingTag").textContent="--";
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("解析とイベントの検出が必要です", W/2, Hh/2);
+    $("timingTable").innerHTML=""; $("tgraphLegend").innerHTML="";
+    return;
+  }
+  const S=sg.S, N=sg.N;
+  const t0=events.setup?events.setup.t:S[0].t;
+  const t1=events.finish?events.finish.t:S[N-1].t;
+  const span=Math.max(0.05,t1-t0);
+  const X=(t)=>PAD.l+(t-t0)/span*(W-PAD.l-PAD.r);
+  const Y=(v)=>Hh-PAD.b-v*(Hh-PAD.t-PAD.b);
+  timingView={t0,span};
+  /* 目盛り */
+  g.strokeStyle="#26362f"; g.lineWidth=1; g.fillStyle="#8fa39a"; g.font="10px monospace"; g.textAlign="center";
+  for(let i=0;i<=4;i++){
+    const t=t0+span*i/4, x=Math.round(X(t))+0.5;
+    g.beginPath(); g.moveTo(x,PAD.t); g.lineTo(x,Hh-PAD.b); g.stroke();
+    g.fillText(t.toFixed(2)+"s", x, Hh-7);
+  }
+  /* イベント線 */
+  const EVC={commit:"#f2b632",fs:"#5fbf7a",impact:"#e05a4e"};
+  const EVL={commit:"始動",fs:"接地",impact:"インパクト"};
+  g.setLineDash([3,3]);
+  ["commit","fs","impact"].forEach(id=>{
+    const e=events[id]; if(!e||e.t<t0||e.t>t1) return;
+    const x=Math.round(X(e.t))+0.5;
+    g.strokeStyle=EVC[id]; g.lineWidth=1.5;
+    g.beginPath(); g.moveTo(x,PAD.t); g.lineTo(x,Hh-PAD.b); g.stroke();
+    g.fillStyle=EVC[id]; g.textAlign="left"; g.fillText(EVL[id]+(e.confirmed?"✓":""), x+3, PAD.t+9);
+  });
+  g.setLineDash([]);
+  /* 4系列 */
+  const rows=[];
+  COMMIT_DEFS.forEach(d=>{
+    const v=sg[d.sig];
+    let pv=-Infinity;
+    for(let i=0;i<N;i++) if(v[i]!=null&&S[i].t>=t0&&S[i].t<=t1&&v[i]>pv) pv=v[i];
+    if(!(pv>1e-9)){ rows.push({d,onset:null,peak:null}); return; }
+    g.strokeStyle=d.color; g.lineWidth=1.8; g.lineJoin="round";
+    g.beginPath();
+    let started=false;
+    for(let i=0;i<N;i++){
+      if(v[i]==null||S[i].t<t0||S[i].t>t1) continue;
+      const x=X(S[i].t), y=Y(v[i]/pv);
+      started?g.lineTo(x,y):g.moveTo(x,y); started=true;
+    }
+    g.stroke();
+    const c=commitCands&&commitCands[d.key];
+    let peakT=null, bv=-Infinity;
+    for(let i=0;i<N;i++){ if(v[i]==null||S[i].t<t0||S[i].t>t1) continue; if(v[i]>bv){bv=v[i];peakT=S[i].t;} }
+    if(c){ const x=X(c.t); g.fillStyle=d.color; g.beginPath(); g.arc(x,Y(0)+0,4,0,Math.PI*2); g.fill(); }
+    rows.push({d,onset:c?c.t:null,peak:peakT});
+  });
+  /* 現在位置 */
+  const xc=Math.round(X(video.currentTime))+0.5;
+  if(xc>=PAD.l&&xc<=W-PAD.r){
+    g.strokeStyle="#eaf6f2"; g.lineWidth=1;
+    g.beginPath(); g.moveTo(xc,PAD.t); g.lineTo(xc,Hh-PAD.b); g.stroke();
+  }
+  $("tgraphLegend").innerHTML=COMMIT_DEFS.map(d=>
+    `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${d.color};margin-right:4px;"></span>${d.label}`
+  ).join("&nbsp;&nbsp;");
+
+  const m=metrics?metrics.m:{};
+  const cell=(v,suf)=> v==null?`<td class="v na">--</td>`:`<td class="v">${v>0?"+":""}${Math.round(v)}${suf||""}</td>`;
+  $("timingTable").innerHTML=
+    `<thead><tr><th style="text-align:left;">区間</th><th>実時間</th><th>コマ数</th></tr></thead><tbody>`
+    + [["始動→接地","Commit_to_FS_ms"],["接地→インパクト","FS_to_Impact_ms"],
+       ["始動→インパクト","Commit_to_Impact_ms"],["トップのタイムラグ","top_lag_ms"]]
+      .map(([nm,k])=>{
+        const v=m[k];
+        const fr=(v==null)?null:v/(1000/fps/slowFactor());
+        return `<tr><td class="nm">${nm}</td>${cell(v,"ms")}`
+          +(fr==null?`<td class="v na">--</td>`:`<td class="v">${fr>0?"+":""}${fr.toFixed(1)}</td>`)+`</tr>`;
+      }).join("")+`</tbody>`;
+  const res=1000/fps/slowFactor();
+  $("timingTag").textContent = fps<60 ? `分解能 ±${res.toFixed(0)}ms 不足` : `分解能 ±${res.toFixed(1)}ms`;
+  $("timingTag").style.color = fps<60 ? "var(--alert)" : "var(--turf)";
+}
+$("tgraph").addEventListener("pointerdown",(e)=>{
+  if(!timingView||!video.duration) return;
+  const cv=$("tgraph"), r=cv.getBoundingClientRect();
+  const px=(e.clientX-r.left)/r.width*cv.width;
+  const frac=(px-34)/(cv.width-44);
+  const t=timingView.t0+clamp(frac,0,1)*timingView.span;
+  video.pause(); video.currentTime=clamp(t,0,Math.max(0,video.duration-0.001));
+  updateTimeRead();
+});
+const isTimingVisible=()=>$("tab-timing").classList.contains("active");
+
+function renderTopLag(){
+  const el=$("topLagKv"), note=$("topLagNote"), tag=$("topLagTag");
+  const m=metrics?metrics.m:null;
+  if(!m||m.top_lag_ms==null){
+    el.innerHTML=`<span class="k" style="grid-column:span 2;">解析とイベントの検出が必要です</span>`;
+    note.textContent=""; tag.textContent="--"; return;
+  }
+  const lag=m.top_lag_ms;
+  tag.textContent=(lag>0?"+":"")+Math.round(lag)+"ms";
+  tag.style.color = lag>0 ? "var(--turf)" : "var(--alert)";
+  el.innerHTML=
+     `<span class="k">骨盤が開き始めた時刻</span><span class="v">${m.t_pelvis_open.toFixed(3)}s</span>`
+    +`<span class="k">グリップが投手方向へ動き出した時刻</span><span class="v">${m.t_grip_fwd.toFixed(3)}s</span>`
+    +`<span class="k">タイムラグ</span><span class="v ${lag>0?"ok":"warn"}">${lag>0?"+":""}${Math.round(lag)} ms</span>`;
+  note.innerHTML = (lag>0
+      ? `骨盤が先に開いてからグリップが出ています(割れができている向き)。`
+      : `グリップの方が先に出ています。値はそのまま表示しています。`)
+    + `<br>⚠️ <b>これは3次元の捻転角度ではありません。</b>
+       側面カメラでは骨盤の回旋そのものは測れないため、
+       <b>見かけの股関節幅が広がり始めた時刻</b>を骨盤の開き始めとして近似しています。
+       角度そのものは測っていません。<b>一律の目安値は設けていません</b>。
+       判定は本人の過去のスイングとの差で行ってください。`;
+}
+function renderKneeUse(){
+  const el=$("kneeUse"), note=$("kneeNote");
+  const m=metrics?metrics.m:null;
+  if(!m||m.knee_fs==null||m.knee_impact==null){
+    el.innerHTML=`<span class="k" style="grid-column:span 2;">指標の算出が必要です</span>`;
+    note.textContent=""; return;
+  }
+  const ext=m.knee_ext;
+  el.innerHTML=
+     `<span class="k">接地時の前膝</span><span class="v">${Math.round(m.knee_fs)}°</span>`
+    +`<span class="k">インパクト時の前膝</span><span class="v">${Math.round(m.knee_impact)}°</span>`
+    +`<span class="k">伸展量</span><span class="v ${ext<=0?"warn":"ok"}">${ext>0?"+":""}${Math.round(ext)}°</span>`;
+  note.innerHTML = ext<=0
+    ? `⚠️ 接地からインパクトにかけて<b>前膝が伸びていません</b>(曲がり続けています)。
+       方向性がはっきりしているため、本人比によらず注意として出しています(仕様書 §5-3)。<br>
+       ただし<b>何度伸びていれば良いという基準は設けていません</b>。`
+    : `接地からインパクトにかけて前膝が伸びています。<br>
+       <b>一律の目安角度は設けていません</b>(仕様書 §5-3)。
+       体格・柔軟性・打ち方で適正値が変わるため、この値は<b>本人の過去のスイングと比べて</b>使ってください。`;
+}
+
+/* ============================================================
+   再現性・本人比・アラート(仕様書 §6 / §9)
+   4階層(測定 → 比較 → 判定 → 解釈)を画面上も分けている。
+   このソフトが行うのは「判定」まで。解釈は人が行う。
+   仕様書 §10 は5段目にドリルを置いていたが、指導内容の提示は本ソフトの役目ではない
+   と判断して削除した。
+   ============================================================ */
+/* cv: 変動係数を出してよいか。0をまたぐ量には出さない(仕様書 §1 決定9) */
+const STAT_DEFS = [
+  { k:"step_ratio",         label:"ステップ幅",           unit:"%",       dec:1, c:"step",  cv:true },
+  { k:"grip_speed_max",     label:"グリップ速度(最大)",    unit:"身長/秒", dec:2, c:"grip",  cv:true },
+  { k:"grip_speed_impact",  label:"グリップ速度(接触時)",  unit:"身長/秒", dec:2, c:"grip",  cv:true },
+  { k:"knee_fs",            label:"接地時 前膝角度",       unit:"°",       dec:0, c:"knee",  cv:true },
+  { k:"knee_impact",        label:"接触時 前膝角度",       unit:"°",       dec:0, c:"knee",  cv:true },
+  { k:"back_knee_fs",       label:"接地時 軸足膝角度",     unit:"°",       dec:0, c:"bknee", cv:true },
+  { k:"back_knee_impact",   label:"接触時 軸足膝角度",     unit:"°",       dec:0, c:"bknee", cv:true },
+  { k:"knee_ext",           label:"前膝の伸展量",          unit:"°",       dec:0, c:"knee",  cv:false, signed:true },
+  { k:"head_fwd_impact",    label:"頭部の前後移動",        unit:"",        dec:3, c:"head",  cv:false, signed:true },
+  { k:"head_vert_impact",   label:"頭部の上下移動",        unit:"",        dec:3, c:"head",  cv:false, signed:true },
+  { k:"head_fwd_max",       label:"頭部の前方移動(最大)",  unit:"",        dec:3, c:"head",  cv:false, signed:true },
+  { k:"head_vert_drop",     label:"頭部の沈み込み(最大)",  unit:"",        dec:3, c:"head",  cv:false, signed:true },
+  { k:"base_pos_fs",        label:"身体中心(接地時)",      unit:"",        dec:2, c:"base",  cv:false, signed:true },
+  { k:"base_pos_impact",    label:"身体中心(接触時)",      unit:"",        dec:2, c:"base",  cv:false, signed:true },
+  { k:"top_lag_ms",         label:"トップのタイムラグ",    unit:"ms",      dec:0, c:"top",   cv:false, signed:true, timing:true },
+  { k:"Commit_to_FS_ms",    label:"始動→接地",            unit:"ms",      dec:0, c:null,    cv:true,  timing:true },
+  { k:"FS_to_Impact_ms",    label:"接地→接触",            unit:"ms",      dec:0, c:null,    cv:true,  timing:true },
+  { k:"Commit_to_Impact_ms",label:"始動→接触",            unit:"ms",      dec:0, c:null,    cv:true,  timing:true },
+];
+let batterSwings=[];   // 現在の打者の全スイング(古い順)
+
+/* Invalid の値と、必須イベント未確定のスイングは除く(仕様書 §6-1) */
+function collectValues(swings, def){
+  const out=[];
+  for(const s of swings){
+    const ev=s.events||{};
+    if(!(ev.commit?.confirmed && ev.fs?.confirmed && ev.impact?.confirmed)) continue;
+    const v=s.metrics?.[def.k];
+    if(v==null||!isFinite(v)) continue;
+    if(def.c && (s.quality?.label||{})[def.c]==="Invalid") continue;
+    out.push(v);
+  }
+  return out;
+}
+function statsOf(arr, allowCv){
+  const n=arr.length;
+  if(!n) return {n:0, mean:null, median:null, sd:null, cv:null};
+  const mean=arr.reduce((a,b)=>a+b,0)/n;
+  const s=[...arr].sort((a,b)=>a-b);
+  const median = n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2;
+  let sd=null;
+  if(n>=3){ sd=Math.sqrt(arr.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(n-1)); }   // 不偏
+  let cv=null;
+  if(allowCv && sd!=null && Math.abs(mean)>1e-9) cv=sd/Math.abs(mean)*100;
+  return {n, mean, median, sd, cv};
+}
+/* 成熟度(仕様書 §6-2)。ここを満たさないと比較もアラートも出さない */
+function maturityOf(n){
+  if(n<5)  return {level:0, label:"データ蓄積中", note:`あと${5-n}本で参考値としての比較を始めます`};
+  if(n<10) return {level:1, label:"参考",         note:`あと${10-n}本で通常の比較になります`};
+  return     {level:2, label:"通常",              note:"通常の比較を行っています"};
+}
+function baselineN(){
+  /* 比較の土台にする本数は「必須イベントが確定した保存済みスイング」の数 */
+  return batterSwings.filter(s=>{
+    const ev=s.events||{};
+    return ev.commit?.confirmed && ev.fs?.confirmed && ev.impact?.confirmed;
+  }).length;
+}
+async function reloadBatterSwings(){
+  if(!db||!currentBatter){ batterSwings=[]; return; }
+  const all=await dbAll("swings");
+  batterSwings=all.filter(s=>s.batter_id===currentBatter.id).sort((a,b)=>a.timestamp-b.timestamp);
+}
+
+/* ---- アラートのしきい値(仕様書 §9)。全て変更可能 ---- */
+const THR_DEFAULT = {
+  grip_speed_max:   { l1:-8,    l2:-15,   mode:"pct",   dir:"down", label:"グリップ速度(最大)" },
+  step_ratio:       { l1:3,     l2:6,     mode:"abs",   dir:"both", label:"ステップ幅",  unit:"pt" },
+  knee_ext:         { l1:-5,    l2:-10,   mode:"abs",   dir:"down", label:"前膝の伸展量", unit:"°" },
+  head_fwd_impact:  { l1:0.03,  l2:0.06,  mode:"abs",   dir:"both", label:"頭部の前方移動" },
+  head_vert_drop:   { l1:0.03,  l2:0.06,  mode:"abs",   dir:"both", label:"頭部の沈み込み" },
+  Commit_to_Impact_ms:{ l1:15,  l2:30,    mode:"abs",   dir:"both", label:"始動→接触", unit:"ms", timing:true },
+  top_lag_ms:       { l1:20,    l2:40,    mode:"abs",   dir:"both", label:"トップのタイムラグ", unit:"ms", timing:true },
+};
+let THR=JSON.parse(JSON.stringify(THR_DEFAULT));
+function loadThr(){
+  try{
+    const o=JSON.parse(lsGet("battinglab.thr.v1")||"null");
+    if(o) for(const k of Object.keys(THR)) if(o[k]){
+      if(isFinite(o[k].l1)) THR[k].l1=o[k].l1;
+      if(isFinite(o[k].l2)) THR[k].l2=o[k].l2;
+    }
+  }catch{}
+}
+function saveThr(){
+  const o={}; for(const k of Object.keys(THR)) o[k]={l1:THR[k].l1,l2:THR[k].l2};
+  try{ lsSet("battinglab.thr.v1", JSON.stringify(o)); }catch{}
+}
+
+/* 今回のスイングと直近10本の平均との差から、アラートの段階を決める */
+function computeAlerts(cur, recentMean){
+  const out=[];
+  const timingOk = fps>=60;
+  for(const [k,t] of Object.entries(THR)){
+    if(t.timing && !timingOk) continue;
+    const v=cur[k], base=recentMean[k];
+    if(v==null||!isFinite(v)||base==null||!isFinite(base)) continue;
+    const d=v-base;
+    let val, unit;
+    if(t.mode==="pct"){
+      if(Math.abs(base)<1e-9) continue;
+      val=d/Math.abs(base)*100; unit="%";
+    }else{ val=d; unit=t.unit||""; }
+    let level=0;
+    /* しきい値ちょうどの値は鳴らす。0.92-1.0 が -7.999999999999996 になるような
+       浮動小数の誤差で「-8%でL1」が鳴らないのを防ぐ */
+    const EPS=1e-9;
+    const hit=(thr)=> t.dir==="down" ? (val<=thr+EPS) : (Math.abs(val)>=Math.abs(thr)-EPS);
+    if(hit(t.l2)) level=2; else if(hit(t.l1)) level=1;
+    /* 伸展量が0以下(接地から接触にかけて前膝が曲がり続けている)は
+       方向性が明確なので、本人比によらず Level 1 を出す(仕様書 §9) */
+    if(k==="knee_ext" && v<=0 && level<1) level=1;
+    if(level>0) out.push({key:k, label:t.label, level, val, unit, cur:v, base});
+  }
+  /* Level 3(複合) */
+  const l2n=out.filter(a=>a.level>=2).length;
+  const gripDown=out.some(a=>a.key==="grip_speed_max"&&a.val<0);
+  const headUp  =out.some(a=>(a.key==="head_fwd_impact"||a.key==="head_vert_drop")&&Math.abs(a.val)>0);
+  const kneeDown=out.some(a=>a.key==="knee_ext"&&a.val<0);
+  const l3 = (l2n>=2) || (gripDown&&headUp&&kneeDown);
+  return { list:out.sort((a,b)=>b.level-a.level), level3:l3 };
+}
+
+function renderRepeat(){
+  const n=baselineN(), mat=maturityOf(n);
+  $("maturityTag").textContent=`${mat.label} n=${n}`;
+  $("maturityTag").style.color = mat.level===2?"var(--turf)":mat.level===1?"var(--amber)":"var(--chalk-dim)";
+  $("maturityKv").innerHTML=
+     `<span class="k">集計できるスイング数</span><span class="v ${n?'':'na'}">${n} 本</span>`
+    +`<span class="k">比較の状態</span><span class="v ${mat.level===2?'ok':mat.level===1?'mid':'na'}">${mat.label}</span>`;
+  $("maturityBar").style.width=Math.min(100,n/10*100)+"%";
+  $("maturityNote").innerHTML = mat.level===0
+    ? `<b>まだ比較もアラートも出しません。</b>${mat.note}。<br>
+       本数が少ないうちの平均は、たまたま出た値に強く引きずられます。`
+    : mat.level===1
+    ? `<b>参考値として比較しています。</b>${mat.note}。`
+    : `${mat.note}。しきい値は「設定」タブで本人のSDに合わせて調整してください。`;
+
+  /* 集計表 */
+  const cur=metrics?metrics.m:{};
+  const rows=[], recentMean={}, allMean={};
+  for(const d of STAT_DEFS){
+    const all=collectValues(batterSwings,d);
+    const rec=collectValues(batterSwings.slice(-10),d);
+    const st=statsOf(all,d.cv), sr=statsOf(rec,d.cv);
+    allMean[d.k]=st.mean; recentMean[d.k]=sr.mean;
+    rows.push({d,st,sr});
+  }
+  const num=(v,dec,signed)=> (v==null||!isFinite(v))?`<td class="v na">--</td>`
+    :`<td class="v">${signed&&v>0?"+":""}${v.toFixed(dec)}</td>`;
+  $("statTable").innerHTML=
+    `<thead><tr><th style="text-align:left;">指標</th><th>平均</th><th>中央値</th><th>SD</th><th>CV</th><th>n</th></tr></thead><tbody>`
+    + rows.map(({d,st})=>
+        `<tr><td class="nm">${d.label}${d.unit?` <span style="color:#4d5a55;">${d.unit}</span>`:""}</td>`
+        + num(st.mean,d.dec,d.signed) + num(st.median,d.dec,d.signed) + num(st.sd,d.dec)
+        + (d.cv ? num(st.cv,1) : `<td class="v na" title="0をまたぐ量のためCVは出しません">—</td>`)
+        + `<td class="v${st.n?"":" na"}">${st.n}</td></tr>`
+      ).join("") + `</tbody>`;
+
+  /* 本人比 */
+  const showDelta = mat.level>0 && metrics;
+  $("deltaTag").textContent = showDelta ? "比較レイヤー" : "比較しません";
+  $("deltaTable").innerHTML = !showDelta
+    ? `<tbody><tr><td class="nm" style="padding:10px 6px;">${metrics?`${mat.note}。`:"先に解析とイベントの確定を行ってください。"}</td></tr></tbody>`
+    : `<thead><tr><th style="text-align:left;">指標</th><th>今回</th><th>平均との差</th><th>直近10本との差</th></tr></thead><tbody>`
+      + rows.map(({d,st,sr})=>{
+          const v=cur[d.k];
+          const dA=(v!=null&&st.mean!=null)?v-st.mean:null;
+          const dR=(v!=null&&sr.mean!=null)?v-sr.mean:null;
+          const cell=(x)=> x==null?`<td class="v na">--</td>`
+            :`<td class="v">${x>0?"+":""}${x.toFixed(d.dec)}</td>`;
+          return `<tr><td class="nm">${d.label}</td>`+num(v,d.dec,d.signed)+cell(dA)+cell(dR)+`</tr>`;
+        }).join("") + `</tbody>`;
+
+  /* アラート */
+  const alertBox=$("alertList"), note=$("alertNote");
+  if(!metrics || mat.level===0){
+    $("alertTag").textContent="出しません";
+    $("alertTag").style.color="var(--chalk-dim)";
+    alertBox.innerHTML=`<div class="legend" style="padding:0;">${
+      !metrics?"先に解析とイベントの確定を行ってください。"
+              :`ベースラインが足りないためアラートは出していません(${mat.note})。`}</div>`;
+    note.innerHTML="";
+    return;
+  }
+  const A=computeAlerts(cur,recentMean);
+  $("alertTag").textContent = A.level3?"Level 3":A.list.length?`Level ${Math.max(...A.list.map(a=>a.level))}`:"なし";
+  $("alertTag").style.color = A.level3?"var(--alert)":A.list.length?(Math.max(...A.list.map(a=>a.level))>=2?"var(--alert)":"var(--amber)"):"var(--turf)";
+  const col=(l)=> l>=2?"var(--alert)":"var(--amber)";
+  alertBox.innerHTML =
+    (A.level3?`<div class="rowitem" style="border-color:var(--alert);">
+        <span><span class="nm" style="color:var(--alert);">Level 3(複合)</span><br>
+        <span class="sub">複数の指標が同時に動いています</span></span></div>`:"")
+    + (A.list.length ? A.list.map(a=>
+        `<div class="rowitem" style="border-left:3px solid ${col(a.level)};">
+          <span><span class="nm">${a.label}</span><br>
+          <span class="sub">今回 ${a.cur.toFixed(3)} / 直近10本 ${a.base.toFixed(3)}</span></span>
+          <span class="sub" style="color:${col(a.level)};">L${a.level} ${a.val>0?"+":""}${a.val.toFixed(a.unit==="%"?1:3)}${a.unit}</span>
+        </div>`).join("")
+      : `<div class="legend" style="padding:0;color:var(--turf);">本人のいつもの範囲内です。</div>`);
+  const skipped = fps<60 ? "・fps が60未満のため、タイミング系のアラートは出していません" : "";
+  note.innerHTML=`アラートは<b>「本人の直近10本と違う」</b>と言っているだけです。
+    良し悪しも原因も判定していません。${skipped?"<br>"+skipped:""}
+    <br>しきい値は「設定」タブで変更できます。本人のSDより小さい値にすると、
+    ただの測定のばらつきで鳴り続けます。`;
+}
+
+/* ============================================================
+   2スイングの比較
+   保存済みレコードのイベントフレームの骨格だけを使う。
+   それぞれの H_norm(胴体長基準)で割ってから重ねるので、撮影距離が違っても比べられる。
+   ⚠️ カメラの角度が違うと形そのものが変わるので、そこは補正できない。
+   ============================================================ */
+const CMP_COLORS={A:"#48c9d8", B:"#f2b632"};
+let cmpRecords=[], cmpTouched=false;
+
+function cmpLabel(r){
+  const d=new Date(r.timestamp);
+  const md=`${d.getMonth()+1}/${d.getDate()}`;
+  const g=r.metrics?.grip_speed_max!=null?` グリップ${r.metrics.grip_speed_max.toFixed(2)}`:"";
+  return `${md} ${r.swing_no}本目${g}`;
+}
+async function reloadCompare(){
+  const selA=$("cmpA"), selB=$("cmpB");
+  if(!selA) return;
+  cmpRecords=[...batterSwings].reverse();            // 新しい順
+  const keep={a:selA.value, b:selB.value};
+  const opts=cmpRecords.map(r=>`<option value="${r.id}">${escapeHtml(cmpLabel(r))}</option>`).join("");
+  selA.innerHTML=opts; selB.innerHTML=opts;
+  if(!cmpRecords.length){
+    selA.innerHTML=selB.innerHTML=`<option value="">記録がありません</option>`;
+  }else{
+    const has=(id)=>cmpRecords.some(r=>r.id===id);
+    if(cmpTouched && has(keep.a) && has(keep.b)){
+      selA.value=keep.a; selB.value=keep.b;          // ユーザーが選んだものを保つ
+    }else{
+      /* 既定は B=いちばん新しい、A=その1つ前。記録が増えるたび B が最新に追従する */
+      selB.value=cmpRecords[0].id;
+      selA.value=(cmpRecords[1]||cmpRecords[0]).id;
+    }
+    /* 同じスイングどうしになってしまったら、別のものにずらす */
+    if(selA.value===selB.value && cmpRecords.length>=2){
+      const other=cmpRecords.find(r=>r.id!==selB.value);
+      if(other) selA.value=other.id;
+    }
+  }
+  const ev=$("cmpEvent");
+  if(ev && !ev.options.length)
+    ev.innerHTML=EVENTS.map(e=>`<option value="${e.id}"${e.id==="impact"?" selected":""}>${e.label}</option>`).join("");
+  drawCompare();
+}
+/* 保存形式 [x,y,vis] を等方座標にして、基準点を原点、身長=1 に正規化する */
+function cmpPoints(rec, evId, anchorKind){
+  const lm=rec.landmarks?.[evId];
+  if(!lm) return null;
+  const AR=rec.video_ar||1, H=rec.calib?.H_norm;
+  if(!H||!(H>0)) return null;
+  const P=(i)=>{ const q=lm[i]; return q?{x:q[0]*AR, y:q[1], v:q[2]}:null; };
+  const mid=(a,b)=>{ const A=P(a),B=P(b); return (A&&B)?{x:(A.x+B.x)/2,y:(A.y+B.y)/2}:null; };
+  let anchor=null;
+  if(anchorKind==="pelvis") anchor=mid(L.lHip,L.rHip);
+  else if(anchorKind==="shoulder") anchor=mid(L.lShoulder,L.rShoulder);
+  else anchor=mid(L.lAnkle,L.rAnkle);
+  if(!anchor) anchor=mid(L.lHip,L.rHip);
+  if(!anchor) return null;
+  const out=new Array(33).fill(null);
+  for(let i=0;i<33;i++){ const q=P(i); if(!q) continue;
+    out[i]={ x:(q.x-anchor.x)/H, y:(q.y-anchor.y)/H, v:q.v }; }
+  return out;
+}
+function drawCompare(){
+  const cv=$("cmpCanvas"); if(!cv) return;
+  const g=cv.getContext("2d"), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
+  const a=cmpRecords.find(r=>r.id===$("cmpA").value);
+  const b=cmpRecords.find(r=>r.id===$("cmpB").value);
+  const evId=$("cmpEvent").value||"impact";
+  const anchor=$("cmpAnchor").value;
+  const leg=$("cmpLegend");
+  if(!a||!b){
+    $("cmpTag").textContent="--";
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("スイングを2本以上記録すると比べられます", W/2, H/2);
+    if(leg) leg.innerHTML=""; $("cmpTable").innerHTML=""; $("cmpDiffTag").textContent="--";
+    return;
+  }
+  const pa=cmpPoints(a,evId,anchor), pb=cmpPoints(b,evId,anchor);
+  $("cmpTag").textContent = (a.id===b.id) ? "同じスイングです" : `${EVENTS.find(e=>e.id===evId)?.label||evId}`;
+  if(!pa||!pb){
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("このイベントは片方に保存されていません", W/2, H/2);
+    if(leg) leg.innerHTML=""; renderCmpTable(a,b); return;
+  }
+  /* 2体を囲む枠を求めて、それが画面いっぱいになるように収める。
+     縦横は同じ縮尺(単位が同じ身長比なので、変えると形が歪む)。 */
+  const PAD=16;
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  [pa,pb].forEach(P=>P.forEach(q=>{ if(!q||q.v<0.3) return;
+    if(q.x<minX)minX=q.x; if(q.x>maxX)maxX=q.x;
+    if(q.y<minY)minY=q.y; if(q.y>maxY)maxY=q.y; }));
+  if(!isFinite(minX)){
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("骨格を検出できたランドマークがありません", W/2, H/2);
+    if(leg) leg.innerHTML=""; renderCmpTable(a,b); return;
+  }
+  const spanX=Math.max(0.25,maxX-minX), spanY=Math.max(0.25,maxY-minY);
+  const sc=Math.min((W-PAD*2)/spanX, (H-PAD*2)/spanY);
+  const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  const X=(v)=>W/2+(v-cx)*sc, Y=(v)=>H/2+(v-cy)*sc;
+  const ox=X(0), oy=Y(0);
+  g.strokeStyle="#1e2b26"; g.lineWidth=1;
+  for(let k=-20;k<=20;k++){ const y=Math.round(Y(k*0.1))+0.5;
+    if(y<PAD||y>H-PAD) continue;
+    g.beginPath(); g.moveTo(PAD,y); g.lineTo(W-PAD,y); g.stroke(); }
+  const drawOne=(P,color,width)=>{
+    g.strokeStyle=color; g.lineWidth=width; g.lineCap="round";
+    SKELETON_LINES.forEach(([i,j])=>{
+      const A=P[i],B=P[j]; if(!A||!B) return;
+      if(A.v<0.3||B.v<0.3) return;
+      g.beginPath(); g.moveTo(X(A.x),Y(A.y)); g.lineTo(X(B.x),Y(B.y)); g.stroke();
+    });
+    P.forEach((q,i)=>{ if(!q||i>32||q.v<0.3) return;
+      g.fillStyle=color; g.beginPath(); g.arc(X(q.x),Y(q.y),2.6,0,Math.PI*2); g.fill(); });
+    /* グリップ(両手首中点)を強調する。打撃ではここが基準点になるため */
+    const lw=P[L.lWrist], rw=P[L.rWrist];
+    if(lw&&rw){ g.strokeStyle=color; g.lineWidth=1.6;
+      g.beginPath(); g.arc(X((lw.x+rw.x)/2),Y((lw.y+rw.y)/2),6,0,Math.PI*2); g.stroke(); }
+  };
+  drawOne(pa, CMP_COLORS.A, 2.6);
+  drawOne(pb, CMP_COLORS.B, 2.6);
+  g.strokeStyle="#e9ede9"; g.lineWidth=1;
+  g.beginPath(); g.moveTo(ox-7,oy); g.lineTo(ox+7,oy);
+  g.moveTo(ox,oy-7); g.lineTo(ox,oy+7); g.stroke();
+  if(leg) leg.innerHTML =
+     `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${CMP_COLORS.A};margin-right:4px;"></span>A ${escapeHtml(cmpLabel(a))}`
+    +`&nbsp;&nbsp;<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${CMP_COLORS.B};margin-right:4px;"></span>B ${escapeHtml(cmpLabel(b))}`
+    +`<br><span style="color:#5f6f68;">横線は身長比 0.1 ごと。＋印が重ねる基準点、丸がグリップです。</span>`;
+  renderCmpTable(a,b);
+}
+function renderCmpTable(a,b){
+  const t=$("cmpTable"); if(!t) return;
+  let n=0;
+  const rows=STAT_DEFS.map(d=>{
+    const va=a.metrics?.[d.k], vb=b.metrics?.[d.k];
+    const ok=(va!=null&&isFinite(va)&&vb!=null&&isFinite(vb));
+    if(ok) n++;
+    const cell=(v)=> (v==null||!isFinite(v))?`<td class="v na">--</td>`
+      :`<td class="v">${d.signed&&v>0?"+":""}${v.toFixed(d.dec)}</td>`;
+    const diff=ok?vb-va:null;
+    return `<tr><td class="nm">${d.label}${d.unit?` <span style="color:#4d5a55;">${d.unit}</span>`:""}</td>`
+      + cell(va) + cell(vb)
+      + (diff==null?`<td class="v na">--</td>`
+         :`<td class="v"${Math.abs(diff)>1e-9?' style="color:var(--amber);"':''}>${diff>0?"+":""}${diff.toFixed(d.dec)}</td>`)
+      + `</tr>`;
+  }).join("");
+  $("cmpDiffTag").textContent = n?`${n}項目`:"--";
+  t.innerHTML=`<thead><tr><th style="text-align:left;">指標</th>
+    <th style="color:${CMP_COLORS.A};">A</th><th style="color:${CMP_COLORS.B};">B</th>
+    <th>B − A</th></tr></thead><tbody>${rows}</tbody>`;
+}
+["cmpA","cmpB"].forEach(id=>{
+  const e=$(id); if(e) e.addEventListener("change",()=>{ cmpTouched=true; drawCompare(); });
+});
+["cmpEvent","cmpAnchor"].forEach(id=>{
+  const e=$(id); if(e) e.addEventListener("change",drawCompare);
+});
+
+/* ---- セッション概要。いま開いているセッションの要約 ---- */
+async function renderSummary(){
+  const kv=$("sumKv"), note=$("sumNote"), tag=$("sumTag");
+  if(!kv) return;
+  if(!currentSession){
+    tag.textContent="--";
+    kv.innerHTML=`<span class="k" style="grid-column:span 2;">セッションを開始すると表示されます</span>`;
+    note.textContent=""; return;
+  }
+  const all=await dbAll("swings");
+  const mine=all.filter(x=>x.session_id===currentSession.id).sort((a,b)=>a.swing_no-b.swing_no);
+  tag.textContent=`${mine.length}本`;
+  const hcm=currentBatter?currentBatter.height_cm:null;
+  const cal=!!(currentBatter&&currentBatter.calibrated);
+  const def=(k)=>STAT_DEFS.find(d=>d.k===k);
+  const st=(k)=>statsOf(collectValues(mine,def(k)),false);
+  const gs=st("grip_speed_max"), sr=st("step_ratio"), tl=st("top_lag_ms"), ci=st("Commit_to_Impact_ms");
+  const grips=collectValues(mine,def("grip_speed_max"));
+  /* 打球データは任意入力なので、入っている本数を併記する */
+  const ev=mine.map(x=>x.metrics?.exit_velocity_kmh).filter(v=>v!=null&&isFinite(v));
+  const f=(v,d,suf)=> (v==null||!isFinite(v))?`<span class="v na">--</span>`
+    :`<span class="v">${v.toFixed(d)}${suf||""}</span>`;
+  const t0=currentSession.started_at;
+  const t1=mine.length?mine[mine.length-1].timestamp:(currentSession.ended_at||Date.now());
+  const mins=Math.max(0,Math.round((t1-t0)/60000));
+  kv.innerHTML=
+     `<span class="k">スイング数</span><span class="v">${mine.length} 本</span>`
+    +`<span class="k">平均グリップ速度(最大)</span>${f(gs.mean,2," 身長/秒")}`
+    +`<span class="k">最も速かったスイング</span>${grips.length?`<span class="v ok">${Math.max(...grips).toFixed(2)} 身長/秒</span>`:`<span class="v na">--</span>`}`
+    +`<span class="k">平均ステップ幅</span>${sr.mean!=null?`<span class="v">${sr.mean.toFixed(1)} %${
+        (hcm&&cal)?` <span style="color:#5f6f68;">(${(sr.mean/100*hcm).toFixed(1)}cm)</span>`:""}</span>`:`<span class="v na">--</span>`}`
+    +`<span class="k">平均 始動→インパクト</span>${f(ci.mean,0," ms")}`
+    +`<span class="k">平均 トップのタイムラグ</span>${f(tl.mean,0," ms")}`
+    +`<span class="k">打球初速の入力</span><span class="v ${ev.length?"":"na"}">${ev.length}/${mine.length} 本</span>`
+    +`<span class="k">平均打球初速</span>${ev.length?`<span class="v">${(ev.reduce((a,b)=>a+b,0)/ev.length).toFixed(1)} km/h</span>`:`<span class="v na">--</span>`}`
+    +`<span class="k">経過時間</span><span class="v">${mins} 分</span>`;
+  const w=[];
+  if(fps<60) w.push(`fps が ${fps.toFixed(0)} のため、タイミング系の平均(始動→インパクト・トップのタイムラグ)は<b>分解能不足</b>です`);
+  if(!cal) w.push("未較正のため cm 換算は表示していません");
+  if(!ev.length&&mine.length) w.push("打球データが入力されていません。「指標」タブで任意に入力できます");
+  note.innerHTML = w.length ? w.map(x=>"・"+x).join("<br>")
+    : "このセッションで記録したスイングの要約です。他人の値とは比べていません。";
+}
+
+/* ---- 後半スイングにおける動作変化(仕様書 §6-3) ---- */
+const BLOCK_DEFS=["grip_speed_max","step_ratio","knee_ext","head_fwd_impact","Commit_to_Impact_ms"];
+const BLOCK_COLORS=["#f2b632","#48c9d8","#5fbf7a","#9b7ede","#e05a4e"];
+/* 単位がばらばらなので、第1ブロックからの変化率[%]で重ねる。
+   絶対値は下の表で見る。0付近の量は%が発散するので系列ごと外す。 */
+function drawBlockChart(blocks, defs){
+  const cv=$("blockChart"); if(!cv) return;
+  const g=cv.getContext("2d"), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
+  const PAD={l:46,r:12,t:14,b:28};
+  const leg=$("blockLegend");
+  if(!blocks||blocks.length<2){
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("2ブロック(20本)以上で推移を表示します", W/2, H/2);
+    if(leg) leg.innerHTML=""; return;
+  }
+  const series=[];
+  defs.forEach((d,i)=>{
+    const ms=blocks.map(b=>statsOf(collectValues(b,d),false).mean);
+    const v0=ms[0];
+    if(v0==null||!isFinite(v0)||Math.abs(v0)<1e-6){ series.push({d,skip:true}); return; }
+    series.push({ d, color:BLOCK_COLORS[i%BLOCK_COLORS.length],
+                  pts:ms.map(v=> (v==null||!isFinite(v))?null:(v-v0)/Math.abs(v0)*100) });
+  });
+  let lim=5;
+  series.forEach(s=>{ if(s.skip) return; s.pts.forEach(v=>{ if(v!=null) lim=Math.max(lim,Math.abs(v)); }); });
+  lim*=1.15;
+  const pw=W-PAD.l-PAD.r, ph=H-PAD.t-PAD.b;
+  const X=(i)=>PAD.l+(blocks.length===1?pw/2:i/(blocks.length-1)*pw);
+  const Y=(v)=>PAD.t+ph/2-(v/lim)*(ph/2);
+  g.strokeStyle="#26362f"; g.lineWidth=1;
+  [-lim/2,0,lim/2].forEach(v=>{ const y=Math.round(Y(v))+0.5;
+    g.beginPath(); g.moveTo(PAD.l,y); g.lineTo(W-PAD.r,y); g.stroke(); });
+  g.strokeStyle="#3a4a44"; g.lineWidth=1.5;
+  g.beginPath(); g.moveTo(PAD.l,Math.round(Y(0))+0.5); g.lineTo(W-PAD.r,Math.round(Y(0))+0.5); g.stroke();
+  g.fillStyle="#8fa39a"; g.font="10px monospace"; g.textAlign="right";
+  [lim/2,0,-lim/2].forEach(v=>g.fillText((v>0?"+":"")+v.toFixed(1)+"%", PAD.l-6, Y(v)+3));
+  /* 端のラベルが切れないように寄せ方を変える */
+  blocks.forEach((b,i)=>{
+    const x=X(i);
+    g.textAlign = x<PAD.l+26 ? "left" : (x>W-PAD.r-26 ? "right" : "center");
+    g.fillText(`${i*10+1}〜${i*10+b.length}`, x, H-8);
+  });
+  series.forEach(s=>{
+    if(s.skip) return;
+    g.strokeStyle=s.color; g.lineWidth=2; g.lineJoin="round";
+    g.beginPath(); let started=false;
+    s.pts.forEach((v,i)=>{ if(v==null) return;
+      const x=X(i), y=Y(v); started?g.lineTo(x,y):g.moveTo(x,y); started=true; });
+    g.stroke();
+    s.pts.forEach((v,i)=>{ if(v==null) return;
+      g.fillStyle=s.color; g.beginPath(); g.arc(X(i),Y(v),3.2,0,Math.PI*2); g.fill(); });
+  });
+  if(leg) leg.innerHTML = series.map(s=> s.skip
+    ? `<span style="color:#3d4a45;">${s.d.label}(0付近のため非表示)</span>`
+    : `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${s.color};margin-right:4px;"></span>${s.d.label}`
+  ).join("&nbsp;&nbsp;")
+  + `<br><span style="color:#5f6f68;">第1ブロックからの変化率です。絶対値は下の表を見てください。</span>`;
+}
+async function renderBlocks(){
+  const t=$("blockTable");
+  const defs=STAT_DEFS.filter(d=>BLOCK_DEFS.includes(d.k));
+  if(!currentSession){ $("blockTag").textContent="--";
+    t.innerHTML=`<tbody><tr><td class="nm" style="padding:10px 6px;">セッションを開始すると表示されます。</td></tr></tbody>`;
+    drawBlockChart(null,defs); return; }
+  const all=await dbAll("swings");
+  const mine=all.filter(s=>s.session_id===currentSession.id).sort((a,b)=>a.swing_no-b.swing_no);
+  if(mine.length<10){ $("blockTag").textContent=`${mine.length}/10本`;
+    t.innerHTML=`<tbody><tr><td class="nm" style="padding:10px 6px;">
+      10本ごとに区切って比べます。あと${10-mine.length}本です。</td></tr></tbody>`;
+    drawBlockChart(null,defs); return; }
+  const blocks=[];
+  for(let i=0;i<mine.length;i+=10) blocks.push(mine.slice(i,i+10));
+  $("blockTag").textContent=`${blocks.length}ブロック / ${mine.length}本`;
+  drawBlockChart(blocks, defs);
+  t.innerHTML=`<thead><tr><th style="text-align:left;">指標</th>`
+    + blocks.map((b,i)=>`<th>${i*10+1}〜${i*10+b.length}</th>`).join("")
+    + `<th>1→最後</th></tr></thead><tbody>`
+    + defs.map(d=>{
+        const ms=blocks.map(b=>statsOf(collectValues(b,d),false).mean);
+        const first=ms[0], last=ms[ms.length-1];
+        const diff=(first!=null&&last!=null)?last-first:null;
+        return `<tr><td class="nm">${d.label}</td>`
+          + ms.map(m=> m==null?`<td class="v na">--</td>`:`<td class="v">${m.toFixed(d.dec)}</td>`).join("")
+          + (diff==null?`<td class="v na">--</td>`:`<td class="v">${diff>0?"+":""}${diff.toFixed(d.dec)}</td>`)
+          + `</tr>`;
+      }).join("") + `</tbody>`;
+}
+
+/* ---- しきい値の編集UI ---- */
+function renderThr(){
+  const t=$("thrTable");
+  t.innerHTML=`<thead><tr><th style="text-align:left;">指標</th><th>Level 1</th><th>Level 2</th></tr></thead><tbody>`
+    + Object.entries(THR).map(([k,v])=>{
+        const u=v.mode==="pct"?"%":(v.unit||"");
+        const inp=(lv)=>`<input type="number" step="0.01" data-thr="${k}" data-lv="${lv}" value="${v[lv]}"
+          style="width:72px;background:var(--bg-1);border:1px solid var(--panel-line);color:var(--chalk);
+                 border-radius:6px;min-height:36px;padding:0 6px;font-size:12px;font-family:inherit;text-align:right;">`;
+        return `<tr><td class="nm">${v.label}${v.timing?' <span style="color:#4d5a55;">(fps≥60のみ)</span>':""}</td>`
+          +`<td>${inp("l1")}${u}</td><td>${inp("l2")}${u}</td></tr>`;
+      }).join("") + `</tbody>`;
+}
+$("thrTable").addEventListener("input",(e)=>{
+  const i=e.target.closest("input[data-thr]"); if(!i) return;
+  const v=parseFloat(i.value);
+  if(!isFinite(v)) return;
+  THR[i.dataset.thr][i.dataset.lv]=v; saveThr(); renderRepeat();
+});
+$("btnThrReset").addEventListener("click",()=>{
+  THR=JSON.parse(JSON.stringify(THR_DEFAULT)); saveThr(); renderThr(); renderRepeat();
+  toast("初期値に戻しました");
+});
+
+/* ============================================================
+   書き出し・読み込み(仕様書 §7 / §8)。すべて端末内で完結する。
+   ============================================================ */
+function download(name, text, mime){
+  const blob=new Blob([text],{type:mime});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); },1500);
+}
+const CSV_COLS = ["date","session_id","swing_no","batter_name","height_cm","bats","fps","capture_fps",
+  "slow_factor","calibrated","Commit_to_FS_ms","FS_to_Impact_ms","Commit_to_Impact_ms","top_lag_ms",
+  "step_ratio","step_cm","head_fwd_impact","head_vert_impact","head_fwd_max","head_vert_drop",
+  "knee_fs","knee_impact","knee_ext","back_knee_fs","back_knee_impact",
+  "grip_speed_max","grip_speed_impact","base_pos_fs","base_pos_impact","commit_source",
+  "exit_velocity_kmh","launch_angle_deg","spray_dir",
+  "conf_step","conf_head","conf_knee","conf_grip","conf_top",
+  "label_step","label_head","label_knee","label_grip","label_top",
+  "event_commit_confirmed","event_fs_confirmed","event_impact_confirmed","fps_warning","note"];
+function csvCell(v){
+  if(v==null||v==="") return "";                       // 欠測は空欄
+  if(typeof v==="number"){ if(!isFinite(v)) return ""; return String(Math.round(v*1000)/1000); }
+  if(typeof v==="boolean") return v?"1":"0";
+  let s=String(v);
+  /* Excel は = + - @ で始まるセルを数式として実行する。
+     選手名などの自由入力がそのまま数式にならないよう、先頭に ' を付けて無害化する。
+     数値は上の分岐で処理済みなので、マイナスの数値には影響しない。 */
+  if(/^[=+\-@\t\r]/.test(s)) s="'"+s;
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function swingToRow(s, batter, session){
+  const m=s.metrics||{}, q=s.quality||{}, cf=q.conf||{}, lb=q.label||{}, ev=s.events||{}, cal=s.calib||{};
+  const d=new Date(s.timestamp);
+  const date=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const o={ date, session_id:s.session_id, swing_no:s.swing_no,
+    batter_name:batter?batter.name:"", height_cm:batter?batter.height_cm:null,
+    bats:batter?batter.bats:"", fps:s.fps, capture_fps:cal.capture_fps, slow_factor:cal.slow_factor,
+    calibrated:cal.calibrated, commit_source:s.commit_source, note:s.note||"",
+    fps_warning:q.fps_warning,
+    event_commit_confirmed:ev.commit?.confirmed, event_fs_confirmed:ev.fs?.confirmed,
+    event_impact_confirmed:ev.impact?.confirmed };
+  ["Commit_to_FS_ms","FS_to_Impact_ms","Commit_to_Impact_ms","top_lag_ms","step_ratio","step_cm",
+   "head_fwd_impact","head_vert_impact","head_fwd_max","head_vert_drop","knee_fs","knee_impact",
+   "knee_ext","back_knee_fs","back_knee_impact","grip_speed_max","grip_speed_impact",
+   "base_pos_fs","base_pos_impact","exit_velocity_kmh","launch_angle_deg","spray_dir"]
+   .forEach(k=>{ o[k]=m[k]; });
+  ["step","head","knee","grip","top"].forEach(k=>{ o["conf_"+k]=cf[k]; o["label_"+k]=lb[k]; });
+  return CSV_COLS.map(c=>csvCell(o[c])).join(",");
+}
+$("btnExportCsv").addEventListener("click",async()=>{
+  if(!currentBatter){ toast("先に打者を選択してください"); return; }
+  const all=(await dbAll("swings")).filter(s=>s.batter_id===currentBatter.id)
+    .sort((a,b)=>a.timestamp-b.timestamp);
+  if(!all.length){ toast("書き出せるスイングがありません"); return; }
+  const sess=await dbAll("sessions");
+  const body=all.map(s=>swingToRow(s,currentBatter,sess.find(x=>x.id===s.session_id))).join("\r\n");
+  /* Excel が UTF-8 と判別できるよう BOM を付ける(仕様書 §8) */
+  download(`batting_${currentBatter.name}_${new Date().toISOString().slice(0,10)}.csv`,
+           "﻿"+CSV_COLS.join(",")+"\r\n"+body+"\r\n", "text/csv;charset=utf-8");
+  toast(`${all.length}本を書き出しました`);
+});
+$("btnExportJson").addEventListener("click",async()=>{
+  if(!currentBatter){ toast("先に打者を選択してください"); return; }
+  const swings=(await dbAll("swings")).filter(s=>s.batter_id===currentBatter.id);
+  const ids=new Set(swings.map(s=>s.session_id));
+  const sess=(await dbAll("sessions")).filter(s=>s.batter_id===currentBatter.id||ids.has(s.id));
+  const pack={ format:"battinglab", version:1, exported_at:new Date().toISOString(),
+    batters:[currentBatter], sessions:sess, swings };
+  download(`batting_${currentBatter.name}_${new Date().toISOString().slice(0,10)}.json`,
+           JSON.stringify(pack), "application/json");
+  toast(`${swings.length}本を書き出しました`);
+});
+$("btnImportJson").addEventListener("click",()=>$("jsonInput").click());
+$("jsonInput").addEventListener("change",async()=>{
+  const f=$("jsonInput").files[0]; $("jsonInput").value="";
+  if(!f) return;
+  if(!dbOk()) return;
+  try{
+    const pack=JSON.parse(await f.text());
+    if(pack.format!=="battinglab") throw new Error("この JSON は打撃解析の書き出しではありません");
+    let added=0;
+    for(const b of pack.batters||[]) await dbPut("batters",b);
+    for(const s of pack.sessions||[]) await dbPut("sessions",s);
+    for(const s of pack.swings||[]){ await dbPut("swings",s); added++; }
+    await reloadBatters();
+    /* 打者が選ばれていないと集計も本人比も出ないので、読み込んだ打者を選んでおく。
+       別端末で書き出したJSONを開いた直後は必ずこの状態になる。 */
+    if(!currentBatter && batters.length){
+      const lastId=lsGet("battinglab.lastBatter");
+      await setCurrentBatter(batters.find(x=>x.id===lastId) || batters[0]);
+    }else{
+      await reloadSessions(); await renderSwingList(); await refreshData();
+    }
+    /* 直前に失敗していると赤いままなので、成功したら必ず戻す */
+    setStatus("ok",`${added}本を読み込みました${currentBatter?` (打者: ${currentBatter.name})`:""}`);
+    toast(`${added}本を読み込みました`);
+  }catch(err){
+    console.error(err);
+    setStatus("err","JSON を読み込めませんでした: "+(err.message||"形式が違います"));
+  }
+});
+async function refreshData(){
+  await reloadBatterSwings();
+  const e=$("exportCount");
+  e.textContent=batterSwings.length?`${batterSwings.length} 本`:"--";
+  e.className="v"+(batterSwings.length?"":" na");
+  renderRepeat(); await renderBlocks(); await renderSummary(); await reloadCompare();
+}
+
+/* 動作確認用のフック。内部の系列を読めるようにしておく(表示には影響しない) */
+window.__batlab = {
+  get raw(){ return rawSeries; },
+  get smooth(){ return smoothSeries; },
+  get analysis(){ return analysis; },
+  get events(){ return events; },
+  get commitCands(){ return commitCands; },
+  get metrics(){ return metrics; },
+  get signals(){ return signals; },
+  get fps(){ return fps; },
+  detectEvents, renderMetrics, buildSignals, confirmEvent,
+  computeAlerts, statsOf, maturityOf, collectValues,
+  get THR(){ return THR; },
+  get swings(){ return batterSwings; },
+  set commitSource(v){ commitSource=v; },
+  get commitSource(){ return commitSource; },
+};
+
+/* ============ 起動 ============ */
+(async function boot(){
+  try{
+    db=await openDB();
+    await reloadBatters();
+    const lastId=lsGet("battinglab.lastBatter");
+    if(lastId){
+      const p=batters.find(x=>x.id===lastId);
+      if(p){ currentBatter=p; $("bName").value=p.name; $("bHeight").value=p.height_cm; $("bBats").value=p.bats;
+             await reloadBatters(); }
+    }
+    /* 進行中のセッションは、いま選んでいる打者のものだけ引き継ぐ */
+    const open=currentBatter
+      ? (await dbAll("sessions")).find(s=>!s.ended_at&&s.batter_id===currentBatter.id) : null;
+    if(open) currentSession=open;
+    await reloadSessions();
+  }catch(err){
+    console.error(err);
+    storageFail("この端末ではデータを保存できません(プライベートブラウズか、ブラウザの設定で保存が無効です)。解析と数値の表示は使えますが、記録は残りません");
+  }
+  loadThr(); renderThr();
+  updateTrimDisplay(); renderAnalysis(); renderEvents(); refreshReady();
+  renderMetrics(); renderSwingList(); drawTiming();
+  try{ await refreshData(); }catch(err){ console.error(err); }
+  initModel(modelKind);
+})();
+</script>
+</body>
+</html>

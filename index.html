@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>フォーム解析ラボ</title>
+<meta name="theme-color" content="#0d1412">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="フォーム解析">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="icon" type="image/png" href="./icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0d1412;--panel:#182420;--line:#26362f;--chalk:#e9ede9;--dim:#8fa39a;--amber:#f2b632;}
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:radial-gradient(ellipse at 20% -10%,#1c2a24 0,transparent 55%),var(--bg);
+    color:var(--chalk);font-family:'Noto Sans JP',sans-serif;min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{
+    max-width:640px;margin:0 auto;
+    padding:calc(32px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+            calc(48px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+  }
+  header{display:flex;align-items:center;gap:14px;margin-bottom:8px;}
+  header img{width:56px;height:56px;border-radius:13px;flex:none;}
+  h1{font-family:'Oswald',sans-serif;font-size:24px;margin:0;letter-spacing:.02em;}
+  .sub{color:var(--dim);font-size:13px;line-height:1.8;margin:14px 0 26px;}
+  a.card{
+    display:block;text-decoration:none;color:inherit;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:18px 20px;margin-bottom:12px;transition:border-color .15s;
+  }
+  a.card:hover{border-color:var(--amber);}
+  a.card:focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+  /* 説明書は最初に読んでほしいので、解析カードより先に目に入るようにする */
+  a.card.manual{border-color:#3a5347;background:linear-gradient(180deg,#1b2a24,var(--panel));}
+  a.card .t{font-size:17px;font-weight:700;margin-bottom:6px;}
+  a.card .t span{color:var(--amber);}
+  a.card .d{font-size:12.5px;color:var(--dim);line-height:1.8;}
+  .note{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:16px 20px;font-size:12.5px;color:var(--dim);line-height:1.9;margin-top:22px;
+  }
+  .note b{color:#b9c7c0;}
+  ol{margin:8px 0 0;padding-left:1.3em;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="./icon-192.png" alt="">
+    <h1>フォーム解析ラボ</h1>
+  </header>
+  <div class="sub">
+    投球・打撃フォームを、スマホやパソコンのブラウザだけで解析します。<br>
+    <b style="color:#b9c7c0;">動画は端末の外に送信されません。</b>解析はすべてブラウザ内で行われます。
+  </div>
+
+  <a class="card manual" href="./manual.html">
+    <div class="t"><span>📖</span> はじめての方へ — 説明書</div>
+    <div class="d">
+      撮り方、練習1回の流れ、画面の見かた、数値の読みかた、
+      データを失わないための注意、うまく測れないときの直し方。
+      この3つのアプリに共通の使い方をまとめてあります。
+    </div>
+  </a>
+
+  <a class="card" href="./formanalyzer.html">
+    <div class="t"><span>▶</span> 解析をはじめる</div>
+    <div class="d">
+      投球／打撃を切り替えて使えます。コマ送り・トリミング・骨格と軌跡の表示・
+      チェックポイント記録・グラフ・2動画比較・再現性の確認。
+    </div>
+  </a>
+
+  <a class="card" href="./pitching-analyzer.html">
+    <div class="t"><span>◆</span> 投球動作解析 Ver.1 <span style="font-size:12px;color:var(--dim);font-weight:400;">(開発中)</span></div>
+    <div class="d">
+      設計仕様書 Ver.1 に沿った投球専用版。選手・セッション管理、較正(身長比)、
+      事前解析と平滑化、イベント6点の検出と手動確定、各指標の算出と球の記録、
+      キネマティック・シークエンス(骨盤→胸郭→上腕→手の角速度と順番・ブレーキ)、
+      複数球の平均・SD・CV と本人比、アラート、
+      10球ブロックごとの変化、CSV / JSON の書き出しと読み込みまで、
+      Ver.1 の予定範囲が一通り入っています。
+    </div>
+  </a>
+
+  <a class="card" href="./batting-analyzer.html">
+    <div class="t"><span>◆</span> 打撃動作解析 Ver.1A <span style="font-size:12px;color:var(--dim);font-weight:400;">(開発中)</span></div>
+    <div class="d">
+      設計仕様書 Ver.1 に沿った打撃専用版。打者・セッション管理、較正(胴体長基準)、
+      事前解析と平滑化、イベント5点の検出と手動確定(始動は4候補から選択・インパクトは手動必須)、
+      各指標の算出と測定信頼度、スイングの記録、タイミングとトップのタイムラグの可視化、
+      複数スイングの平均・SD・CV と本人比、アラート、10本ブロックごとの動作変化、
+      CSV / JSON の書き出しと読み込みまで、Ver.1A の予定範囲が一通り入っています。
+    </div>
+  </a>
+
+  <div class="note">
+    <b>iPhoneで使うときは「ホーム画面に追加」がおすすめです。</b>
+    <ol>
+      <li>Safariでこのページを開く</li>
+      <li>下の共有ボタン(□に↑)をタップ</li>
+      <li>「ホーム画面に追加」を選ぶ</li>
+    </ol>
+    アプリのように全画面で開き、保存したデータも消えにくくなります。
+    一度開いておけば、電波の弱い場所でも動きます。
+  </div>
+</div>
+<script>
+/* このページからも Service Worker を登録しておく。
+   ホーム画面に追加したあと最初に開くのがこのページなので、
+   ここで登録しないと解析ページを一度開くまでオフラインで動かない。 */
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("./sw.js").catch(err=>console.warn("sw registration failed",err));
+  });
+}
+</script>
+</body>
+</html>

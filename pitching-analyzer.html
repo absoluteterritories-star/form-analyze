@@ -1,0 +1,3469 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>投球動作解析システム Ver.1</title>
+<meta name="theme-color" content="#0d1412">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="投球解析">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="icon" type="image/png" href="./icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-0:#0d1412; --bg-1:#141d1a; --panel:#182420; --panel-line:#26362f;
+    --dirt:#3a2c22; --turf:#3fa876; --chalk:#e9ede9; --chalk-dim:#8fa39a;
+    --amber:#f2b632; --sky:#48c9d8; --alert:#e05a4e; --tap:44px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:radial-gradient(ellipse at 20% -10%,#1c2a24 0,transparent 55%),var(--bg-0);
+    color:var(--chalk);font-family:'Noto Sans JP',sans-serif;min-height:100vh;
+    -webkit-font-smoothing:antialiased;overscroll-behavior-y:contain;
+  }
+  button{font-family:inherit;}
+  button,.tab,.switch{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+  .wrap{
+    max-width:1360px;margin:0 auto;
+    padding:calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+            calc(48px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+  }
+  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    padding:4px 2px 14px;border-bottom:1px solid var(--panel-line);margin-bottom:16px;}
+  header .eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;
+    color:var(--amber);background:rgba(242,182,50,.08);border:1px solid rgba(242,182,50,.35);
+    padding:3px 8px;border-radius:3px;flex:none;}
+  h1{font-family:'Oswald',sans-serif;font-weight:700;font-size:21px;margin:0;}
+  .status-line{display:flex;align-items:center;gap:8px;margin-left:auto;
+    font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--chalk-dim);
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:20px;
+    padding:5px 12px;max-width:100%;}
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--chalk-dim);flex:none;}
+  .status-dot.ok{background:var(--turf);box-shadow:0 0 6px var(--turf);}
+  .status-dot.busy{background:var(--amber);box-shadow:0 0 6px var(--amber);animation:pulse 1s infinite;}
+  .status-dot.err{background:var(--alert);box-shadow:0 0 6px var(--alert);}
+  @keyframes pulse{50%{opacity:.35;}}
+
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:18px;align-items:start;}
+  @media (max-width:980px){ .layout{grid-template-columns:1fr;} }
+  @media (min-width:981px){
+    .stage-card{position:sticky;top:12px;}
+    .sidebar{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;padding-right:2px;}
+  }
+
+  .stage-card{background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;overflow:hidden;}
+  .stage{position:relative;width:100%;
+    background:repeating-linear-gradient(0deg,#241a13 0 2px,#2a1f16 2px 42px),var(--dirt);
+    display:flex;align-items:center;justify-content:center;aspect-ratio:9/13;max-height:64vh;overflow:hidden;}
+  .stage.dragover{outline:2px dashed var(--amber);outline-offset:-6px;}
+  .pane{position:relative;flex:1 1 0;height:100%;min-width:0;}
+  video{display:block;width:100%;height:100%;object-fit:contain;background:#000;}
+  video.mirrored{transform:scaleX(-1);}
+  canvas.overlay{position:absolute;left:0;top:0;pointer-events:none;}
+  canvas.overlay.calib{pointer-events:auto;cursor:crosshair;}
+  .drop{text-align:center;padding:32px 22px;color:var(--chalk-dim);}
+  .drop .glyph{font-family:'Oswald',sans-serif;font-size:15px;letter-spacing:.16em;color:var(--amber);display:block;margin-bottom:10px;}
+  .drop .hint{font-size:12px;margin-top:10px;color:#5f6f68;line-height:1.7;}
+  .btn-amber{font-size:13.5px;font-weight:600;color:var(--bg-0);background:var(--amber);
+    border:none;padding:0 18px;min-height:var(--tap);border-radius:8px;cursor:pointer;}
+  .btn-amber:hover{filter:brightness(1.08);}
+  .calib-banner{
+    position:absolute;left:0;right:0;top:0;z-index:5;background:rgba(242,182,50,.92);color:#0d1412;
+    font-size:12.5px;font-weight:600;padding:8px 12px;text-align:center;display:none;
+  }
+  .calib-banner.show{display:block;}
+
+  /* transport */
+  .transport{padding:10px 12px 12px;border-top:1px solid var(--panel-line);display:none;}
+  .transport.show{display:block;}
+  .seek-wrap{position:relative;padding:6px 0 2px;}
+  .seek{width:100%;-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;
+    background:var(--panel-line);outline:none;margin:0;display:block;position:relative;z-index:2;}
+  .seek::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;
+    background:var(--amber);cursor:pointer;box-shadow:0 0 0 3px rgba(242,182,50,.22);}
+  .seek-trim{position:absolute;left:0;right:0;top:6px;height:5px;pointer-events:none;z-index:1;}
+  .seek-trim i{position:absolute;top:0;height:5px;background:rgba(13,20,18,.72);border-radius:3px;}
+  .tline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--chalk-dim);margin:8px 0 10px;}
+  .tline b{color:var(--chalk);font-weight:500;font-size:14px;}
+  .chip{border:1px solid var(--panel-line);border-radius:5px;padding:2px 7px;font-size:10.5px;}
+  .tline .right{margin-left:auto;display:flex;gap:8px;align-items:center;}
+  .steps{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-bottom:8px;}
+  .steps.fine-row{grid-template-columns:auto auto minmax(0,1fr);}
+  .fine-note{font-size:10.5px;line-height:1.5;color:var(--chalk-dim);align-self:center;font-family:'JetBrains Mono',monospace;}
+  .tbtn{font-family:'JetBrains Mono',monospace;background:var(--bg-1);border:1px solid var(--panel-line);
+    color:var(--chalk);min-height:var(--tap);padding:4px 6px;border-radius:8px;cursor:pointer;
+    font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:3px;user-select:none;-webkit-user-select:none;}
+  .tbtn:hover{border-color:var(--amber);color:var(--amber);}
+  .tbtn:active{background:rgba(242,182,50,.18);border-color:var(--amber);transform:translateY(1px);}
+  .tbtn.play{background:var(--amber);color:var(--bg-0);border:none;font-weight:700;font-size:13.5px;}
+  .tbtn.fine{font-size:11.5px;flex-direction:column;gap:0;line-height:1.25;}
+  .tbtn.fine em{font-style:normal;font-size:9.5px;color:var(--chalk-dim);}
+  @media (max-width:560px){
+    .steps{grid-template-columns:repeat(3,minmax(0,1fr));}
+    .steps .tbtn.play{grid-column:span 3;order:-1;min-height:52px;}
+    .steps.fine-row{grid-template-columns:1fr 1fr;}
+    .fine-note{grid-column:span 2;}
+  }
+  .transport-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  select.mini{font-family:'JetBrains Mono',monospace;background:var(--bg-1);border:1px solid var(--panel-line);
+    color:var(--chalk);padding:0 8px;min-height:36px;border-radius:7px;font-size:12px;}
+  .ghost{font-size:12px;background:var(--bg-1);border:1px solid var(--panel-line);color:var(--chalk);
+    min-height:36px;padding:0 12px;border-radius:7px;cursor:pointer;}
+  .ghost:hover{border-color:var(--amber);color:var(--amber);}
+
+  /* panels */
+  .panel{background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;margin-bottom:14px;overflow:hidden;}
+  .panel h2{font-family:'Oswald',sans-serif;font-size:12.5px;letter-spacing:.1em;font-weight:600;
+    color:var(--chalk-dim);margin:0;padding:11px 14px 9px;border-bottom:1px solid var(--panel-line);
+    display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .panel h2 .tag{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--amber);letter-spacing:0;}
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+  .tab{background:var(--panel);border:1px solid var(--panel-line);color:var(--chalk-dim);
+    min-height:40px;border-radius:8px;font-size:12.5px;cursor:pointer;flex:1 1 30%;padding:0 6px;}
+  .tab.active{background:rgba(242,182,50,.12);border-color:var(--amber);color:var(--amber);font-weight:600;}
+  .tabpage{display:none;}
+  .tabpage.active{display:block;}
+  .opt-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:9px 12px;font-size:12.5px;min-height:44px;}
+  .opt-row .lab{color:var(--chalk);}
+  .field{padding:8px 12px;}
+  .field label{display:block;font-size:11.5px;color:var(--chalk-dim);margin-bottom:6px;}
+  .field input[type=text], .field input[type=number]{
+    width:100%;background:var(--bg-1);border:1px solid var(--panel-line);color:var(--chalk);
+    border-radius:7px;min-height:44px;padding:0 12px;font-size:14px;font-family:inherit;
+  }
+  .toolbar{padding:0 12px 12px;display:flex;gap:8px;flex-wrap:wrap;}
+  .toolbar button, .toolbar select.mini{
+    background:var(--bg-1);color:var(--chalk);border:1px solid var(--panel-line);
+    font-size:12.5px;min-height:40px;padding:0 14px;border-radius:8px;cursor:pointer;flex:1 1 auto;}
+  .toolbar button:hover{border-color:var(--amber);color:var(--amber);}
+  .toolbar button.primary{background:var(--amber);color:var(--bg-0);border:none;font-weight:600;}
+  .toolbar button:disabled{opacity:.4;cursor:not-allowed;}
+  .legend{padding:0 12px 12px;font-size:11.5px;color:var(--chalk-dim);line-height:1.8;}
+  .legend b{color:#b9c7c0;}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:8px 12px 12px;
+    font-family:'JetBrains Mono',monospace;font-size:11.5px;}
+  .kv .k{color:var(--chalk-dim);font-family:'Noto Sans JP',sans-serif;}
+  .kv .v{color:var(--chalk);text-align:right;}
+  .kv .v.na{color:#3d4a45;}
+  .kv .v.ok{color:var(--turf);}
+  .kv .v.warn{color:var(--alert);}
+  .kv .v.mid{color:var(--amber);}
+  .rowlist{padding:8px 12px 4px;display:flex;flex-direction:column;gap:6px;}
+  .rowitem{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;
+    background:var(--bg-1);border:1px solid var(--panel-line);border-radius:8px;padding:9px 10px;}
+  .rowitem.sel{border-color:var(--amber);}
+  .rowitem .nm{font-size:12.5px;}
+  .rowitem .sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--chalk-dim);}
+  .rowitem button{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--panel);
+    border:1px solid var(--panel-line);color:var(--chalk);min-height:36px;padding:0 10px;border-radius:7px;cursor:pointer;}
+  .range-set{padding:10px 12px 8px;border-bottom:1px solid var(--panel-line);}
+  .range-set-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;margin-bottom:6px;}
+  .range-set-time{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--amber);}
+  .mini-btn{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-1);
+    border:1px solid var(--panel-line);color:var(--chalk);min-height:36px;padding:0 10px;
+    border-radius:7px;cursor:pointer;white-space:nowrap;}
+  .mini-btn:hover{border-color:var(--amber);color:var(--amber);}
+  .switch{position:relative;width:38px;height:22px;flex:none;}
+  .switch input{opacity:0;width:0;height:0;}
+  .slider-toggle{position:absolute;cursor:pointer;inset:0;background:#2a3a34;border-radius:20px;transition:.15s;}
+  .slider-toggle::before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;
+    background:var(--chalk-dim);border-radius:50%;transition:.15s;}
+  input:checked + .slider-toggle{background:rgba(242,182,50,.35);}
+  input:checked + .slider-toggle::before{transform:translateX(16px);background:var(--amber);}
+  .range-row{padding:4px 12px 12px;}
+  .range-row label{font-size:12px;color:var(--chalk-dim);display:flex;justify-content:space-between;margin-bottom:8px;}
+  .range-row label b{color:var(--chalk);font-family:'JetBrains Mono',monospace;font-weight:500;}
+  input[type=range].thin{width:100%;-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;
+    background:var(--panel-line);outline:none;}
+  input[type=range].thin::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;
+    border-radius:50%;background:var(--sky);cursor:pointer;}
+  .bar{height:6px;background:var(--bg-1);border-radius:3px;overflow:hidden;margin:0 12px 12px;}
+  .graph-wrap{padding:6px 12px 8px;}
+  #chain,#relScatter,#blockChart,#timeline,#cmpCanvas{width:100%;height:auto;display:block;border-radius:8px;background:var(--bg-1);
+    border:1px solid var(--panel-line);cursor:crosshair;touch-action:none;}
+  .tblwrap{padding:6px 12px 4px;overflow-x:auto;}
+  table.mtable{border-collapse:collapse;width:100%;font-family:'JetBrains Mono',monospace;font-size:11px;}
+  table.mtable th,table.mtable td{padding:5px 6px;text-align:center;border-bottom:1px solid var(--panel-line);white-space:nowrap;}
+  table.mtable th{color:var(--chalk-dim);font-weight:500;font-size:10px;}
+  table.mtable td.nm{text-align:left;font-family:'Noto Sans JP',sans-serif;font-size:11.5px;color:var(--chalk-dim);}
+  table.mtable td.v{color:var(--chalk);}
+  table.mtable td.v.na{color:#3d4a45;}
+  .thumbs{display:flex;gap:6px;overflow-x:auto;padding:0 12px 10px;scroll-snap-type:x mandatory;}
+  .thumb{flex:none;scroll-snap-align:center;background:var(--bg-1);border:2px solid var(--panel-line);
+    border-radius:8px;padding:3px;cursor:pointer;text-align:center;}
+  .thumb.cur{border-color:var(--amber);}
+  .thumb canvas{display:block;border-radius:5px;background:#000;}
+  .thumb .lb{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--chalk-dim);padding-top:3px;}
+  .thumb.cur .lb{color:var(--amber);}
+  .ev-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:7px;
+    background:var(--bg-1);border:1px solid var(--panel-line);border-radius:8px;padding:7px 9px;}
+  .ev-row.sel{border-color:var(--sky);}
+  .ev-row .nm{font-size:12.5px;}
+  .ev-row .sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--chalk-dim);}
+  .ev-row .sub.set{color:var(--amber);}
+  .ev-row .sub.ok{color:var(--turf);}
+  .ev-row button{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--panel);
+    border:1px solid var(--panel-line);color:var(--chalk);min-height:38px;padding:0 10px;
+    border-radius:7px;cursor:pointer;white-space:nowrap;}
+  .ev-row button.pick{background:var(--amber);color:var(--bg-0);border:none;font-weight:600;}
+  .bar i{display:block;height:100%;background:var(--amber);width:0;transition:width .15s;}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(12px);
+    background:var(--panel);border:1px solid var(--amber);color:var(--chalk);padding:10px 16px;
+    border-radius:24px;font-size:12.5px;z-index:50;opacity:0;pointer-events:none;
+    transition:opacity .2s,transform .2s;max-width:88vw;text-align:center;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  kbd{font-family:'JetBrains Mono',monospace;font-size:10.5px;background:var(--bg-1);
+    border:1px solid var(--panel-line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:var(--chalk);}
+  @media (pointer: coarse){
+    select.mini,.ghost,.mini-btn,.tab,.toolbar select.mini,.toolbar button,.rowitem button{min-height:44px;}
+  }
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="eyebrow">PITCH LAB Ver.1</span>
+    <h1>投球動作解析システム</h1>
+    <div class="status-line">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">モデル未読み込み</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div class="stage-card">
+      <div class="stage" id="stage">
+        <div class="calib-banner" id="calibBanner"></div>
+        <div class="drop" id="dropUI">
+          <span class="glyph">VIDEO INPUT</span>
+          投球動画(側面から撮影)を選択、またはここにドラッグ&amp;ドロップ<br>
+          <button id="pickBtn" class="btn-amber" style="margin-top:16px;">動画を選択</button>
+          <div class="hint">
+            解析はすべてブラウザ内で行われ、動画は外部に送信されません<br>
+            投球方向に対して直角の位置から、全身が入るように撮影してください
+          </div>
+        </div>
+        <div class="pane" id="paneA" style="display:none;">
+          <video id="video" playsinline preload="auto"></video>
+          <canvas class="overlay" id="overlay"></canvas>
+        </div>
+      </div>
+
+      <div class="transport" id="transport">
+        <div class="seek-wrap">
+          <div class="seek-trim" id="seekTrim"></div>
+          <input type="range" class="seek" id="seek" min="0" max="1000" value="0" step="1" aria-label="再生位置">
+        </div>
+        <div class="tline">
+          <b id="timeRead">0.000</b><span>/ <span id="durRead">0.000</span> s</span>
+          <span class="chip" id="frameRead">コマ 0</span>
+          <span class="chip" id="fpsRead">fps --</span>
+          <span class="chip" id="realRead" style="display:none;">実 --</span>
+          <span class="chip" id="posRead" style="display:none;">位置 --</span>
+          <span class="chip" id="sameChip" style="display:none;border-color:var(--sky);color:var(--sky);">同じコマ</span>
+          <span class="chip" id="outOfTrim" style="display:none;border-color:var(--alert);color:var(--alert);">範囲外</span>
+          <span class="right">
+            <label for="speed" style="font-size:11px;">速度</label>
+            <select class="mini" id="speed">
+              <option value="0.1">0.1×</option><option value="0.25">0.25×</option>
+              <option value="0.5" selected>0.5×</option><option value="1">1×</option>
+            </select>
+          </span>
+        </div>
+        <div class="steps">
+          <button class="tbtn fine" data-step="-0.1"  title="0.1秒戻る (←)">−0.1<em>秒</em></button>
+          <button class="tbtn fine" data-step="-0.01" title="0.01秒戻る (Shift+←)">−0.01<em>秒</em></button>
+          <button class="tbtn"      data-frame="-1"   title="1コマ戻る (,)">◀|</button>
+          <button class="tbtn play" id="btnPlay" title="再生/一時停止 (Space)">▶ 再生</button>
+          <button class="tbtn"      data-frame="1"    title="1コマ進む (.)">|▶</button>
+          <button class="tbtn fine" data-step="0.01"  title="0.01秒進む (Shift+→)">＋0.01<em>秒</em></button>
+          <button class="tbtn fine" data-step="0.1"   title="0.1秒進む (→)">＋0.1<em>秒</em></button>
+        </div>
+        <div class="steps fine-row">
+          <button class="tbtn fine" data-nudge="-0.001" title="0.001秒戻る ([)">−0.001<em>秒</em></button>
+          <button class="tbtn fine" data-nudge="0.001"  title="0.001秒進む (])">＋0.001<em>秒</em></button>
+          <span class="fine-note" id="fineNote"></span>
+        </div>
+        <div class="transport-row">
+          <button class="ghost" id="btnToStart">|◀◀ 先頭</button>
+          <button class="ghost" id="btnToTrim">範囲の開始へ</button>
+          <button class="ghost" id="pickBtn2" style="margin-left:auto;">別の動画</button>
+        </div>
+      </div>
+      <input type="file" id="fileInput" accept="video/*">
+    </div>
+
+    <div class="sidebar">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="setup" role="tab">選手・撮影</button>
+        <button class="tab" data-tab="analyze" role="tab">解析</button>
+        <button class="tab" data-tab="metrics" role="tab">指標</button>
+        <button class="tab" data-tab="chain" role="tab">連鎖</button>
+        <button class="tab" data-tab="repeat" role="tab">再現性</button>
+        <button class="tab" data-tab="compare" role="tab">比較</button>
+        <button class="tab" data-tab="change" role="tab">変化・出力</button>
+        <button class="tab" data-tab="config" role="tab">設定</button>
+        <button class="tab" data-tab="help" role="tab">使い方</button>
+      </div>
+
+      <!-- ===== 選手・撮影 ===== -->
+      <div class="tabpage active" id="tab-setup">
+        <div class="panel" id="storageWarn" style="display:none;border-color:var(--alert);">
+          <h2 style="color:var(--alert);">保存できません</h2>
+          <div class="legend" id="storageWarnText"></div>
+        </div>
+        <div class="panel">
+          <h2>選手 <span class="tag" id="pitcherTag">未選択</span></h2>
+          <div class="rowlist" id="pitcherList"></div>
+          <div class="field">
+            <label>名前</label>
+            <input type="text" id="pName" placeholder="例: 山田">
+          </div>
+          <div class="field">
+            <label>身長(cm) — 距離の指標に使います(必須)</label>
+            <input type="number" id="pHeight" min="100" max="220" step="0.5" placeholder="例: 165">
+          </div>
+          <div class="opt-row">
+            <span class="lab">投球腕</span>
+            <select class="mini" id="pThrows"><option value="R">右投げ</option><option value="L">左投げ</option></select>
+          </div>
+          <div class="toolbar">
+            <button id="btnAddPitcher" class="primary">この内容で登録 / 更新</button>
+          </div>
+          <div class="legend">
+            身長は<b>ストライド長やリリース位置を身長比で出す</b>ために必要です。
+            身長比にすると、撮影距離が変わっても比べられます。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>較正 <span class="tag" id="calibTag">未較正</span></h2>
+          <div class="kv">
+            <span class="k">k_nose(足首〜鼻 ÷ 身長)</span><span class="v" id="kNoseVal">0.890 (既定)</span>
+            <span class="k">身長ピクセル長 H_norm</span><span class="v na" id="hNormVal">--</span>
+          </div>
+          <div class="toolbar">
+            <button id="btnCalib" class="primary">較正する(既知の長さを2点で指定)</button>
+            <button id="btnCalibReset">既定に戻す</button>
+          </div>
+          <div class="legend">
+            較正すると、その選手の体格に合った換算になります(1人1回で済みます)。<br>
+            <b>手順</b>: 選手が<b>まっすぐ立っているコマ</b>まで動かす → 「較正する」 →
+            画面内で<b>長さが分かっているもの</b>(投球板の横幅 60.96cm、メジャー等)の両端をタップ → 実際の長さを入力。<br>
+            未較正でも身長比は出ますが、既定値(0.89)による数%の誤差が乗ります。
+            同じ選手の中で比べる分には影響しません。
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 解析 ===== -->
+      <div class="tabpage" id="tab-analyze">
+        <div class="panel">
+          <h2>セッション <span class="tag" id="sessionTag">未開始</span></h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnSessionStart" class="primary">セッション開始</button>
+            <button id="btnSessionEnd">終了</button>
+          </div>
+          <div class="rowlist" id="sessionList"></div>
+          <div class="legend">
+            ブルペン1本を1セッションとして扱います。疲労の推移(10球ブロック)はこの単位で見ます。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>トリミング</h2>
+          <div class="range-set">
+            <div class="range-set-row">
+              <span>開始(始動前)</span>
+              <span class="range-set-time" id="trimStartTime">0.000s</span>
+              <button class="mini-btn" id="btnTrimStart">現在地点</button>
+            </div>
+            <div class="range-set-row">
+              <span>終了(投球後)</span>
+              <span class="range-set-time" id="trimEndTime">動画の最後</span>
+              <button class="mini-btn" id="btnTrimEnd">現在地点</button>
+            </div>
+            <div class="toolbar" style="padding:6px 0 2px;">
+              <button class="mini-btn" id="btnTrimReset">リセット</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>事前解析 <span class="tag" id="analyzeTag">未実行</span></h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnAnalyze" class="primary">この範囲を解析する</button>
+          </div>
+          <div class="bar"><i id="analyzeBar"></i></div>
+          <div class="kv">
+            <span class="k">解析フレーム数</span><span class="v na" id="kFrames">--</span>
+            <span class="k">平滑化の窓</span><span class="v na" id="kWindow">--</span>
+            <span class="k">身長ピクセル長 H_norm</span><span class="v na" id="kHnorm">--</span>
+            <span class="k">投球方向</span><span class="v na" id="kDir">--</span>
+            <span class="k">検出できたコマ</span><span class="v na" id="kDetected">--</span>
+            <span class="k">1コマの実時間</span><span class="v na" id="kFrameMs">--</span>
+          </div>
+          <div class="legend">
+            範囲全体を1コマずつ解析し、<b>平滑化した骨格</b>を作ります。
+            以降の角度・位置・速度はこの平滑化後の値から計算します(生の座標をそのまま微分すると
+            検出のブレが増幅されるため)。<br>
+            角度・位置・速度はこの平滑化後の値から計算します。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>イベント <span class="tag" id="eventTag">未検出</span></h2>
+          <div class="opt-row" id="dirManualRow" style="display:none;">
+            <span class="lab" style="color:var(--alert);">投球方向を選んでください</span>
+            <select class="mini" id="dirSel">
+              <option value="">未選択</option>
+              <option value="1">画面の右</option>
+              <option value="-1">画面の左</option>
+            </select>
+          </div>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnDetectEvents" class="primary">候補を検出</button>
+          </div>
+          <div class="rowlist" id="eventList"></div>
+          <div id="thumbWrap" style="display:none;">
+            <div class="legend" id="thumbTitle" style="padding:8px 12px 6px;"></div>
+            <div class="thumbs" id="thumbs"></div>
+            <div class="legend" style="padding-top:8px;">
+              正しいコマをタップすると確定します。コマ送り(<b>◀| |▶</b>)で動かしてから
+              「現在のコマで確定」でも構いません。
+            </div>
+          </div>
+          <div class="legend">
+            自動検出は<b>候補の提示</b>です。必ず目で確認して確定してください。
+            とくに<b>リリース</b>は、手の速度が最大になるコマとボールが離れるコマが
+            数コマずれることがあります。<br>
+            <b>Arm Peak は肩の最大外旋角度(MER)ではありません。</b>
+            側面2Dでは真の外旋角度は測れないため、
+            「肘が最も後方かつ高い位置に来たコマ」を近似として出しています。
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 指標 ===== -->
+      <div class="tabpage" id="tab-metrics">
+        <div class="panel">
+          <h2>球速 <span class="tag">手入力</span></h2>
+          <div class="field">
+            <label>スピードガンの値(km/h) — 未入力でも他の指標は出ます</label>
+            <input type="number" id="speedKmh" min="30" max="200" step="0.1" placeholder="例: 118.5">
+          </div>
+          <div class="legend">自動計測はしません。仕様書 §5 A-1 の通り外部計測値を手入力します。</div>
+        </div>
+
+        <div class="panel">
+          <h2>指標 <span class="tag" id="metricsTag">--</span></h2>
+          <div class="kv" id="metricsList"></div>
+          <div class="legend" id="metricsNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>この球を記録 <span class="tag" id="pitchCountTag">0球</span></h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnSavePitch" class="primary">セッションに記録</button>
+          </div>
+          <div class="rowlist" id="pitchList"></div>
+          <div class="legend">
+            記録するとイベント時のランドマークも一緒に保存されるので、
+            較正値や設定を変えたあとでも計算し直せます。<br>
+            複数球の平均・SD・本人比、CSV出力、アラートは Phase 5 以降で追加します。
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 運動連鎖 ===== -->
+      <div class="tabpage" id="tab-chain">
+        <div class="panel">
+          <h2>タイムライン <span class="tag" id="tlTag">--</span></h2>
+          <div class="graph-wrap"><canvas id="timeline" width="680" height="132"></canvas></div>
+          <div class="kv" id="tlKv"></div>
+          <div class="legend">
+            接地(FP)から Arm Peak を経てリリースまでの時間配分です。
+            長さがそのまま実時間の比です(スロー撮影の補正込み)。<br>
+            <b>Arm Peak が FP より前に来ることもあります</b>(早めに腕が上がっている)。
+            そのときは FP の左側に伸びた帯として表示します。<br>
+            ⚠️ <b>Arm Peak は肩の最大外旋角度(MER)ではありません。</b>
+            側面2Dでは真の外旋角度は測れないため、「肘が最も後方かつ高い位置に来たコマ」の近似です。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>キネマティック・シークエンス <span class="tag" id="chainTag">--</span></h2>
+          <div class="graph-wrap"><canvas id="chain" width="680" height="330"></canvas></div>
+          <div class="legend" id="chainLegend" style="padding-bottom:6px;"></div>
+          <div class="opt-row">
+            <span class="lab">各部位の最大で割って重ねる(順番を見やすくする)</span>
+            <label class="switch"><input type="checkbox" id="chainNormToggle"><span class="slider-toggle"></span></label>
+          </div>
+          <div class="tblwrap"><table class="mtable" id="chainTable"></table></div>
+          <div class="rowlist" id="chainSeq"></div>
+          <div class="legend">
+            <b>見るのは「骨盤 → 胸郭 → 上腕 → 手」の順にピークが並んでいるか</b>です。
+            隣り合う部位が<b>ほぼ同時にピーク</b>なら、そこでエネルギーが分離できていません。
+            前の部位が<b>減速している最中に次がピーク</b>を迎えていれば、
+            ブレーキから次への受け渡しが起きている向きです(表の右端が減速の鋭さ)。<br><br>
+
+            <b>骨盤と胸郭は「鉛直軸まわりの回旋角」から出しています。</b>
+            体が回ると左右の股関節(肩)の<b>見かけの幅が cos で縮む</b>ので、
+            そこから回旋角 φ = arccos(見かけの幅 ÷ 最大幅) を復元しています。
+            側面から骨盤線の「傾き」を見ても回旋は捉えられないため、この方法にしました。<br><br>
+
+            ⚠️ <b>上腕と手は画面内の2D角速度です</b>(表の 2D 印)。腕の動きは3次元なので、
+            カメラに対して奥行き方向に動いた分は入りません。<br>
+            ⚠️ <b>研究で引用される絶対値(600〜1200 °/s 等)とは比較できません。</b>
+            測り方が違います。<b>比較対象は本人の過去の投球のみ</b>としてください。<br>
+            ⚠️ 体が画像面と平行に近い区間(回旋角が小さい区間)は復元の誤差が大きく増幅されるため、
+            角速度を出していません。<br>
+            ⚠️ 区間は<b>最大脚上げ〜リリース</b>です。リリース以降は回旋が90°を越えて
+            見かけの幅が再び広がり、復元が折り返してしまうためです。<br><br>
+            グラフをタップするとその時刻へ移動します。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>前膝の使い方</h2>
+          <div class="kv" id="kneeUse"></div>
+          <div class="legend" id="kneeNote"></div>
+        </div>
+      </div>
+
+      <!-- ===== 再現性(仕様書 §5-F / §8) ===== -->
+      <div class="tabpage" id="tab-repeat">
+        <div class="panel">
+          <h2>ベースライン <span class="tag" id="maturityTag">--</span></h2>
+          <div class="kv" id="maturityKv"></div>
+          <div class="bar"><i id="maturityBar"></i></div>
+          <div class="legend" id="maturityNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>① 測定 <span class="tag">数値そのまま</span></h2>
+          <div class="tblwrap"><table class="mtable" id="statTable"></table></div>
+          <div class="legend">
+            <b>n は常に併記しています。</b><br>
+            SD は n≥3 のときだけ出しています。CV(変動係数)は<b>0をまたがない量にだけ</b>出しています
+            (体幹前傾や膝の伸展量は平均が0付近になりうるため、CVが発散して無意味になります)。<br>
+            検出信頼度が <b>0.50 未満</b>の値と、<b>イベントが未確定の投球</b>は集計から除いています(仕様書 §5-F)。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>リリース位置の再現性 <span class="tag" id="relSdTag">--</span></h2>
+          <div class="graph-wrap"><canvas id="relScatter" width="520" height="520"></canvas></div>
+          <div class="kv" id="relSdKv"></div>
+          <div class="legend">
+            横軸が<b>前後位置</b>、縦軸が<b>高さ</b>です(どちらも身長比)。
+            <b>縦横は同じ縮尺</b>にしてあるので、点の散らばりの形がそのまま実際の散らばりの形です。<br>
+            薄い点が全投球、明るい点が直近10球、丸で囲んだ点が今回の投球です。
+            四角は<b>直近10球の平均 ±1SD</b>の範囲です。<br>
+            ⚠️ <b>これは投球板からの距離(エクステンション)ではありません。</b>
+            高さは足首基準、前後はセット時の軸足つま先基準です(仕様書 §5 E-1/E-2)。
+            左右方向は側面カメラでは測れないため、2軸だけです。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>② 比較 <span class="tag" id="deltaTag">--</span></h2>
+          <div class="tblwrap"><table class="mtable" id="deltaTable"></table></div>
+          <div class="legend">
+            <b>主に見るのは「直近10球との差」</b>です(仕様書 §5-F)。全投球平均との差は副次的に併記しています。<br>
+            他人の値や一般的な目安とは比べていません。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>③ 判定 <span class="tag" id="alertTag">--</span></h2>
+          <div class="rowlist" id="alertList"></div>
+          <div class="legend" id="alertNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>④ 解釈 <span class="tag">事実の記述のみ</span></h2>
+          <div class="legend" id="interpNote"></div>
+        </div>
+      </div>
+
+      <!-- ===== 2球の比較 ===== -->
+      <div class="tabpage" id="tab-compare">
+        <div class="panel">
+          <h2>2球を並べて比べる <span class="tag" id="cmpTag">--</span></h2>
+          <div class="field">
+            <label>A(基準)</label>
+            <select class="mini" id="cmpA" style="width:100%;"></select>
+          </div>
+          <div class="field">
+            <label>B(比べる方)</label>
+            <select class="mini" id="cmpB" style="width:100%;"></select>
+          </div>
+          <div class="opt-row">
+            <span class="lab">見るイベント</span>
+            <select class="mini" id="cmpEvent"></select>
+          </div>
+          <div class="opt-row">
+            <span class="lab">重ねる基準点</span>
+            <select class="mini" id="cmpAnchor">
+              <option value="ankleP">両足首の中点(地面)で合わせる</option>
+              <option value="pelvis">骨盤中心で合わせる</option>
+              <option value="shoulder">肩中点で合わせる</option>
+            </select>
+          </div>
+          <div class="graph-wrap"><canvas id="cmpCanvas" width="440" height="520"></canvas></div>
+          <div class="legend" id="cmpLegend" style="padding-bottom:4px;"></div>
+          <div class="legend">
+            2球とも<b>それぞれの身長ピクセル長で割ってから</b>重ねています。
+            撮影距離やカメラ位置が違っても比べられますが、
+            <b>カメラの角度が違うと形そのものが変わります</b>。同じ位置から撮った動画どうしで比べてください。<br>
+            保存したイベントのコマの骨格だけを使うので、動画がもう手元になくても比べられます。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>指標の差 <span class="tag" id="cmpDiffTag">--</span></h2>
+          <div class="tblwrap"><table class="mtable" id="cmpTable"></table></div>
+          <div class="legend">
+            差は <b>B − A</b> です。どちらが良いかは判定していません。
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 変化・出力 ===== -->
+      <div class="tabpage" id="tab-change">
+        <div class="panel">
+          <h2>このセッションの概要 <span class="tag" id="sumTag">--</span></h2>
+          <div class="kv" id="sumKv"></div>
+          <div class="legend" id="sumNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>10球ブロックごとの変化 <span class="tag" id="blockTag">--</span></h2>
+          <div class="graph-wrap"><canvas id="blockChart" width="680" height="300"></canvas></div>
+          <div class="legend" id="blockLegend" style="padding-bottom:4px;"></div>
+          <div class="tblwrap"><table class="mtable" id="blockTable"></table></div>
+          <div class="legend" id="blockNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>書き出し・読み込み</h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <button id="btnExportCsv">CSV(投球一覧)</button>
+            <button id="btnExportJson" class="primary">JSON(まるごと)</button>
+            <button id="btnImportJson">JSONを読み込む</button>
+          </div>
+          <input type="file" id="jsonInput" accept="application/json,.json">
+          <div class="kv">
+            <span class="k">この選手の投球数</span><span class="v na" id="exportCount">--</span>
+          </div>
+          <div class="legend">
+            ⚠️ <b>iPhone の Safari は、しばらく開かないと保存データを消すことがあります。</b>
+            ブルペンが終わったら JSON を書き出して手元に残してください。<br>
+            JSON にはイベント時の全ランドマークが入っているので、
+            較正値や定義を変えたあとでも計算し直せます。CSV は表計算ソフトで見るためのものです。<br>
+            書き出しも読み込みも端末内で完結します。<b>外部へは送信しません</b>(仕様書 §7)。
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 設定(この位置にイベントを差し込む) ===== -->
+      <div class="tabpage" id="tab-config">
+        <div class="panel">
+          <h2>撮影・計測</h2>
+          <div class="opt-row">
+            <span class="lab">撮影時のfps(スロー撮影)</span>
+            <select class="mini" id="captureFpsSel">
+              <option value="0" selected>自動(動画のまま)</option>
+              <option value="60">60fps</option><option value="120">120fps</option><option value="240">240fps</option>
+            </select>
+          </div>
+          <div class="opt-row">
+            <span class="lab">鏡像動画(インカメラ)</span>
+            <label class="switch"><input type="checkbox" id="mirrorToggle"><span class="slider-toggle"></span></label>
+          </div>
+          <div class="opt-row">
+            <span class="lab">平滑化前の骨格も表示</span>
+            <label class="switch"><input type="checkbox" id="rawToggle"><span class="slider-toggle"></span></label>
+          </div>
+          <div class="range-row">
+            <label>検出しきい値 <b id="visVal">0.40</b></label>
+            <input type="range" class="thin" id="visMin" min="0.1" max="0.8" step="0.05" value="0.4">
+          </div>
+          <div class="legend">
+            <b>撮影時のfps</b>は、スロー撮影の動画が「遅くした状態」で保存されている場合の補正です。
+            画面の fps 表示が撮影設定と違っていたら選んでください。時間に関わる値だけが補正されます。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>アラートのしきい値 <span class="tag">全て変更できます</span></h2>
+          <div class="tblwrap"><table class="mtable" id="thrTable"></table></div>
+          <div class="toolbar">
+            <button id="btnThrReset">初期値に戻す</button>
+          </div>
+          <div class="legend">
+            ⚠️ <b>初期値は外部から与えた数字であり、その選手にとって適切である保証はありません</b>(仕様書 §8-2)。
+            30球程度たまった時点で「再現性」タブの<b>本人のSD</b>を見て、
+            そのばらつきに合わせて設定し直してください。
+            SDより小さいしきい値にすると、ただの測定のばらつきでアラートが鳴り続けます。<br>
+            fps が 50 未満のときは、タイミング系のアラートは自動的に出しません。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>解析精度</h2>
+          <div class="toolbar" style="padding-top:12px;">
+            <select class="mini" id="modelSel" style="flex:1 1 auto;">
+              <option value="lite" selected>標準(軽い・速い)</option>
+              <option value="full">高精度(重い)</option>
+            </select>
+          </div>
+          <div class="legend">動きの速い投球では「高精度」の方が手首の追従が安定します。</div>
+        </div>
+      </div>
+
+      <!-- ===== 使い方 ===== -->
+      <div class="tabpage" id="tab-help">
+        <div class="panel">
+          <h2>説明書</h2>
+          <div class="legend">
+            撮り方・練習1回の流れ・数値の読みかた・うまく測れないときの直し方は
+            <a href="./manual.html" style="color:var(--amber);font-weight:700;">説明書</a>
+            にまとめてあります。一度開いておけば圏外でも読めます。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Ver.1 Phase 1 の範囲</h2>
+          <div class="legend">
+            この版でできることは<b>解析の下地づくり</b>までです。<br>
+            ① 選手の登録(身長・投球腕) ② 較正 ③ セッション管理 ④ トリミング
+            ⑤ 範囲の事前解析と平滑化 ⑥ 骨格の重畳表示とコマ送り
+            ⑦ イベント6点の候補検出と手動確定 ⑧ 各指標の算出と球の記録
+            ⑨ キネマティック・シークエンス(角速度 deg/秒・順番・ブレーキ)<br><br>
+            ⑩ 複数球の平均・中央値・SD・CV・n ⑪ 本人比(直近10球との差が主)
+            ⑫ アラート(しきい値は変更可) ⑬ 10球ブロックごとの変化
+            ⑭ CSV / JSON の書き出しと読み込み
+            ⑮ セッション概要 ⑯ 2球の比較(骨格の重ね + 指標の差)
+            ⑰ リリース位置の散布図(縦横同縮尺) ⑱ FP→Arm Peak→リリースのタイムライン
+            ⑲ 10球ブロックの推移グラフ<br><br>
+            <b>Ver.1 の予定範囲はこれで一通り入りました。</b>
+            実際の動画で試して、検出のしきい値やアラートのしきい値を詰めていく段階です。<br><br>
+            <b>入れていないもの</b>: 3D解析・真の肩最大外旋角度(MER)・球種別の解析・
+            自動の良し悪し判定。これらは側面カメラ1台では測れないか、Ver.1 の範囲外です。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>キーボード操作</h2>
+          <div class="legend">
+            <table style="width:100%;line-height:2.1;">
+              <tr><td><kbd>Space</kbd></td><td>再生 / 一時停止</td></tr>
+              <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>0.1秒</td></tr>
+              <tr><td><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd></td><td>0.01秒</td></tr>
+              <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>1コマ(確実に1コマ)</td></tr>
+              <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>0.001秒</td></tr>
+              <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>トリミングの開始 / 終了</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>撮影について</h2>
+          <div class="legend">
+            <b>側面(一塁/三塁側)</b>から、投球方向に対して<b>直角</b>の位置に三脚を置きます。
+            全身が切れない画角、明るい場所、可能なら60fps以上(iPhoneのスローモーション推奨)。<br>
+            30fpsだとリリース前後が4〜5コマしか残らず、タイミングの比較ができません。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+/* ============================================================
+   投球動作解析システム Ver.1 — Phase 1
+   仕様: docs/pitching-v1-measurement-spec.md
+   この段階の範囲: 選手/セッション管理・較正・トリミング・
+                   範囲の事前解析と平滑化・骨格の重畳表示
+   ============================================================ */
+
+/* ---- MediaPipe は動的 import(CDN不通でも動画操作は使えるように) ---- */
+const CDN_BASES = [
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14",
+  "https://unpkg.com/@mediapipe/tasks-vision@0.10.14",
+];
+let PoseLandmarker = null, FilesetResolver = null, cdnBase = null;
+async function loadVisionLib(){
+  if (PoseLandmarker) return true;
+  for (const base of CDN_BASES){
+    try{
+      const m = await import(`${base}/vision_bundle.mjs`);
+      PoseLandmarker = m.PoseLandmarker; FilesetResolver = m.FilesetResolver; cdnBase = base;
+      return true;
+    }catch(err){ console.warn("vision bundle load failed:", base, err); }
+  }
+  return false;
+}
+const MODEL_URL = {
+  lite:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+  full:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
+};
+
+/* ---- ランドマーク(仕様書 §3) ---- */
+const L = { nose:0, lShoulder:11, rShoulder:12, lElbow:13, rElbow:14, lWrist:15, rWrist:16,
+            lHip:23, rHip:24, lKnee:25, rKnee:26, lAnkle:27, rAnkle:28,
+            lHeel:29, rHeel:30, lFoot:31, rFoot:32 };
+const SKELETON_LINES = [
+  [L.lShoulder,L.rShoulder],[L.lShoulder,L.lElbow],[L.lElbow,L.lWrist],
+  [L.rShoulder,L.rElbow],[L.rElbow,L.rWrist],
+  [L.lShoulder,L.lHip],[L.rShoulder,L.rHip],[L.lHip,L.rHip],
+  [L.lHip,L.lKnee],[L.lKnee,L.lAnkle],[L.lAnkle,L.lHeel],[L.lAnkle,L.lFoot],[L.lHeel,L.lFoot],
+  [L.rHip,L.rKnee],[L.rKnee,L.rAnkle],[L.rAnkle,L.rHeel],[L.rAnkle,L.rFoot],[L.rHeel,L.rFoot],
+  [L.nose,L.lShoulder],[L.nose,L.rShoulder],
+];
+const COLOR_SKELETON = "#7fe0d4", COLOR_POINT = "#eaf6f2", COLOR_RAW = "rgba(233,237,233,.28)";
+const K_NOSE_DEFAULT = 0.89;
+
+/* ---- DOM ---- */
+const $ = (id)=>document.getElementById(id);
+const video=$("video"), overlay=$("overlay"), ctx=overlay.getContext("2d"), stage=$("stage");
+const seek=$("seek"), btnPlay=$("btnPlay"), speedSel=$("speed");
+const timeRead=$("timeRead"), durRead=$("durRead"), frameRead=$("frameRead"), fpsRead=$("fpsRead");
+const toastEl=$("toast");
+
+/* ---- 状態 ---- */
+let poseLandmarker=null, modelKind="lite", libFailed=false;
+let VIS_MIN=0.4, mirror=false, showRaw=false, captureFps=0;
+let videoAR=1, fps=30, fpsLocked=false, fpsMeasured=false;
+let mediaTimeNow=null, frameIndexNow=null, sameFrameFlag=false;
+let prevFrameForCompare=null, stepAnchor=null;
+let rafHandle=null, vfcHandle=null, objectUrl=null, seeking=false;
+let lastLandmarks=null, lastWorld=null;
+let trim={ start:0, end:null };
+let busy=false, cancelBusy=false;
+/* 事前解析の結果 */
+let rawSeries=[];      // [{t, lm, wlm}]  検出そのまま
+let smoothSeries=[];   // [{t, lm}]       平滑化後
+let analysis=null;     // {H_norm, dir, window, detected, total}
+/* 較正 */
+let calibMode=0, calibPts=[];
+/* データ */
+let pitchers=[], sessions=[], currentPitcher=null, currentSession=null;
+let currentFileName="";
+
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const slowFactor=()=> (captureFps>0 && fps>0) ? Math.max(1, captureFps/fps) : 1;
+const realSec=(t)=> t/slowFactor();
+function setStatus(kind,text){ $("statusDot").className="status-dot"+(kind?" "+kind:""); $("statusText").textContent=text; }
+/* モデルと動画がそろうまで解析系の操作を無効にする(押しても何も起きない状態を作らない) */
+function refreshReady(){
+  const ready = !!poseLandmarker && !!video.src && isFinite(video.duration);
+  const a=$("btnAnalyze"), d=$("btnDetectEvents");
+  if(a && !busy){ a.disabled=!ready; a.title = ready?"":"モデルの読み込みと動画の準備が終わると押せます"; }
+  if(d){ const okEv = ready && smoothSeries.length>0;
+         d.disabled=!okEv; d.title = okEv?"":"先に「この範囲を解析する」を実行してください"; }
+}
+let toastTimer=null;
+function toast(m){ toastEl.textContent=m; toastEl.classList.add("show");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.classList.remove("show"),1900); }
+
+/* ============ IndexedDB (仕様書 §1-1 決定6) ============ */
+const DB_NAME="pitchlab", DB_VER=2;
+let db=null;
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=()=>{
+      const d=r.result;
+      if(!d.objectStoreNames.contains("pitchers")) d.createObjectStore("pitchers",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("sessions")) d.createObjectStore("sessions",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("pitches")){
+        const s=d.createObjectStore("pitches",{keyPath:"id"});
+        s.createIndex("session_id","session_id",{unique:false});
+      }
+    };
+    r.onsuccess=()=>res(r.result);
+    r.onerror=()=>rej(r.error);
+  });
+}
+/* プライベートブラウズやブラウザ設定で localStorage / IndexedDB が
+   使えないことがある。触っただけで例外になる環境もあるので、必ずここを通す。 */
+const lsGet=(k)=>{ try{ return lsGet(k); }catch{ return null; } };
+const lsSet=(k,v)=>{ try{ lsSet(k, v); }catch{} };
+let dbBroken=false;
+function storageFail(msg){
+  const first=!dbBroken;
+  dbBroken=true;
+  const text = msg || "この端末ではデータを保存できません(プライベートブラウズか、ブラウザの設定で保存が無効です)。"
+    + "解析と数値の表示は使えますが、記録は残りません。";
+  /* ステータス行はモデル読み込みなどで上書きされるので、消えないパネルにも出す */
+  const w=$("storageWarn"), t=$("storageWarnText");
+  if(w&&t){ t.innerHTML=text+"<br>通常のウィンドウで開き直すか、ブラウザの設定でサイトデータの保存を許可してください。"; w.style.display="block"; }
+  if(first) setStatus("err", text);
+}
+/* 書き込みを伴う操作の入口で呼ぶ。false なら中断する */
+/* 記録ボタンのダブルタップ(モバイルでは起きやすい)で
+   同じ番号のレコードが複数できるのを防ぐ。押している間はボタンも無効にする。 */
+let busySave=false;
+async function withSaveLock(btnId, fn){
+  if(busySave) return;
+  busySave=true;
+  const btn=$(btnId), prev=btn?btn.disabled:false;
+  if(btn) btn.disabled=true;
+  try{ await fn(); }
+  catch(err){ console.error(err); setStatus("err","保存できませんでした"); }
+  finally{ busySave=false; if(btn) btn.disabled=prev; }
+}
+function dbOk(){
+  if(db) return true;
+  storageFail(); toast("この端末ではデータを保存できません");
+  return false;
+}
+function tx(store,mode){ return db.transaction(store,mode).objectStore(store); }
+const dbPut=(store,val)=>new Promise((res,rej)=>{
+  if(!db){ storageFail(); return rej(new Error("no-db")); }
+  const q=tx(store,"readwrite").put(val);q.onsuccess=()=>res(val);q.onerror=()=>rej(q.error);});
+const dbAll=(store)=>new Promise((res)=>{
+  if(!db) return res([]);                       // 読みは空で返して画面を壊さない
+  const q=tx(store,"readonly").getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>res([]);});
+const dbDel=(store,key)=>new Promise((res,rej)=>{
+  if(!db){ storageFail(); return rej(new Error("no-db")); }
+  const q=tx(store,"readwrite").delete(key);q.onsuccess=()=>res();q.onerror=()=>rej(q.error);});
+
+/* ============ モデル ============ */
+let visionFileset=null;
+async function createLandmarker(kind){
+  if(!visionFileset) visionFileset=await FilesetResolver.forVisionTasks(`${cdnBase}/wasm`);
+  const opts=(delegate)=>({baseOptions:{modelAssetPath:MODEL_URL[kind],delegate},runningMode:"VIDEO",numPoses:1});
+  try{ return await PoseLandmarker.createFromOptions(visionFileset,opts("GPU")); }
+  catch(err){ console.warn("GPU delegate failed, CPU にフォールバック",err);
+    return await PoseLandmarker.createFromOptions(visionFileset,opts("CPU")); }
+}
+async function initModel(kind){
+  modelKind=kind;
+  setStatus("busy",`モデルを読み込み中…(${kind==="full"?"高精度":"標準"})`);
+  if(!(await loadVisionLib())){
+    libFailed=true;
+    setStatus("err","解析ライブラリを取得できませんでした。動画の再生とコマ送りはこのまま使えます");
+    return;
+  }
+  libFailed=false;
+  const prev=poseLandmarker; poseLandmarker=null;
+  try{
+    poseLandmarker=await createLandmarker(kind);
+    setStatus("ok", video.src ? "解析できます" : "準備完了 — 動画を読み込んでください");
+  refreshReady();
+  }catch(err){ console.error(err); setStatus("err","モデルの読み込みに失敗しました"); }
+  refreshReady();
+  try{ prev?.close?.(); }catch{}
+  lastTs=-1;
+  if(poseLandmarker && video.readyState>=2) detectAndRender();
+}
+$("modelSel").addEventListener("change",async(e)=>{
+  if(busy){ e.target.value=modelKind; toast("解析中は変更できません"); return; }
+  video.pause(); await initModel(e.target.value); savePrefs();
+});
+
+/* ============ 検出 ============ */
+let lastTs=-1;
+function nextTimestamp(){ let t=Math.round(performance.now()); if(t<=lastTs) t=lastTs+1; lastTs=t; return t; }
+function detect(){
+  if(!poseLandmarker || video.readyState<2) return null;
+  try{
+    const r=poseLandmarker.detectForVideo(video,nextTimestamp());
+    if(!r||!r.landmarks||!r.landmarks.length) return null;
+    return { lm:r.landmarks[0], wlm:r.worldLandmarks?r.worldLandmarks[0]:null };
+  }catch(err){ console.warn("detection skipped",err); return undefined; }
+}
+function detectAndRender(){
+  const r=detect();
+  if(r!==undefined){ lastLandmarks=r?r.lm:null; lastWorld=r?r.wlm:null; }
+  draw();
+  renderCalib();   // 現在のコマでの H_norm を表示に反映
+}
+
+/* ============ 平滑化(仕様書 §2-2) ============ */
+/* 50ms に最も近い奇数フレーム数(最小3)。60fps→3, 120fps→7, 240fps→13 */
+function smoothWindow(f){
+  let n=Math.round(0.050*f);
+  if(n%2===0) n+=1;
+  return Math.max(3,n);
+}
+function smoothLandmarkSeries(series, W){
+  const half=(W-1)/2;
+  return series.map((f,i)=>{
+    if(!f.lm) return {t:f.t, lm:null};
+    const out=new Array(33).fill(null);
+    for(let j=0;j<33;j++){
+      let sx=0,sy=0,sv=0,n=0;
+      for(let k=Math.max(0,i-half);k<=Math.min(series.length-1,i+half);k++){
+        const p=series[k].lm && series[k].lm[j];
+        if(!p) continue;
+        sx+=p.x; sy+=p.y; sv+=(p.visibility==null?1:p.visibility); n++;
+      }
+      if(n) out[j]={x:sx/n,y:sy/n,visibility:sv/n};
+    }
+    return {t:f.t, lm:out};
+  });
+}
+/* 指定時刻に最も近い平滑化フレーム */
+function smoothedAt(t){
+  if(!smoothSeries.length) return null;
+  let lo=0, hi=smoothSeries.length-1;
+  while(lo<hi){ const mid=(lo+hi)>>1; if(smoothSeries[mid].t < t) lo=mid+1; else hi=mid; }
+  const a=smoothSeries[Math.max(0,lo-1)], b=smoothSeries[lo];
+  const pick=(Math.abs(a.t-t)<=Math.abs(b.t-t))?a:b;
+  return (Math.abs(pick.t-t) <= 1.5/fps) ? pick.lm : null;
+}
+
+/* ============ 幾何 ============ */
+const isoX=(p)=>p.x*videoAR;
+function midOf(lm,a,b){
+  const A=lm[a],B=lm[b];
+  if(!A||!B) return null;
+  return { x:(isoX(A)+isoX(B))/2, y:(A.y+B.y)/2 };
+}
+/* 身長ピクセル長(仕様書 §2-4) */
+function computeHNorm(lm, kNose){
+  if(!lm) return null;
+  const nose=lm[L.nose], ank=midOf(lm,L.lAnkle,L.rAnkle);
+  if(!nose||!ank) return null;
+  const d=(ank.y - nose.y);
+  return d>1e-6 ? d/(kNose||K_NOSE_DEFAULT) : null;
+}
+
+/* ============ 描画 ============ */
+function fitOverlay(){
+  const vw=video.videoWidth, vh=video.videoHeight, r=video.getBoundingClientRect();
+  if(!vw||!vh||!r.width||!r.height) return;
+  const sc=Math.min(r.width/vw, r.height/vh), dw=vw*sc, dh=vh*sc;
+  const pr=$("paneA").getBoundingClientRect();
+  overlay.style.left=(r.left-pr.left+(r.width-dw)/2)+"px";
+  overlay.style.top =(r.top -pr.top +(r.height-dh)/2)+"px";
+  overlay.style.width=dw+"px"; overlay.style.height=dh+"px";
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  const w=Math.max(1,Math.round(dw*dpr)), h=Math.max(1,Math.round(dh*dpr));
+  if(overlay.width!==w||overlay.height!==h){ overlay.width=w; overlay.height=h; }
+}
+function layout(){
+  if(video.videoWidth&&video.videoHeight){
+    const ar=`${video.videoWidth} / ${video.videoHeight}`;
+    if(stage.style.aspectRatio!==ar) stage.style.aspectRatio=ar;
+  }
+  fitOverlay(); draw();
+}
+function drawSkeleton(c,cv,lm,color,width,dots){
+  if(!lm) return;
+  const P=(i)=>({x:lm[i].x*cv.width, y:lm[i].y*cv.height});
+  c.strokeStyle=color; c.lineWidth=width; c.lineCap="round";
+  SKELETON_LINES.forEach(([i,j])=>{
+    const A=lm[i],B=lm[j]; if(!A||!B) return;
+    if((A.visibility!=null&&A.visibility<0.3)||(B.visibility!=null&&B.visibility<0.3)) return;
+    const a=P(i),b=P(j); c.beginPath(); c.moveTo(a.x,a.y); c.lineTo(b.x,b.y); c.stroke();
+  });
+  if(!dots) return;
+  lm.forEach((p,i)=>{ if(i>32||!p) return;
+    if(p.visibility!=null&&p.visibility<0.3) return;
+    const q=P(i); c.fillStyle=COLOR_POINT; c.beginPath(); c.arc(q.x,q.y,3,0,Math.PI*2); c.fill(); });
+}
+function draw(){
+  ctx.clearRect(0,0,overlay.width,overlay.height);
+  ctx.save();
+  if(mirror){ ctx.translate(overlay.width,0); ctx.scale(-1,1); }
+  const sm=smoothedAt(video.currentTime);
+  if(showRaw || !sm) drawSkeleton(ctx,overlay,lastLandmarks, sm?COLOR_RAW:COLOR_SKELETON, sm?2:3, !sm);
+  if(sm) drawSkeleton(ctx,overlay,sm,COLOR_SKELETON,3,true);
+  // 較正で置いた点
+  if(calibPts.length){
+    ctx.strokeStyle="#f2b632"; ctx.fillStyle="#f2b632"; ctx.lineWidth=2;
+    if(calibPts.length===2){
+      ctx.beginPath();
+      ctx.moveTo(calibPts[0].x*overlay.width, calibPts[0].y*overlay.height);
+      ctx.lineTo(calibPts[1].x*overlay.width, calibPts[1].y*overlay.height);
+      ctx.stroke();
+    }
+    calibPts.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x*overlay.width,p.y*overlay.height,6,0,Math.PI*2); ctx.fill(); });
+  }
+  ctx.restore();
+}
+window.addEventListener("resize",layout);
+if("ResizeObserver" in window) new ResizeObserver(layout).observe(stage);
+
+/* ============ 動画の読み込み ============ */
+function openPicker(){ $("fileInput").click(); }
+$("pickBtn").addEventListener("click",openPicker);
+$("pickBtn2").addEventListener("click",openPicker);
+$("fileInput").addEventListener("change",()=>{ const f=$("fileInput").files[0]; $("fileInput").value=""; if(f) loadFile(f); });
+["dragenter","dragover"].forEach(ev=>stage.addEventListener(ev,e=>{e.preventDefault();stage.classList.add("dragover");}));
+["dragleave","drop"].forEach(ev=>stage.addEventListener(ev,e=>{e.preventDefault();stage.classList.remove("dragover");}));
+stage.addEventListener("drop",e=>{ const f=e.dataTransfer?.files?.[0];
+  if(f&&f.type.startsWith("video/")) loadFile(f); else if(f) toast("動画ファイルを選んでください"); });
+
+function formatWarning(file){
+  if(file.type && video.canPlayType(file.type)===""){
+    return `この形式(${file.type||"不明"})は再生できない可能性があります。mp4(H.264)に変換してお試しください`;
+  }
+  return null;
+}
+function loadFile(file){
+  currentFileName=(file.name||"").replace(/\.[^.]+$/,"").slice(0,60);
+  const w=formatWarning(file); if(w) setStatus("err",w);
+  events={}; selectedEvent=null; dirManual=null; smoothSeries=[]; refreshReady();
+  if($("thumbWrap")) $("thumbWrap").style.display="none";
+  if(objectUrl) URL.revokeObjectURL(objectUrl);
+  objectUrl=URL.createObjectURL(file);
+  lastLandmarks=null; lastWorld=null;
+  rawSeries=[]; smoothSeries=[]; analysis=null; renderAnalysis();
+  fps=30; fpsLocked=false; fpsMeasured=false; fpsSamples.length=0; noteFrameTime.last=null;
+  mediaTimeNow=null; frameIndexNow=null; stepAnchor=null;
+  trim={start:0,end:null};
+  $("dropUI").style.display="none"; $("paneA").style.display="block";
+  $("transport").classList.add("show");
+  video.src=objectUrl; video.load();
+  renderEvents(); loadDraft();
+}
+video.addEventListener("loadedmetadata",()=>{
+  if(video.videoWidth&&video.videoHeight) videoAR=video.videoWidth/video.videoHeight;
+  seek.max=Math.max(1,Math.floor(video.duration*1000));
+  video.playbackRate=parseFloat(speedSel.value);
+  updateTrimDisplay(); layout(); showFps(false); updateTimeRead();
+  setStatus("ok","解析できます — トリミングしてから「この範囲を解析する」");
+  refreshReady();
+});
+video.addEventListener("loadeddata",()=>{ layout(); detectAndRender(); });
+video.addEventListener("error",()=>{
+  const c=video.error&&video.error.code;
+  setStatus("err", c===4 ? "この形式/コーデックを再生できません。mp4(H.264)に変換してお試しください"
+                         : "動画を再生できませんでした");
+});
+
+/* ============ fps 実測 ============ */
+const fpsSamples=[];
+const COMMON_FPS=[23.976,24,25,29.97,30,50,59.94,60,120,240];
+function noteFrameTime(mt){
+  const last=noteFrameTime.last; noteFrameTime.last=mt;
+  if(last==null) return;
+  const d=mt-last; if(d<=0.0005||d>0.5) return;
+  fpsSamples.push(d); if(fpsSamples.length>40) fpsSamples.shift();
+  if(fpsSamples.length>=8 && !fpsLocked){
+    const s=[...fpsSamples].sort((a,b)=>a-b); const med=s[Math.floor(s.length/2)];
+    let f=1/med;
+    /* 一覧の「最初に見つかったもの」ではなく「いちばん近いもの」に合わせる。
+       29.97 と 30 のように近接する値があるため、先着順だと取り違える。 */
+    let near=null, bestD=Infinity;
+    for(const c of COMMON_FPS){ const d=Math.abs(c-f)/c; if(d<0.06 && d<bestD){ bestD=d; near=c; } }
+    if(near) f=near;
+    fps=f; if(fpsSamples.length>=20) fpsLocked=true;
+    fpsMeasured=true; showFps(true); updateTimeRead();
+  }
+}
+function showFps(measured){
+  const f=slowFactor(), ms=1000/fps/f;
+  fpsRead.textContent=(measured?"fps ":"fps ~")+fps.toFixed(fps%1?2:0)+(f>1?` ×${f.toFixed(0)}`:"")
+    +" / 1コマ "+ms.toFixed(1)+"ms";
+  const n=$("fineNote");
+  if(n) n.innerHTML=`1コマ = <b style="color:#b9c7c0;">${ms.toFixed(1)}ms</b>`
+    +(f>1?`(実時間)`:"")+`。0.001秒は1コマより細かいため、押しても画が変わらないことがあります。`
+    +`確実に1コマ送るには <b style="color:#b9c7c0;">◀| |▶</b>。`;
+}
+
+/* ============ コマ送り(仕様書 §4-0) ============ */
+function captureMediaTime(){
+  const finish=()=>{ sameFrameFlag=(prevFrameForCompare!=null&&frameIndexNow===prevFrameForCompare);
+    prevFrameForCompare=null; updateTimeRead(); };
+  const fallback=()=>{ mediaTimeNow=video.currentTime; frameIndexNow=Math.round(mediaTimeNow*fps);
+    stepAnchor=mediaTimeNow; finish(); };
+  if(!("requestVideoFrameCallback" in HTMLVideoElement.prototype)){ fallback(); return; }
+  let done=false;
+  const timer=setTimeout(()=>{ if(!done){done=true;fallback();} },250);
+  video.requestVideoFrameCallback((_n,meta)=>{
+    if(done) return; done=true; clearTimeout(timer);
+    mediaTimeNow=meta.mediaTime; frameIndexNow=Math.round(mediaTimeNow*fps);
+    stepAnchor=mediaTimeNow; finish();
+  });
+}
+const shownTime=()=> (mediaTimeNow!=null?mediaTimeNow:video.currentTime);
+function seekForStep(t){
+  prevFrameForCompare=frameIndexNow;
+  video.currentTime=clamp(t,0,Math.max(0,video.duration-0.0001));
+  updateTimeRead();
+}
+function stepBy(dt){ if(!video.src||!isFinite(video.duration)) return;
+  if(!video.paused) video.pause(); seekForStep(video.currentTime+dt); }
+function stepFrames(n){
+  if(!video.src||!isFinite(video.duration)) return;
+  if(!video.paused) video.pause();
+  const f=1/fps;
+  const base=(stepAnchor!=null)?stepAnchor:(mediaTimeNow!=null?mediaTimeNow:video.currentTime);
+  stepAnchor=base+n*f;                 // mediaTime はコマの開始時刻。前後とも +0.25f 内側へ
+  seekForStep(stepAnchor+f*0.25);
+}
+function nudgeBy(dt){ if(!video.src||!isFinite(video.duration)) return;
+  if(!video.paused) video.pause();
+  seekForStep(Math.round((video.currentTime+dt)*1000)/1000); }
+function bindRepeat(btn,action){
+  let hold=null,rep=null,viaPointer=false;
+  const stop=()=>{clearTimeout(hold);clearInterval(rep);hold=rep=null;};
+  btn.addEventListener("pointerdown",e=>{ if(e.button!=null&&e.button!==0) return;
+    e.preventDefault(); viaPointer=true; action();
+    hold=setTimeout(()=>{ rep=setInterval(action,90); },420); });
+  ["pointerup","pointercancel","pointerleave"].forEach(ev=>btn.addEventListener(ev,stop));
+  window.addEventListener("pointerup",stop);
+  btn.addEventListener("click",()=>{ if(viaPointer){viaPointer=false;return;} action(); });
+}
+document.querySelectorAll("[data-step]").forEach(b=>bindRepeat(b,()=>stepBy(parseFloat(b.dataset.step))));
+document.querySelectorAll("[data-frame]").forEach(b=>bindRepeat(b,()=>stepFrames(parseInt(b.dataset.frame,10))));
+document.querySelectorAll("[data-nudge]").forEach(b=>bindRepeat(b,()=>nudgeBy(parseFloat(b.dataset.nudge))));
+
+/* ============ 再生 ============ */
+function startLoop(){
+  stopLoop();
+  if("requestVideoFrameCallback" in HTMLVideoElement.prototype){
+    const step=(_n,meta)=>{ if(video.paused||video.ended) return;
+      noteFrameTime(meta.mediaTime); mediaTimeNow=meta.mediaTime;
+      frameIndexNow=Math.round(mediaTimeNow*fps); stepAnchor=mediaTimeNow;
+      if(!smoothSeries.length) detectAndRender(); else draw();
+      updateTimeRead(); enforceTrim();
+      vfcHandle=video.requestVideoFrameCallback(step); };
+    vfcHandle=video.requestVideoFrameCallback(step);
+  }else{
+    const step=()=>{ if(video.paused||video.ended) return;
+      if(!smoothSeries.length) detectAndRender(); else draw();
+      updateTimeRead(); enforceTrim(); rafHandle=requestAnimationFrame(step); };
+    rafHandle=requestAnimationFrame(step);
+  }
+}
+function stopLoop(){ if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
+  if(vfcHandle&&video.cancelVideoFrameCallback){video.cancelVideoFrameCallback(vfcHandle);vfcHandle=null;} }
+video.addEventListener("play",()=>{ btnPlay.textContent="❚❚ 停止"; startLoop(); });
+video.addEventListener("pause",()=>{ btnPlay.textContent="▶ 再生"; stopLoop(); detectAndRender(); });
+video.addEventListener("ended",()=>{ btnPlay.textContent="▶ 再生"; stopLoop(); });
+btnPlay.addEventListener("click",()=>{
+  if(!video.src) return;
+  if(video.paused){
+    const end=trim.end??video.duration;
+    if(video.currentTime>=end-0.01||video.currentTime<trim.start-0.05) video.currentTime=trim.start;
+    video.play().catch(()=>{});
+  } else video.pause();
+});
+speedSel.addEventListener("change",()=>{ video.playbackRate=parseFloat(speedSel.value); savePrefs(); });
+seek.addEventListener("input",()=>{ seeking=true; if(!video.paused) video.pause();
+  video.currentTime=parseFloat(seek.value)/1000; updateTimeRead(); });
+video.addEventListener("timeupdate",()=>{ if(!seeking) seek.value=Math.floor(video.currentTime*1000); updateTimeRead(); });
+let seekPending=false;
+video.addEventListener("seeked",()=>{
+  seeking=false;
+  if(seekPending) return; seekPending=true;
+  requestAnimationFrame(()=>{
+    seekPending=false;
+    if(!video.paused) return;
+    if(!smoothSeries.length) detectAndRender(); else { const r=detect(); if(r!==undefined){lastLandmarks=r?r.lm:null;lastWorld=r?r.wlm:null;} draw(); }
+    captureMediaTime();
+  });
+});
+function enforceTrim(){
+  if(video.paused) return;
+  const end=trim.end??video.duration;
+  if(video.currentTime<trim.start-0.05){ video.currentTime=trim.start; return; }
+  if(video.currentTime>=end-0.005){ video.pause(); video.currentTime=Math.max(trim.start,end-0.005); }
+}
+function updateTimeRead(){
+  const d=video.duration; if(!d||isNaN(d)) return;
+  const shown=shownTime();
+  timeRead.textContent=shown.toFixed(3);
+  durRead.textContent=d.toFixed(3);
+  frameRead.textContent="コマ "+(frameIndexNow!=null?frameIndexNow:Math.round(shown*fps));
+  const f=slowFactor();
+  $("realRead").style.display=f>1?"inline-block":"none";
+  if(f>1) $("realRead").textContent="実 "+realSec(shown).toFixed(3)+"s";
+  const gap=Math.abs(video.currentTime-shown);
+  $("posRead").style.display=gap>0.0005?"inline-block":"none";
+  if(gap>0.0005) $("posRead").textContent="位置 "+video.currentTime.toFixed(3);
+  $("sameChip").style.display=sameFrameFlag?"inline-block":"none";
+  const tEnd=trim.end??d;
+  $("outOfTrim").style.display=(video.currentTime<trim.start-0.001||video.currentTime>tEnd+0.001)?"inline-block":"none";
+}
+document.addEventListener("keydown",(e)=>{
+  const tag=(e.target.tagName||"").toLowerCase();
+  if(tag==="input"||tag==="select"||tag==="textarea") return;
+  if(e.metaKey||e.ctrlKey||e.altKey||!video.src) return;
+  const k=e.key;
+  if(k===" "){e.preventDefault();btnPlay.click();}
+  else if(k==="ArrowLeft"){e.preventDefault();stepBy(e.shiftKey?-0.01:-0.1);}
+  else if(k==="ArrowRight"){e.preventDefault();stepBy(e.shiftKey?0.01:0.1);}
+  else if(k===","){e.preventDefault();stepFrames(-1);}
+  else if(k==="."){e.preventDefault();stepFrames(1);}
+  else if(k==="["){e.preventDefault();nudgeBy(-0.001);}
+  else if(k==="]"){e.preventDefault();nudgeBy(0.001);}
+  else if(k==="i"||k==="I"){e.preventDefault();$("btnTrimStart").click();}
+  else if(k==="o"||k==="O"){e.preventDefault();$("btnTrimEnd").click();}
+});
+$("btnToStart").addEventListener("click",()=>{ video.pause(); video.currentTime=0; });
+$("btnToTrim").addEventListener("click",()=>{ video.pause(); video.currentTime=trim.start; });
+
+/* ============ トリミング ============ */
+const fmt=(t)=> (t==null||isNaN(t))?"--":t.toFixed(3)+"s";
+function updateTrimDisplay(){
+  $("trimStartTime").textContent=fmt(trim.start);
+  $("trimEndTime").textContent=trim.end==null?"動画の最後":fmt(trim.end);
+  if(!video.duration||isNaN(video.duration)){ $("seekTrim").innerHTML=""; return; }
+  const pos=(t)=>clamp(t/video.duration,0,1)*100;
+  const e=trim.end??video.duration;
+  $("seekTrim").innerHTML=`<i style="left:0;width:${pos(trim.start)}%"></i><i style="left:${pos(e)}%;right:0"></i>`;
+}
+$("btnTrimStart").addEventListener("click",()=>{
+  const t=video.currentTime;
+  if(trim.end!=null&&t>=trim.end){ toast("開始は終了より前にしてください"); return; }
+  trim.start=t; updateTrimDisplay(); toast("開始を設定しました");
+});
+$("btnTrimEnd").addEventListener("click",()=>{
+  const t=video.currentTime;
+  if(t<=trim.start){ toast("終了は開始より後にしてください"); return; }
+  trim.end=t; updateTrimDisplay(); toast("終了を設定しました");
+});
+$("btnTrimReset").addEventListener("click",()=>{ trim={start:0,end:null}; updateTrimDisplay(); });
+
+/* ============ 較正(仕様書 §2-4) ============ */
+function calibBanner(msg){
+  const b=$("calibBanner");
+  if(msg){ b.textContent=msg; b.classList.add("show"); } else b.classList.remove("show");
+}
+$("btnCalib").addEventListener("click",()=>{
+  if(!dbOk()) return;
+  if(!currentPitcher){ toast("先に選手を登録・選択してください"); return; }
+  if(!video.src){ toast("先に動画を読み込んでください"); return; }
+  if(!lastLandmarks){ toast("骨格が検出できているコマで実行してください"); return; }
+  calibMode=1; calibPts=[];
+  overlay.classList.add("calib");
+  calibBanner("① 選手がまっすぐ立っているコマで、長さが分かるものの「片端」をタップ");
+  draw();
+});
+function calibCancel(){ calibMode=0; calibPts=[]; overlay.classList.remove("calib"); calibBanner(null); draw(); }
+overlay.addEventListener("pointerdown",(e)=>{
+  if(!calibMode) return;
+  const r=overlay.getBoundingClientRect();
+  let nx=(e.clientX-r.left)/r.width, ny=(e.clientY-r.top)/r.height;
+  if(mirror) nx=1-nx;
+  calibPts.push({x:clamp(nx,0,1), y:clamp(ny,0,1)});
+  if(calibPts.length===1){ calibBanner("② もう片方の端をタップ"); draw(); return; }
+  calibMode=0; overlay.classList.remove("calib"); calibBanner(null); draw();
+  finishCalibration();
+});
+function finishCalibration(){
+  const [a,b]=calibPts;
+  const d=Math.hypot((a.x-b.x)*videoAR, a.y-b.y);   // 等方座標での距離
+  if(d<1e-4){ toast("2点が近すぎます"); calibPts=[]; draw(); return; }
+  const input=prompt("いま指定した2点の実際の長さ(cm)を入力してください\n例: 投球板の横幅 = 60.96", "60.96");
+  if(input==null){ calibPts=[]; draw(); return; }
+  const Lcm=parseFloat(input);
+  if(!isFinite(Lcm)||Lcm<=0){ toast("数値を入力してください"); calibPts=[]; draw(); return; }
+  const cmPerUnit=Lcm/d;                      // cm / 等方単位
+  const hNormTrue=currentPitcher.height_cm/cmPerUnit;
+  const nose=lastLandmarks[L.nose], ank=midOf(lastLandmarks,L.lAnkle,L.rAnkle);
+  if(!nose||!ank){ toast("鼻・足首が検出できていません"); calibPts=[]; draw(); return; }
+  const k=(ank.y-nose.y)/hNormTrue;
+  // k_nose は人体比なので 0.89 前後になるはず。大きく外れたら入力ミスとみなす
+  if(!(k>0.75&&k<1.05)){
+    const why = k<0.75
+      ? "脚を上げているコマの可能性があります。まっすぐ立っているコマでやり直してください"
+      : "指定した長さが実際より短い可能性があります";
+    setStatus("err",`較正値が不自然です(k=${k.toFixed(3)})。${why}`);
+    toast("較正できませんでした"); calibPts=[]; draw(); return;
+  }
+  currentPitcher.k_nose=k; currentPitcher.calibrated=true;
+  dbPut("pitchers",currentPitcher).then(()=>{ renderCalib(); toast(`較正しました (k_nose=${k.toFixed(3)})`); });
+  calibPts=[]; draw();
+}
+$("btnCalibReset").addEventListener("click",()=>{
+  if(!currentPitcher) return;
+  if(!dbOk()) return;
+  currentPitcher.k_nose=K_NOSE_DEFAULT; currentPitcher.calibrated=false;
+  dbPut("pitchers",currentPitcher).then(()=>{ renderCalib(); toast("既定値に戻しました"); });
+});
+function renderCalib(){
+  const k=currentPitcher?(currentPitcher.k_nose||K_NOSE_DEFAULT):K_NOSE_DEFAULT;
+  const cal=!!(currentPitcher&&currentPitcher.calibrated);
+  $("calibTag").textContent=cal?"較正済み":"未較正";
+  $("kNoseVal").textContent=k.toFixed(3)+(cal?"":" (既定)");
+  const hn=lastLandmarks?computeHNorm(lastLandmarks,k):null;
+  const el=$("hNormVal");
+  el.textContent=hn?hn.toFixed(4):"--"; el.className="v"+(hn?"":" na");
+}
+
+/* ============ 選手 ============ */
+async function reloadPitchers(){
+  pitchers=await dbAll("pitchers");
+  const wrap=$("pitcherList");
+  wrap.innerHTML=pitchers.length?pitchers.map(p=>`
+    <div class="rowitem${currentPitcher&&currentPitcher.id===p.id?" sel":""}" data-id="${p.id}">
+      <span><span class="nm">${escapeHtml(p.name)}</span>
+        <span class="sub">${p.height_cm}cm / ${p.throws==="R"?"右":"左"}投げ / ${p.calibrated?"較正済":"未較正"}</span></span>
+      <button class="pick">選択</button>
+    </div>`).join("")
+    :`<div class="legend" style="padding:0;">まだ登録がありません。下の欄に入力して登録してください。</div>`;
+  $("pitcherTag").textContent=currentPitcher?currentPitcher.name:"未選択";
+  renderCalib();
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+/* 選手を切り替えるときは、必ずこれを通す。
+   ⚠️ セッションは選手に属する。別の選手のセッションを開いたまま記録すると、
+   「選手Bの投球が選手Aのセッションに入る」レコードができてしまう。 */
+/* 投球腕が変わると、イベント検出に使った踏み出し脚・投球腕が入れ替わる。
+   ⚠️ イベント時刻をそのままにして指標だけ左右を入れ替えると、
+   もっともらしいが意味のない数値になる(実測: 前膝 144°→179°)。
+   なので解析済みのイベントは捨てて、検出し直してもらう。 */
+function invalidateOnHandChange(){
+  if(!analysis) return false;
+  const now = currentPitcher ? currentPitcher.throws : null;
+  if(analysis.handed==null || analysis.handed===now) return false;
+  analysis.handed=now;
+  events={}; selectedEvent=null;
+  const tw=$("thumbWrap"); if(tw) tw.style.display="none";
+  renderEvents(); saveDraft();
+  setStatus("err","投球腕が変わったので、イベントを検出し直してください");
+  toast("イベントを検出し直してください");
+  return true;
+}
+async function setCurrentPitcher(p){
+  const changed = !currentPitcher || !p || currentPitcher.id!==p.id;
+  currentPitcher=p||null;
+  invalidateOnHandChange();
+  if(p){
+    lsSet("pitchlab.lastPitcher", p.id);
+    $("pName").value=p.name; $("pHeight").value=p.height_cm; $("pThrows").value=p.throws;
+  }
+  if(currentSession && (!p || currentSession.pitcher_id!==p.id)) currentSession=null;
+  await reloadPitchers();
+  await reloadSessions();
+  await renderPitchList();
+  await refreshData();
+  renderMetrics();
+  return changed;
+}
+$("pitcherList").addEventListener("click",async(e)=>{
+  const row=e.target.closest(".rowitem"); if(!row) return;
+  const p=pitchers.find(x=>x.id===row.dataset.id); if(!p) return;
+  const hadSession=!!currentSession;
+  await setCurrentPitcher(p);
+  if(hadSession&&!currentSession) toast("別の選手に切り替えたので、セッションを閉じました");
+});
+$("btnAddPitcher").addEventListener("click",async()=>{
+  if(!dbOk()) return;
+  const name=$("pName").value.trim();
+  const h=parseFloat($("pHeight").value);
+  if(!name){ toast("名前を入力してください"); return; }
+  if(!isFinite(h)||h<100||h>220){ toast("身長を100〜220cmで入力してください"); return; }
+  const hand=$("pThrows").value;
+  /* 同姓の別人を黙って上書きしないようにする。
+     ⚠️ 上書きすると、その名前で保存済みの記録が、身長も利き手も違う
+     プロフィールに紐づいたままになり、cm 換算も左右も狂う。 */
+  let target=null;
+  if(currentPitcher && currentPitcher.name===name) target=currentPitcher;                 // 選択中の本人を更新
+  else {
+    const same=pitchers.filter(x=>x.name===name);
+    if(same.length){
+      const e=same[0];
+      const differs=(e.height_cm!==h || e.throws!==hand);
+      if(!differs) target=e;
+      else target=confirm(
+        `「${name}」はすでに登録されています(${e.height_cm}cm / ${e.throws==="R"?"右":"左"}投げ)。\n\n`
+        +`OK: この選手の情報を書き換える\n`
+        +`キャンセル: 同姓の別人として新しく登録する`) ? e : null;
+    }
+  }
+  const exist=!!target;
+  const p= target ? {...target, height_cm:h, throws:hand}
+                 : { id:String(Date.now()), name, height_cm:h, throws:hand,
+                     k_nose:K_NOSE_DEFAULT, calibrated:false };
+  await dbPut("pitchers",p);
+  const hadSession=!!currentSession;
+  await setCurrentPitcher(p);
+  toast(exist?"更新しました":"登録しました");
+  if(hadSession&&!currentSession) toast("別の選手に切り替えたので、セッションを閉じました");
+});
+
+/* ============ セッション ============ */
+async function reloadSessions(){
+  sessions=(await dbAll("sessions")).sort((a,b)=>b.started_at-a.started_at);
+  const mine=currentPitcher?sessions.filter(s=>s.pitcher_id===currentPitcher.id).slice(0,8):[];
+  $("sessionList").innerHTML=mine.length?mine.map(s=>{
+    const d=new Date(s.started_at);
+    const label=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    return `<div class="rowitem${currentSession&&currentSession.id===s.id?" sel":""}">
+      <span><span class="nm">${label}</span>
+        <span class="sub">${s.ended_at?"終了":"進行中"} / ${(s.pitch_ids||[]).length}球</span></span>
+      <span style="display:flex;gap:6px;">
+        <button class="ssel" data-id="${s.id}">開く</button>
+        <button class="del" data-id="${s.id}">削除</button></span></div>`;
+  }).join("") : `<div class="legend" style="padding:0;">${
+      currentPitcher?"この選手のセッションはまだありません。":"先に選手を選択してください。"}</div>`;
+  $("sessionTag").textContent=currentSession?(currentSession.ended_at?"終了":"進行中"):"未開始";
+}
+$("sessionList").addEventListener("click",async(e)=>{
+  /* 過去のセッションを開いて見直せるようにする。
+     JSONを読み込んだ直後は進行中のセッションが無いので、これが無いと
+     10球ブロックの推移も投球一覧も見られない。 */
+  if(!dbOk()) return;
+  const sel=e.target.closest(".ssel");
+  if(sel){
+    const s=sessions.find(x=>x.id===sel.dataset.id);
+    if(!s) return;
+    currentSession=s;
+    await reloadSessions(); await renderPitchList(); await refreshData();
+    toast(s.ended_at?"終了したセッションを開きました(記録は追加できます)":"セッションを開きました");
+    return;
+  }
+  const b=e.target.closest(".del"); if(!b) return;
+  await dbDel("sessions",b.dataset.id);
+  if(currentSession&&currentSession.id===b.dataset.id) currentSession=null;
+  await reloadSessions(); await renderPitchList(); await refreshData();
+});
+$("btnSessionStart").addEventListener("click",()=>withSaveLock("btnSessionStart",async()=>{
+  if(!dbOk()) return;
+  if(!currentPitcher){ toast("先に選手を選択してください"); return; }
+  currentSession={ id:String(Date.now()), pitcher_id:currentPitcher.id,
+    date:new Date().toISOString().slice(0,10), started_at:Date.now(), ended_at:null, note:"", pitch_ids:[] };
+  await dbPut("sessions",currentSession);
+  await reloadSessions(); await renderPitchList(); toast("セッションを開始しました");
+}));
+$("btnSessionEnd").addEventListener("click",async()=>{
+  if(!dbOk()) return;
+  if(!currentSession){ toast("進行中のセッションがありません"); return; }
+  currentSession.ended_at=Date.now();
+  await dbPut("sessions",currentSession);
+  currentSession=null; await reloadSessions(); toast("セッションを終了しました");
+});
+
+/* ============ 事前解析(仕様書 §2-2) ============ */
+function seekTo(t){
+  return new Promise(res=>{
+    const dur=video.duration;
+    const target=clamp(t,0,(isFinite(dur)&&dur>0)?Math.max(0,dur-0.001):t);
+    if(Math.abs(video.currentTime-target)<1e-4){ res(); return; }
+    let done=false;
+    const fin=()=>{ if(done) return; done=true; video.removeEventListener("seeked",fin); clearTimeout(tm); res(); };
+    const tm=setTimeout(fin,2000);
+    video.addEventListener("seeked",fin);
+    video.currentTime=target;
+  });
+}
+$("btnAnalyze").addEventListener("click",async()=>{
+  if(busy){ cancelBusy=true; return; }
+  if(!video.duration||isNaN(video.duration)){ toast("先に動画を読み込んでください"); return; }
+  if(!poseLandmarker){ setStatus("err", libFailed?"解析ライブラリを取得できていません":"モデルを読み込み中です"); return; }
+  video.pause();
+  busy=true; cancelBusy=false;
+  $("btnAnalyze").textContent="中止"; $("btnAnalyze").disabled=false;
+  const start=clamp(trim.start,0,video.duration);
+  const end=trim.end!=null?Math.min(video.duration,trim.end):video.duration;
+  const dur=Math.max(0.1,end-start);
+  const step=1/fps;
+  /* メモリと時間の上限。240fps なら 1200コマ = 5.0秒しかない。
+     ⚠️ ここで黙って切り詰めると、範囲の後半が解析されないまま
+     「完了」と表示されてしまうので、切り詰めたことを必ず伝える。 */
+  const FRAME_CAP=1200;
+  const wanted=Math.max(1,Math.round(dur/step));
+  const total=Math.min(FRAME_CAP,wanted);
+  const truncated=wanted>FRAME_CAP;
+  const series=[];
+  try{
+    for(let i=0;i<=total;i++){
+      if(cancelBusy) break;
+      const t=start+Math.min(dur-0.001,i*step);
+      await seekTo(t);
+      const r=detect();
+      const got=(r===undefined)?null:r;
+      series.push({ t:video.currentTime, lm:got?got.lm:null, wlm:got?got.wlm:null });
+      if(i%4===0){
+        const pct=Math.round(i/total*100);
+        $("analyzeBar").style.width=pct+"%";
+        setStatus("busy",`解析中… ${pct}%`);
+      }
+    }
+    rawSeries=series;
+    const W=smoothWindow(fps);
+    smoothSeries=smoothLandmarkSeries(series,W);
+    const detected=series.filter(f=>f.lm).length;
+    /* 身長ピクセル長。
+       「範囲の先頭フレーム」から取ると、トリミング開始が既に脚上げに入っていた場合に
+       10%近く小さく出てしまう(足首中点が上がるため)。
+       直立に近い姿勢ほど 足首〜鼻 の距離は大きくなるので、
+       範囲全体の上位10%(90パーセンタイル)を採る。単発の外れ値にも影響されにくい。 */
+    const k=currentPitcher?(currentPitcher.k_nose||K_NOSE_DEFAULT):K_NOSE_DEFAULT;
+    const hs=smoothSeries.map(f=>f.lm?computeHNorm(f.lm,k):null).filter(v=>v!=null).sort((a,b)=>a-b);
+    const H=hs.length?hs[Math.min(hs.length-1, Math.floor(hs.length*0.90))]:null;
+    const hSpread=hs.length? (hs[hs.length-1]-hs[0])/ (H||1) : 0;
+    // 投球方向(仕様書 §2-3): 骨盤中心の移動向き
+    let dir=null, dirAmb=false;
+    const first=smoothSeries.find(f=>f.lm);
+    const last=[...smoothSeries].reverse().find(f=>f.lm);
+    if(first&&last&&H){
+      const a=midOf(first.lm,L.lHip,L.rHip), b=midOf(last.lm,L.lHip,L.rHip);
+      if(a&&b){
+        const dx=(b.x-a.x)/H;
+        if(Math.abs(dx)<0.02) dirAmb=true; else dir=Math.sign(dx);
+      }
+    }
+    analysis={ H_norm:H, hSpread, dir, dirAmb, window:W, detected, total:series.length,
+               truncated, coveredSec:total*step, requestedSec:dur,
+               k_nose:k, calibrated:!!(currentPitcher&&currentPitcher.calibrated),
+               handed:currentPitcher?currentPitcher.throws:null };
+    /* 範囲を狭めて解析し直すと、前の範囲で決めたイベントが解析範囲の外に出る。
+       そのまま残すと「確定済み」に見えるのに指標だけ消える状態になるので捨てる。 */
+    let droppedEv=[];
+    if(smoothSeries.length){
+      const w0=smoothSeries[0].t, w1=smoothSeries[smoothSeries.length-1].t;
+      droppedEv=Object.keys(events).filter(k=>events[k].t<w0-1e-6||events[k].t>w1+1e-6);
+      if(droppedEv.length){
+        droppedEv.forEach(k=>delete events[k]);
+        selectedEvent=null;
+        const tw=$("thumbWrap"); if(tw) tw.style.display="none";
+        renderEvents(); saveDraft();
+      }
+    }
+    renderAnalysis();
+    $("dirManualRow").style.display = (analysis.dirAmb && dirManual==null) ? "flex" : "none";
+    renderMetrics();
+    await seekTo(start);
+    detectAndRender();
+    if(truncated&&!cancelBusy){
+      setStatus("err",`範囲が長すぎるため、先頭 ${(total*step).toFixed(1)}秒 分だけ解析しました`
+        +`(指定は ${dur.toFixed(1)}秒)。トリミングを短くしてやり直してください`);
+      toast("範囲が長すぎます。先頭だけ解析しました");
+    }else{
+      setStatus("ok", cancelBusy?"解析を中止しました"
+        :`解析 完了 — ${detected}/${series.length} コマで骨格を検出`
+         +(droppedEv.length?` / 範囲の外に出た ${droppedEv.length} 件のイベントは取り消しました`:""));
+      if(!cancelBusy) toast(droppedEv.length
+        ? "範囲外になったイベントを取り消しました。検出し直してください" : "解析が完了しました");
+    }
+  }catch(err){
+    console.error(err); setStatus("err","解析中にエラーが発生しました");
+  }finally{
+    busy=false; $("btnAnalyze").textContent="この範囲を解析する"; $("analyzeBar").style.width="0";
+    refreshReady();
+  }
+});
+function renderAnalysis(){
+  const set=(id,val,cls)=>{ const e=$(id); e.textContent=val; e.className="v"+(cls?" "+cls:""); };
+  if(!analysis){
+    $("analyzeTag").textContent="未実行";
+    ["kFrames","kWindow","kHnorm","kDir","kDetected","kFrameMs"].forEach(id=>set(id,"--","na"));
+    return;
+  }
+  $("analyzeTag").textContent=analysis.truncated?"一部のみ":"完了";
+  $("analyzeTag").style.color=analysis.truncated?"var(--alert)":"";
+  set("kFrames", analysis.truncated
+    ? `${analysis.total} コマ (先頭 ${analysis.coveredSec.toFixed(1)}s / 指定 ${analysis.requestedSec.toFixed(1)}s)`
+    : `${analysis.total} コマ`, analysis.truncated?"warn":"");
+  set("kWindow", `${analysis.window} コマ (約${Math.round(analysis.window/fps*1000)}ms)`);
+  set("kHnorm", analysis.H_norm?analysis.H_norm.toFixed(4)+(analysis.calibrated?"":" (未較正)"):"--",
+      analysis.H_norm?(analysis.calibrated?"ok":""):"na");
+  set("kDir", analysis.dirAmb?"判定不能":(analysis.dir==null?"--":(analysis.dir>0?"画面の右":"画面の左")),
+      analysis.dirAmb?"warn":(analysis.dir==null?"na":""));
+  const ratio=analysis.total?analysis.detected/analysis.total:0;
+  set("kDetected", `${analysis.detected} / ${analysis.total} (${Math.round(ratio*100)}%)`,
+      ratio>=0.9?"ok":(ratio>=0.7?"":"warn"));
+  set("kFrameMs", (1000/fps/slowFactor()).toFixed(1)+"ms");
+}
+
+/* ============ 設定 ============ */
+const PREF="pitchlab.prefs.v1";
+function savePrefs(){
+  try{ lsSet(PREF, JSON.stringify({
+    modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value })); }catch{}
+}
+(function applyPrefs(){
+  let p={}; try{ p=JSON.parse(lsGet(PREF)||"{}"); }catch{}
+  if(p.modelKind==="full"||p.modelKind==="lite") modelKind=p.modelKind;
+  if(typeof p.VIS_MIN==="number") VIS_MIN=clamp(p.VIS_MIN,0.1,0.8);
+  if(typeof p.mirror==="boolean") mirror=p.mirror;
+  if(typeof p.showRaw==="boolean") showRaw=p.showRaw;
+  if(typeof p.captureFps==="number") captureFps=p.captureFps;
+  if(p.speed) speedSel.value=p.speed;
+  $("modelSel").value=modelKind; $("visMin").value=String(VIS_MIN);
+  $("visVal").textContent=VIS_MIN.toFixed(2);
+  $("mirrorToggle").checked=mirror; video.classList.toggle("mirrored",mirror);
+  $("rawToggle").checked=showRaw; $("captureFpsSel").value=String(captureFps||0);
+})();
+$("visMin").addEventListener("input",e=>{ VIS_MIN=parseFloat(e.target.value);
+  $("visVal").textContent=VIS_MIN.toFixed(2); savePrefs(); draw(); });
+/* 結果に効く設定を変えたら、指標・連鎖・集計をまとめて計算し直す。
+   ⚠️ 片方だけ更新すると、画面の一部だけ古い値のまま残る。
+   実測: capture_fps を変えても指標が再計算されず、240fps 設定時に
+   タイミング指標が 8倍ずれたまま保存されていた。 */
+function recomputeAll(){
+  renderMetrics();
+  drawTimeline();
+  if(isChainVisible()) drawChain(); else chain=null;
+  refreshData();
+}
+$("mirrorToggle").addEventListener("change",e=>{ mirror=e.target.checked;
+  video.classList.toggle("mirrored",mirror); savePrefs(); draw(); recomputeAll(); });
+$("rawToggle").addEventListener("change",e=>{ showRaw=e.target.checked; savePrefs(); draw(); });
+$("captureFpsSel").addEventListener("change",e=>{
+  captureFps=parseFloat(e.target.value)||0; savePrefs();
+  showFps(fpsMeasured); updateTimeRead(); renderAnalysis(); recomputeAll();
+  const f=slowFactor();
+  toast(f>1?`実時間 = 動画時間 ÷ ${f.toFixed(0)} として計算します`:"時間の補正なし");
+});
+document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll(".tabpage").forEach(x=>x.classList.remove("active"));
+  t.classList.add("active"); $("tab-"+t.dataset.tab).classList.add("active");
+  if(t.dataset.tab==="chain") drawChain();
+  if(t.dataset.tab==="repeat"||t.dataset.tab==="change") refreshData();
+  if(t.dataset.tab==="compare") reloadCompare();
+}));
+document.addEventListener("visibilitychange",()=>{ if(document.hidden&&!video.paused) video.pause(); });
+
+/* ============ Service Worker ============ */
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("./sw.js").then(reg=>{
+      reg.addEventListener("updatefound",()=>{
+        const sw=reg.installing; if(!sw) return;
+        sw.addEventListener("statechange",()=>{
+          if(sw.state==="installed"&&navigator.serviceWorker.controller)
+            toast("新しいバージョンがあります。再読み込みしてください");
+        });
+      });
+    }).catch(err=>console.warn("sw registration failed",err));
+  });
+}
+
+
+/* ============================================================
+   イベント検出(仕様書 §4)
+   自動検出は「候補の生成」。確定は必ず手動。
+   すべて平滑化後の系列(smoothSeries)の上で計算する。
+   ============================================================ */
+const EVENTS = [
+  { id:"set",  label:"セット/構え" },
+  { id:"lift", label:"最大脚上げ" },
+  { id:"fp",   label:"前足接地 (FP)" },
+  { id:"arm",  label:"Arm Peak (2D近似)" },
+  { id:"rel",  label:"リリース" },
+  { id:"fin",  label:"フィニッシュ" },
+];
+let events={};        // id -> {t, frame, confirmed, auto}
+let dirManual=null;   // 自動判定できないときの手動指定
+let selectedEvent=null;
+
+const mpSide=(anat)=> mirror ? (anat==="R"?"L":"R") : anat;
+function throwArm(){ return currentPitcher ? currentPitcher.throws : "R"; }
+function strideSideAnat(){ return throwArm()==="R" ? "L" : "R"; }   // 踏み出し脚は投球腕の反対
+const IDX={ ankle:{R:L.rAnkle,L:L.lAnkle}, foot:{R:L.rFoot,L:L.lFoot},
+            wrist:{R:L.rWrist,L:L.lWrist}, elbow:{R:L.rElbow,L:L.lElbow},
+            shoulder:{R:L.rShoulder,L:L.lShoulder} };
+const idxOf=(part,anat)=>IDX[part][mpSide(anat)];
+function effectiveDir(){
+  if(dirManual!=null) return dirManual;
+  return (analysis && !analysis.dirAmb) ? analysis.dir : null;
+}
+
+function detectEvents(){
+  if(!smoothSeries.length || !analysis || !analysis.H_norm){
+    toast("先に「この範囲を解析する」を実行してください"); return null;
+  }
+  const dir=effectiveDir();
+  if(dir==null){ $("dirManualRow").style.display="flex";
+    toast("投球方向を選んでください"); return null; }
+  const S=smoothSeries, H=analysis.H_norm, N=S.length;
+  const lm=(i)=>S[i]&&S[i].lm;
+  const ok=(i,j)=>{ const p=lm(i)&&lm(i)[j]; return p&&(p.visibility==null||p.visibility>=VIS_MIN); };
+  const X=(i,j)=>lm(i)[j].x*videoAR, Y=(i,j)=>lm(i)[j].y;
+  /* 中心差分の速さ[身長/秒]。時間は実時間(スロー補正込み) */
+  const spd=(i,j)=>{
+    if(i<=0||i>=N-1) return null;
+    const a=lm(i-1)&&lm(i-1)[j], b=lm(i+1)&&lm(i+1)[j];
+    if(!a||!b) return null;
+    const dt=realSec(S[i+1].t-S[i-1].t);
+    if(dt<=0) return null;
+    return Math.hypot((b.x-a.x)*videoAR, b.y-a.y)/H/dt;
+  };
+  const strideAnk=idxOf("ankle",strideSideAnat()), strideToe=idxOf("foot",strideSideAnat());
+  const armW=idxOf("wrist",throwArm()), armE=idxOf("elbow",throwArm()), armS=idxOf("shoulder",throwArm());
+
+  /* ① 仮FP: 後半で踏み出し足首の Y が最大(=最も低い) */
+  let fpTmp=-1, maxY=-Infinity;
+  for(let i=Math.floor(N*0.3);i<N;i++){
+    if(!ok(i,strideAnk)) continue;
+    if(Y(i,strideAnk)>maxY){ maxY=Y(i,strideAnk); fpTmp=i; }
+  }
+  if(fpTmp<0) return null;
+
+  /* ② 最大脚上げ: set〜仮FP で踏み出し足首の Y が最小(=最も高い) */
+  let lift=-1, minY=Infinity;
+  for(let i=0;i<=fpTmp;i++){
+    if(!ok(i,strideAnk)) continue;
+    if(Y(i,strideAnk)<minY){ minY=Y(i,strideAnk); lift=i; }
+  }
+  if(lift<0) lift=0;
+
+  /* ③ FP(§4-1): 足首・つま先の速度が閾値以下2連続 かつ Y が最大の95%以上 */
+  let fp=-1;
+  const yPeakSoFar=(i)=>{ let m=-Infinity; for(let k=0;k<=i;k++) if(ok(k,strideAnk)) m=Math.max(m,Y(k,strideAnk)); return m; };
+  for(let i=lift+1;i<N-2;i++){
+    const a1=spd(i,strideAnk), a2=spd(i+1,strideAnk);
+    const t1=spd(i,strideToe), t2=spd(i+1,strideToe);
+    if(a1==null||a2==null) continue;
+    const c1 = a1<0.15 && a2<0.15;
+    const c2 = (t1==null||t2==null) ? true : (t1<0.20 && t2<0.20);
+    const c3 = ok(i,strideAnk) && Y(i,strideAnk) >= 0.95*yPeakSoFar(i);
+    if(c1&&c2&&c3){ fp=i; break; }
+  }
+  if(fp<0){ // 条件1のみ
+    for(let i=lift+1;i<N-2;i++){
+      const a1=spd(i,strideAnk), a2=spd(i+1,strideAnk);
+      if(a1!=null&&a2!=null&&a1<0.15&&a2<0.15){ fp=i; break; }
+    }
+  }
+  if(fp<0) fp=fpTmp;
+
+  /* ④ リリース(§4-3): FP以降、手首が肩より前方の区間で手首速度が最大 */
+  let rel=-1, maxW=-1;
+  for(let i=fp;i<N;i++){
+    if(!ok(i,armW)||!ok(i,armS)) continue;
+    if(dir*(X(i,armW)-X(i,armS))<=0) continue;
+    const v=spd(i,armW);
+    if(v!=null&&v>maxW){ maxW=v; rel=i; }
+  }
+  if(rel<0){ // 前方条件を外して再探索
+    for(let i=fp;i<N;i++){ const v=spd(i,armW); if(v!=null&&v>maxW){ maxW=v; rel=i; } }
+  }
+
+  /* ⑤ Arm Peak(§4-2): fp−0.15秒 〜 rel で 後方度+高さ度 が最大 */
+  let arm=-1, best=-Infinity;
+  const tFrom=S[fp].t-0.15, tTo=rel>=0?S[rel].t:S[N-1].t;
+  for(let i=0;i<N;i++){
+    if(S[i].t<tFrom||S[i].t>tTo) continue;
+    if(!ok(i,armE)||!ok(i,armS)) continue;
+    const sh=midOf(lm(i),L.lShoulder,L.rShoulder), hp=midOf(lm(i),L.lHip,L.rHip);
+    if(!sh||!hp) continue;
+    const Ltorso=Math.hypot(sh.x-hp.x, sh.y-hp.y);
+    if(Ltorso<1e-6) continue;
+    const back=dir*(X(i,armS)-X(i,armE))/Ltorso;
+    const high=(Y(i,armS)-Y(i,armE))/Ltorso;
+    const sc=back+high;
+    if(sc>best){ best=sc; arm=i; }
+  }
+
+  /* ⑥ フィニッシュ: rel以降、手首速度が最大の25%未満になる最初 */
+  let fin=-1;
+  if(rel>=0){
+    for(let i=rel+2;i<N;i++){ const v=spd(i,armW); if(v!=null&&v<maxW*0.25){ fin=i; break; } }
+    if(fin<0) fin=N-1;
+  }
+
+  const mk=(i)=> i>=0&&i<N ? { t:S[i].t, frame:Math.round(S[i].t*fps), confirmed:false, auto:true } : null;
+  const out={ set:{ t:S[0].t, frame:Math.round(S[0].t*fps), confirmed:false, auto:true } };
+  const put=(id,i)=>{ const v=mk(i); if(v) out[id]=v; };
+  put("lift",lift); put("fp",fp); put("arm",arm); put("rel",rel); put("fin",fin);
+  return out;
+}
+
+$("btnDetectEvents").addEventListener("click",()=>{
+  const r=detectEvents();
+  if(!r) return;
+  events=r; selectedEvent=null; $("thumbWrap").style.display="none";
+  renderEvents(); saveDraft(); renderMetrics(); drawChain();
+  toast("候補を検出しました。1つずつ確認して確定してください");
+});
+$("dirSel").addEventListener("change",(e)=>{
+  dirManual = e.target.value===""?null:parseFloat(e.target.value);
+  if(dirManual!=null){ toast("投球方向を設定しました"); renderMetrics(); }
+});
+
+function renderEvents(){
+  const n=Object.keys(events).length;
+  const c=Object.values(events).filter(e=>e.confirmed).length;
+  $("eventTag").textContent = n? `${c}/${n} 確定` : "未検出";
+  $("eventList").innerHTML = EVENTS.map(ev=>{
+    const e=events[ev.id];
+    const sub = e ? `${e.t.toFixed(3)}s / コマ ${e.frame}${e.confirmed?" ✓確定":"(候補)"}` : "--";
+    const cls = e ? (e.confirmed?"sub ok":"sub set") : "sub";
+    return `<div class="ev-row${selectedEvent===ev.id?" sel":""}" data-id="${ev.id}">
+      <span><span class="nm">${ev.label}</span><br><span class="${cls}">${sub}</span></span>
+      <button class="go" ${e?"":"disabled"}>移動</button>
+      <button class="pick" ${e?"":"disabled"}>選ぶ</button>
+    </div>`;
+  }).join("");
+}
+$("eventList").addEventListener("click",async(e)=>{
+  const row=e.target.closest(".ev-row"); if(!row) return;
+  const id=row.dataset.id, ev=events[id]; if(!ev) return;
+  if(e.target.closest(".go")){ video.pause(); await seekTo(ev.t+0.25/fps); detectAndRender(); return; }
+  if(e.target.closest(".pick")){ await openThumbs(id); }
+});
+
+/* ---- 前後±5コマのサムネイル(仕様書 §4) ---- */
+let thumbBusy=false;
+async function openThumbs(id){
+  if(thumbBusy) return;
+  const ev=events[id]; if(!ev) return;
+  selectedEvent=id; renderEvents();
+  const wrap=$("thumbWrap"), strip=$("thumbs");
+  wrap.style.display="block";
+  $("thumbTitle").innerHTML=`<b>${EVENTS.find(x=>x.id===id).label}</b> — 正しいコマをタップして確定`;
+  strip.innerHTML=""; thumbBusy=true;
+  video.pause();
+  const f=1/fps, W=132, Hh=Math.round(W/(videoAR||1.333));
+  const items=[];
+  for(let k=-5;k<=5;k++){
+    const d=document.createElement("div");
+    d.className="thumb"+(k===0?" cur":"");
+    d.innerHTML=`<canvas width="${W}" height="${Hh}"></canvas><div class="lb">…</div>`;
+    strip.appendChild(d); items.push({el:d,k});
+  }
+  for(const it of items){
+    const target=ev.t + it.k*f + f*0.25;
+    if(target<0||target>video.duration){ it.el.querySelector(".lb").textContent="—"; it.el.style.opacity=.35; continue; }
+    await seekTo(target);
+    const mt=await new Promise(res=>{
+      if(!("requestVideoFrameCallback" in HTMLVideoElement.prototype)) return res(video.currentTime);
+      let done=false; const tm=setTimeout(()=>{ if(!done){done=true;res(video.currentTime);} },250);
+      video.requestVideoFrameCallback((_n,meta)=>{ if(done) return; done=true; clearTimeout(tm); res(meta.mediaTime); });
+    });
+    const cv=it.el.querySelector("canvas");
+    const c2=cv.getContext("2d");
+    c2.save();
+    if(mirror){ c2.translate(cv.width,0); c2.scale(-1,1); }
+    try{ c2.drawImage(video,0,0,cv.width,cv.height); }catch(err){ console.warn("thumb draw failed",err); }
+    c2.restore();
+    it.t=mt; it.frame=Math.round(mt*fps);
+    it.el.querySelector(".lb").textContent=(it.k===0?"候補 ":"")+"コマ "+it.frame;
+    it.el.addEventListener("click",()=>confirmEvent(id, it.t, it.frame));
+  }
+  thumbBusy=false;
+  await seekTo(ev.t+0.25/fps); detectAndRender();
+}
+function confirmEvent(id,t,frame){
+  events[id]={ t, frame, confirmed:true, auto:false };
+  renderEvents(); saveDraft(); renderMetrics(); if(isChainVisible()) drawChain();
+  toast(`${EVENTS.find(x=>x.id===id).label} を コマ ${frame} で確定`);
+  video.pause(); seekTo(t+0.25/fps).then(detectAndRender);
+}
+
+/* ---- 作業中のイベントを一時保存(再読み込みで消えないように) ---- */
+const DRAFT="pitchlab.draft.v1";
+function saveDraft(){
+  try{ lsSet(DRAFT, JSON.stringify({ file:currentFileName, events, dirManual })); }catch{}
+}
+function loadDraft(){
+  try{
+    const d=JSON.parse(lsGet(DRAFT)||"null");
+    if(d && d.file && d.file===currentFileName && d.events){
+      events=d.events; dirManual=(d.dirManual??null); renderEvents(); renderMetrics();
+      if(Object.keys(events).length) toast("前回のイベント指定を復元しました");
+    }
+  }catch{}
+}
+
+
+/* ============================================================
+   指標の算出(仕様書 §5 A〜E)
+   すべて平滑化後の系列・等方座標・身長比。時間は実時間(スロー補正込み)。
+   ============================================================ */
+const METRIC_ROWS = [
+  { k:"speed_kmh",  label:"球速",                    unit:"km/h", dec:1 },
+  { k:"stride_ratio",label:"ストライド長",           unit:"%",    dec:1, cm:"stride_cm" },
+  { k:"pelvis_disp",label:"骨盤中心の前方移動",       unit:"身長比", dec:3 },
+  { k:"pelvis_vel", label:"骨盤中心の移動速度",       unit:"身長/秒", dec:2 },
+  { k:"knee_fp",    label:"FP時 前膝角度",           unit:"°",    dec:0 },
+  { k:"knee_rel",   label:"リリース時 前膝角度",      unit:"°",    dec:0 },
+  { k:"knee_ext",   label:"前膝の伸展量",            unit:"°",    dec:0, signed:true },
+  { k:"elbow_fp",   label:"FP時 肘角度",             unit:"°",    dec:0 },
+  { k:"trunk_fp",   label:"FP時 体幹前傾",           unit:"°",    dec:1, signed:true },
+  { k:"trunk_rel",  label:"リリース時 体幹前傾",      unit:"°",    dec:1, signed:true },
+  { k:"t_fp_arm",   label:"FP→Arm Peak",            unit:"ms",   dec:0, signed:true, timing:true },
+  { k:"t_fp_rel",   label:"FP→リリース",             unit:"ms",   dec:0, timing:true },
+  { k:"t_arm_rel",  label:"Arm Peak→リリース",       unit:"ms",   dec:0, timing:true },
+  { k:"rel_height", label:"リリース高さ(足首基準)",   unit:"身長比", dec:3, cm:"rel_height_cm" },
+  { k:"rel_ext",    label:"リリース前後位置(軸足基準)",unit:"身長比", dec:3, cm:"rel_ext_cm" },
+];
+let metrics=null;
+
+function angle2(A,B,C){
+  const v1x=A.x-B.x, v1y=A.y-B.y, v2x=C.x-B.x, v2y=C.y-B.y;
+  const m1=Math.hypot(v1x,v1y), m2=Math.hypot(v2x,v2y);
+  if(m1<1e-9||m2<1e-9) return null;
+  return Math.acos(clamp((v1x*v2x+v1y*v2y)/(m1*m2),-1,1))*180/Math.PI;
+}
+/* イベント時刻に最も近い平滑化フレーム */
+function lmAt(id){ const e=events[id]; return e ? smoothedAt(e.t) : null; }
+const P2=(lm,i)=> (lm&&lm[i]) ? { x:lm[i].x*videoAR, y:lm[i].y } : null;
+const visOf=(lm,i)=> (lm&&lm[i]&&lm[i].visibility!=null) ? lm[i].visibility : (lm&&lm[i]?1:0);
+const minVis=(...pairs)=> pairs.reduce((m,[lm,i])=>Math.min(m, visOf(lm,i)), 1);
+
+function computeMetricsAll(){
+  if(!analysis||!analysis.H_norm||!smoothSeries.length) return null;
+  const dir=effectiveDir(); if(dir==null) return null;
+  const H=analysis.H_norm;
+  const hcm=currentPitcher?currentPitcher.height_cm:null;
+  const arm=throwArm(), stride=strideSideAnat(), pivot=arm; // 軸足は投球腕と同じ側
+  const A={ set:lmAt("set"), lift:lmAt("lift"), fp:lmAt("fp"), armp:lmAt("arm"), rel:lmAt("rel") };
+  const m={}, conf={};
+  const iAnkS=idxOf("ankle",stride), iAnkP=idxOf("ankle",pivot);
+  const iToeP=IDX.foot[mpSide(pivot)];
+  const iKneeS=(mpSide(stride)==="R")?L.rKnee:L.lKnee, iHipS=(mpSide(stride)==="R")?L.rHip:L.lHip;
+  const iSh=idxOf("shoulder",arm), iEl=idxOf("elbow",arm), iWr=idxOf("wrist",arm);
+
+  /* B-1 ストライド長 */
+  if(A.fp){
+    const a=P2(A.fp,iAnkS), b=P2(A.fp,iAnkP);
+    if(a&&b){
+      m.stride_ratio=Math.abs(a.x-b.x)/H*100;
+      if(hcm) m.stride_cm=m.stride_ratio/100*hcm;
+      conf.stride=minVis([A.fp,iAnkS],[A.fp,iAnkP]);
+    }
+  }
+  /* B-2 骨盤中心の前方移動 */
+  if(A.fp&&A.lift){
+    const a=midOf(A.lift,L.lHip,L.rHip), b=midOf(A.fp,L.lHip,L.rHip);
+    if(a&&b){
+      m.pelvis_disp=dir*(b.x-a.x)/H;
+      const dt=realSec(events.fp.t-events.lift.t);
+      if(dt>0) m.pelvis_vel=m.pelvis_disp/dt;
+      conf.pelvis=minVis([A.lift,L.lHip],[A.lift,L.rHip],[A.fp,L.lHip],[A.fp,L.rHip]);
+    }
+  }
+  /* C-1 / C-2 前膝 */
+  const kneeAt=(lm)=>{ const h=P2(lm,iHipS), k=P2(lm,iKneeS), a=P2(lm,iAnkS);
+    return (h&&k&&a)?angle2(h,k,a):null; };
+  if(A.fp){ m.knee_fp=kneeAt(A.fp); conf.knee_fp=minVis([A.fp,iHipS],[A.fp,iKneeS],[A.fp,iAnkS]); }
+  if(A.rel){ m.knee_rel=kneeAt(A.rel); conf.knee_rel=minVis([A.rel,iHipS],[A.rel,iKneeS],[A.rel,iAnkS]); }
+  if(m.knee_fp!=null&&m.knee_rel!=null) m.knee_ext=m.knee_rel-m.knee_fp;
+  /* C-3 肘 */
+  if(A.fp){
+    const sh=P2(A.fp,iSh), el=P2(A.fp,iEl), wr=P2(A.fp,iWr);
+    if(sh&&el&&wr){ m.elbow_fp=angle2(sh,el,wr); conf.elbow=minVis([A.fp,iSh],[A.fp,iEl],[A.fp,iWr]); }
+  }
+  /* C-4 体幹前傾 */
+  const trunkAt=(lm)=>{
+    const sh=midOf(lm,L.lShoulder,L.rShoulder), hp=midOf(lm,L.lHip,L.rHip);
+    if(!sh||!hp) return null;
+    return Math.atan2(dir*(sh.x-hp.x), (hp.y-sh.y))*180/Math.PI;
+  };
+  if(A.fp) m.trunk_fp=trunkAt(A.fp);
+  if(A.rel) m.trunk_rel=trunkAt(A.rel);
+  /* D タイミング(実時間 ms、分解能に丸める) */
+  const resMs=1000/fps/slowFactor();
+  const round=(ms)=> ms==null?null:Math.round(ms/resMs)*resMs;
+  if(events.fp&&events.arm) m.t_fp_arm=round(realSec(events.arm.t-events.fp.t)*1000);
+  if(events.fp&&events.rel) m.t_fp_rel=round(realSec(events.rel.t-events.fp.t)*1000);
+  if(events.arm&&events.rel) m.t_arm_rel=round(realSec(events.rel.t-events.arm.t)*1000);
+  /* E-1 リリース高さ(足首基準) */
+  if(A.rel&&A.fp){
+    const la=P2(A.fp,L.lAnkle), ra=P2(A.fp,L.rAnkle), wr=P2(A.rel,iWr);
+    if(la&&ra&&wr){
+      const base=Math.max(la.y,ra.y);           // y は下向き正 → max が地面に近い
+      m.rel_height=(base-wr.y)/H;
+      if(hcm) m.rel_height_cm=m.rel_height*hcm;
+      conf.release=minVis([A.rel,iWr],[A.fp,L.lAnkle],[A.fp,L.rAnkle]);
+    }
+  }
+  /* E-2 リリース前後位置(軸足つま先基準) */
+  if(A.rel&&A.set){
+    const toe=P2(A.set,iToeP)||P2(A.set,iAnkP), wr=P2(A.rel,iWr);
+    if(toe&&wr){
+      m.rel_ext=dir*(wr.x-toe.x)/H;
+      if(hcm) m.rel_ext_cm=m.rel_ext*hcm;
+    }
+  }
+  /* A-1 球速 */
+  const sv=parseFloat($("speedKmh").value);
+  if(isFinite(sv)) m.speed_kmh=sv;
+  return { m, conf, resMs, dir, H, calibrated:!!(currentPitcher&&currentPitcher.calibrated) };
+}
+
+function renderMetrics(){
+  metrics=computeMetricsAll();
+  const list=$("metricsList");
+  if(!metrics){
+    $("metricsTag").textContent="--";
+    list.innerHTML=`<span class="k" style="grid-column:span 2;">解析とイベントの確定が必要です</span>`;
+    $("metricsNote").textContent="";
+    return;
+  }
+  const {m,conf,resMs}=metrics;
+  const n=METRIC_ROWS.filter(r=>m[r.k]!=null).length;
+  $("metricsTag").textContent=`${n}/${METRIC_ROWS.length} 項目`;
+  const confOf=(k)=>({stride_ratio:conf.stride,pelvis_disp:conf.pelvis,pelvis_vel:conf.pelvis,
+    knee_fp:conf.knee_fp,knee_rel:conf.knee_rel,knee_ext:conf.knee_fp,elbow_fp:conf.elbow,
+    rel_height:conf.release}[k]);
+  list.innerHTML=METRIC_ROWS.map(r=>{
+    const v=m[r.k];
+    let txt="--", cls="na";
+    if(v!=null&&isFinite(v)){
+      const sign=(r.signed&&v>0)?"+":"";
+      txt=sign+v.toFixed(r.dec)+" "+r.unit;
+      if(r.cm&&m[r.cm]!=null) txt+=` (${m[r.cm].toFixed(1)}cm)`;
+      const c=confOf(r.k);
+      cls = (c!=null&&c<0.5) ? "warn" : (c!=null&&c<0.7 ? "" : "ok");
+      if(c!=null&&c<0.7) txt+=c<0.5?" ⚠低":" ⚠";
+    }
+    return `<span class="k">${r.label}</span><span class="v ${cls}">${txt}</span>`;
+  }).join("");
+  const warns=[];
+  if(fps<50) warns.push(`fps が ${fps.toFixed(0)} のため、タイミングの分解能は ±${resMs.toFixed(0)}ms です。本人比の比較には粗すぎます`);
+  if(!metrics.calibrated) warns.push("未較正です。同じ選手の中での比較には影響しませんが、cm の絶対値は数%ずれます");
+  const lowc=Object.entries(conf).filter(([,v])=>v<0.7).map(([k])=>k);
+  if(lowc.length) warns.push(`検出信頼度が低い項目があります(${lowc.join(", ")})。⚠印の値は参考程度に`);
+  $("metricsNote").innerHTML=warns.length?warns.map(w=>"・"+w).join("<br>"):
+    "すべて平滑化後の骨格から、等方座標・身長比で算出しています。";
+  drawTimeline(); renderRepeat();
+}
+$("speedKmh").addEventListener("input",()=>{ renderMetrics(); if(isChainVisible()) drawChain(); });
+
+/* ---- 球の記録(仕様書 §6-1) ---- */
+$("btnSavePitch").addEventListener("click",()=>withSaveLock("btnSavePitch",async()=>{
+  if(!dbOk()) return;
+  if(!metrics){ toast("先に解析とイベントの確定を行ってください"); return; }
+  if(!currentSession){ toast("先にセッションを開始してください"); return; }
+  if(!currentPitcher){ toast("先に選手を選択してください"); return; }
+  /* 念のための不変条件。ここが破れると別人のセッションに記録が混ざる */
+  if(currentSession.pitcher_id!==currentPitcher.id){
+    setStatus("err","開いているセッションが別の選手のものです。セッションを開き直してください");
+    toast("セッションの選手が一致しません"); return; }
+  const pack=(lm)=> lm? lm.map(p=>p?[Math.round(p.x*1e4)/1e4,Math.round(p.y*1e4)/1e4,
+                                     Math.round((p.visibility==null?1:p.visibility)*1e3)/1e3]:null) : null;
+  const evOut={}, lmOut={};
+  EVENTS.forEach(ev=>{
+    const e=events[ev.id]; if(!e) return;
+    evOut[ev.id]={ frame:e.frame, t_sec:e.t, confirmed:!!e.confirmed };
+    lmOut[ev.id]=pack(smoothedAt(e.t));
+  });
+  const rec={
+    id:String(Date.now()), session_id:currentSession.id, pitcher_id:currentPitcher.id,
+    /* 番号はセッションに実在するレコードの「最大値+1」。
+       件数+1 にすると、途中の1件を消したあとに番号が重複する(実測 [1,2,4,5,5])。
+       pitch_ids を使わないのは、書き込みが競合すると実体とずれることがあるため */
+    pitch_no:(await dbAll("pitches")).filter(x=>x.session_id===currentSession.id)
+            .reduce((m,x)=>Math.max(m, x.pitch_no||0), 0) + 1,
+    timestamp:Date.now(),
+    video_ref:currentFileName, fps, video_ar:videoAR,
+    calib:{ k_nose:currentPitcher.k_nose||K_NOSE_DEFAULT, calibrated:!!currentPitcher.calibrated,
+            H_norm:analysis.H_norm, dir:metrics.dir, capture_fps:captureFps||null, slow_factor:slowFactor() },
+    events:evOut, metrics:metrics.m, landmarks:lmOut,
+    quality:{ conf:metrics.conf, vis:visSummary(lmOut), fps_warning:fps<50 },
+    note:"",
+  };
+  await dbPut("pitches",rec);
+  currentSession.pitch_ids=[...(currentSession.pitch_ids||[]),rec.id];
+  await dbPut("sessions",currentSession);
+  await reloadSessions(); await renderPitchList(); await refreshData();
+  toast(`${rec.pitch_no}球目として記録しました`);
+}));
+async function renderPitchList(){
+  const all=await dbAll("pitches");
+  const mine=currentSession?all.filter(x=>x.session_id===currentSession.id):[];
+  $("pitchCountTag").textContent=`${mine.length}球`;
+  $("pitchList").innerHTML=mine.length?mine.slice(-6).reverse().map(x=>{
+    const sp=x.metrics.speed_kmh!=null?`${x.metrics.speed_kmh}km/h`:"球速--";
+    const st=x.metrics.stride_ratio!=null?`ストライド${x.metrics.stride_ratio.toFixed(0)}%`:"";
+    return `<div class="rowitem"><span><span class="nm">${x.pitch_no}球目</span>
+      <span class="sub">${sp} / ${st}</span></span>
+      <button class="pdel" data-id="${x.id}">削除</button></div>`;
+  }).join("") : `<div class="legend" style="padding:0;">まだ記録がありません。</div>`;
+}
+$("pitchList").addEventListener("click",async(e)=>{
+  const b=e.target.closest(".pdel"); if(!b) return;
+  if(!dbOk()) return;
+  await dbDel("pitches",b.dataset.id);
+  if(currentSession){ currentSession.pitch_ids=(currentSession.pitch_ids||[]).filter(i=>i!==b.dataset.id);
+    await dbPut("sessions",currentSession); }
+  await reloadSessions(); await renderPitchList(); await refreshData();
+});
+
+
+/* ============================================================
+   運動連鎖(近似)  仕様書 §8 / 設計仕様書 §6
+   側面2Dのため、これは「各部位が動き出す/最大になるタイミング」の比較であり、
+   3次元の角速度そのものではない。絶対値の評価は行わない。
+   ============================================================ */
+/* ============================================================
+   キネマティック・シークエンス(運動連鎖)
+   ------------------------------------------------------------
+   骨盤・胸郭は「鉛直軸まわりの回旋角」を、見かけの幅の短縮から復元する。
+     見かけの幅 W(t) = 実幅 × cos(φ)   （φ = 画像面からの回旋角）
+     → φ(t) = arccos( W(t) / W_max )
+   側面カメラで骨盤線・肩線の「画像上の傾き」を見ても回旋は捉えられない
+   （回っても傾きはほとんど変わらない）ため、旧実装から作り直した。
+
+   ⚠️ 上腕・前腕は画面内の2D角速度。3次元の角速度ではない。
+   ⚠️ 研究で引用される絶対値(600〜1200 deg/s 等)とは測り方が違うので比較できない。
+   ============================================================ */
+const CHAIN_DEFS = [
+  { k:"pelvis", label:"骨盤",     short:"骨盤", color:"#f2b632", kind:"rot" },
+  { k:"thorax", label:"胸郭",     short:"胸郭", color:"#48c9d8", kind:"rot" },
+  { k:"arm",    label:"上腕",     short:"上腕", color:"#9b7ede", kind:"seg2d" },
+  { k:"hand",   label:"前腕(手)", short:"手",   color:"#e05a4e", kind:"seg2d" },
+];
+/* 回旋角の復元は W/W_max が 1 に近いほど誤差が増幅される
+   (dφ/dW ∝ 1/sin φ)。ここを超えたコマは角速度を出さない。 */
+const ROT_RATIO_MAX = 0.995;                 // φ ≈ 5.7° より小さい領域を捨てる
+let chain=null, chainView=null, chainNorm=false;
+
+function pctOf(arr,p){
+  const s=arr.filter(v=>v!=null&&isFinite(v)).sort((a,b)=>a-b);
+  return s.length? s[Math.min(s.length-1, Math.floor(s.length*p))] : null;
+}
+/* 角度の不連続(±180°の折返し)をつなぐ */
+function unwrap(arr){
+  const out=arr.slice();
+  for(let i=1;i<out.length;i++){
+    if(out[i]==null||out[i-1]==null) continue;
+    let d=out[i]-out[i-1];
+    while(d>180){ out[i]-=360; d=out[i]-out[i-1]; }
+    while(d<-180){ out[i]+=360; d=out[i]-out[i-1]; }
+  }
+  return out;
+}
+function buildChain(){
+  if(!smoothSeries.length||!analysis||!analysis.H_norm) return null;
+  const dir=effectiveDir(); if(dir==null) return null;
+  const S=smoothSeries, N=S.length;
+  const arm=throwArm();
+  const iSh=idxOf("shoulder",arm), iEl=idxOf("elbow",arm), iWr=idxOf("wrist",arm);
+  const P=(lm,i)=> (lm&&lm[i])?{x:lm[i].x*videoAR,y:lm[i].y}:null;
+  const segAng=(a,b)=> (a&&b)?Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI:null;
+
+  /* 見る区間: 最大脚上げ 〜 リリース。
+     リリース以降は骨盤が90°を越えて見かけの幅が再び広がり、
+     arccos が折り返してしまうので含めない。 */
+  const t0=events.lift?events.lift.t:S[0].t;
+  const t1=events.rel?events.rel.t:(events.fin?events.fin.t:S[N-1].t);
+  const inWin=(i)=>S[i].t>=t0-1e-6&&S[i].t<=t1+1e-6;
+
+  /* 見かけの幅(等方座標) */
+  const hipW=[], shW=[];
+  for(let i=0;i<N;i++){
+    const lm=S[i].lm;
+    const lh=P(lm,L.lHip), rh=P(lm,L.rHip);
+    hipW.push((lh&&rh)?Math.abs(lh.x-rh.x):null);
+    const ls=P(lm,L.lShoulder), rs=P(lm,L.rShoulder);
+    shW.push((ls&&rs)?Math.abs(ls.x-rs.x):null);
+  }
+  /* 実幅 = 区間内の95パーセンタイル(骨盤が画像面と平行に近いとき最大になる)。
+     単純な最大値だと検出の外れ値1枚に引きずられる。 */
+  const winVals=(arr)=>arr.filter((v,i)=>inWin(i)&&v!=null);
+  const hipWmax=pctOf(winVals(hipW),0.95), shWmax=pctOf(winVals(shW),0.95);
+
+  /* 回旋角[度] と、その値が信用できるか */
+  const rotOf=(W,Wmax)=>{
+    const ang=new Array(N).fill(null), okv=new Array(N).fill(false);
+    if(!Wmax||!(Wmax>1e-9)) return {ang,okv};
+    for(let i=0;i<N;i++){
+      if(W[i]==null) continue;
+      const r=W[i]/Wmax;
+      ang[i]=Math.acos(clamp(r,0,1))*180/Math.PI;
+      okv[i]=(r<=ROT_RATIO_MAX);
+    }
+    return {ang,okv};
+  };
+  const pel=rotOf(hipW,hipWmax), tho=rotOf(shW,shWmax);
+
+  /* 上腕・前腕は画面内の2D角度 */
+  const armAng=[], handAng=[];
+  for(let i=0;i<N;i++){
+    const lm=S[i].lm;
+    const a=P(lm,iSh), b=P(lm,iEl), c=P(lm,iWr);
+    armAng.push(segAng(a,b));
+    handAng.push(segAng(b,c));
+  }
+  const raw={ pelvis:pel.ang, thorax:tho.ang, arm:unwrap(armAng), hand:unwrap(handAng) };
+  const trust={ pelvis:pel.okv, thorax:tho.okv,
+                arm:new Array(N).fill(true), hand:new Array(N).fill(true) };
+
+  /* 角速度[度/秒]。中心差分・実時間(スロー補正込み) */
+  const vel={}, acc={};
+  CHAIN_DEFS.forEach(d=>{
+    const k=d.k, a=raw[k], v=new Array(N).fill(null);
+    for(let i=1;i<N-1;i++){
+      if(a[i-1]==null||a[i+1]==null) continue;
+      if(!trust[k][i-1]||!trust[k][i+1]) continue;      // 復元が不安定な区間は出さない
+      const dt=realSec(S[i+1].t-S[i-1].t);
+      if(dt<=0) continue;
+      v[i]=Math.abs((a[i+1]-a[i-1])/dt);
+    }
+    vel[k]=v;
+    /* 角加速度[度/秒²]。負が減速(ブレーキ) */
+    const ac=new Array(N).fill(null);
+    for(let i=1;i<N-1;i++){
+      if(v[i-1]==null||v[i+1]==null) continue;
+      const dt=realSec(S[i+1].t-S[i-1].t);
+      if(dt<=0) continue;
+      ac[i]=(v[i+1]-v[i-1])/dt;
+    }
+    acc[k]=ac;
+  });
+
+  const out={};
+  CHAIN_DEFS.forEach(d=>{
+    const v=vel[d.k], ac=acc[d.k];
+    let peak=-1, pv=-Infinity;
+    for(let i=0;i<N;i++){ if(!inWin(i)||v[i]==null) continue; if(v[i]>pv){pv=v[i];peak=i;} }
+    if(peak<0||!(pv>1e-9)){
+      out[d.k]={pts:[],peakT:null,peakI:-1,onsetT:null,max:null,decelMax:null,vel:v,acc:ac};
+      return;
+    }
+    /* 動き出し: ピークより前で、最大の20%を2フレーム連続で超えた最初 */
+    let onset=-1;
+    for(let i=0;i<peak;i++){
+      if(!inWin(i)||v[i]==null||v[i+1]==null) continue;
+      if(v[i]>=pv*0.2&&v[i+1]>=pv*0.2){ onset=i; break; }
+    }
+    /* ピーク後の最大減速(ブレーキの鋭さ) */
+    let decelMax=null;
+    for(let i=peak+1;i<N;i++){
+      if(!inWin(i)||ac[i]==null) continue;
+      if(ac[i]<0) decelMax=(decelMax==null)?-ac[i]:Math.max(decelMax,-ac[i]);
+    }
+    const pts=[];
+    for(let i=0;i<N;i++){ if(!inWin(i)||v[i]==null) continue; pts.push({t:S[i].t, v:v[i]}); }
+    out[d.k]={ pts, peakT:S[peak].t, peakI:peak, onsetT:onset>=0?S[onset].t:null,
+               max:pv, decelMax, vel:v, acc:ac };
+  });
+  /* 隣り合う部位の関係: 前が減速している最中に次がピークを迎えているか */
+  const rel=[];
+  for(let n=0;n<CHAIN_DEFS.length-1;n++){
+    const A=out[CHAIN_DEFS[n].k], B=out[CHAIN_DEFS[n+1].k];
+    if(!A||!B||A.peakT==null||B.peakT==null){ rel.push(null); continue; }
+    const gapMs=realSec(B.peakT-A.peakT)*1000;
+    const accAatB=(B.peakI>=0&&A.acc[B.peakI]!=null)?A.acc[B.peakI]:null;
+    rel.push({ from:CHAIN_DEFS[n].short, to:CHAIN_DEFS[n+1].short, gapMs,
+               brakes:(accAatB!=null&&accAatB<0), accAatB });
+  }
+  const resMs=1000/fps/slowFactor();
+  return { win:[t0,t1], series:out, rel, resMs,
+           scale:{hipWmax, shWmax}, dropped:{
+             pelvis:pel.okv.filter((b,i)=>inWin(i)&&!b).length,
+             thorax:tho.okv.filter((b,i)=>inWin(i)&&!b).length } };
+}
+
+function drawChain(){
+  chain=buildChain();
+  const cv=$("chain"), g=cv.getContext("2d"), W=cv.width, Hh=cv.height;
+  g.clearRect(0,0,W,Hh);
+  const PAD={l:52,r:10,t:12,b:24};
+  if(!chain){
+    $("chainTag").textContent="--";
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("解析とイベントの確定が必要です", W/2, Hh/2);
+    $("chainTable").innerHTML=""; $("chainLegend").innerHTML="";
+    $("chainSeq").innerHTML=""; renderKneeUse(); return;
+  }
+  const [t0,t1]=chain.win, span=Math.max(0.05,t1-t0);
+  const X=(t)=>PAD.l+(t-t0)/span*(W-PAD.l-PAD.r);
+  /* 縦軸: 既定は deg/秒 の実数値。正規化に切り替えもできる */
+  let vmax=1;
+  CHAIN_DEFS.forEach(d=>{ const s0=chain.series[d.k];
+    if(s0&&s0.max!=null) vmax=Math.max(vmax,s0.max); });
+  const Y=(v)=>Hh-PAD.b-(chainNorm?v:(v/vmax))*(Hh-PAD.t-PAD.b);
+  chainView={t0,span,X};
+  /* 目盛り */
+  g.strokeStyle="#26362f"; g.lineWidth=1; g.fillStyle="#8fa39a"; g.font="10px monospace";
+  g.textAlign="center";
+  for(let i=0;i<=4;i++){
+    const t=t0+span*i/4, x=Math.round(X(t))+0.5;
+    g.beginPath(); g.moveTo(x,PAD.t); g.lineTo(x,Hh-PAD.b); g.stroke();
+    g.fillText(t.toFixed(2)+"s", x, Hh-7);
+  }
+  g.textAlign="right";
+  for(let i=0;i<=4;i++){
+    const frac=i/4, y=Math.round(Hh-PAD.b-frac*(Hh-PAD.t-PAD.b))+0.5;
+    g.beginPath(); g.moveTo(PAD.l,y); g.lineTo(W-PAD.r,y); g.stroke();
+    g.fillText(chainNorm?frac.toFixed(2):Math.round(frac*vmax)+"", PAD.l-5, y+3);
+  }
+  g.save(); g.translate(11,(PAD.t+Hh-PAD.b)/2); g.rotate(-Math.PI/2);
+  g.textAlign="center"; g.fillStyle="#5f6f68"; g.font="10px sans-serif";
+  g.fillText(chainNorm?"各自の最大=1":"角速度 deg/秒", 0, 0); g.restore();
+  /* イベント線 */
+  const EVC={lift:"#8fa39a",fp:"#f2b632",arm:"#9b7ede",rel:"#e05a4e"};
+  const EVL={lift:"上げ",fp:"接地",arm:"AP",rel:"離"};
+  g.setLineDash([3,3]);
+  ["lift","fp","arm","rel"].forEach(id=>{
+    const e=events[id]; if(!e||e.t<t0||e.t>t1) return;
+    const x=Math.round(X(e.t))+0.5;
+    g.strokeStyle=EVC[id]; g.lineWidth=1.5;
+    g.beginPath(); g.moveTo(x,PAD.t); g.lineTo(x,Hh-PAD.b); g.stroke();
+    g.fillStyle=EVC[id]; g.textAlign="left"; g.fillText(EVL[id], x+3, PAD.t+9);
+  });
+  g.setLineDash([]);
+  /* 系列 */
+  CHAIN_DEFS.forEach(d=>{
+    const s0=chain.series[d.k]; if(!s0||s0.pts.length<2) return;
+    g.strokeStyle=d.color; g.lineWidth=1.8; g.lineJoin="round";
+    g.beginPath();
+    s0.pts.forEach((p,i)=>{ const x=X(p.t), y=Y(chainNorm?p.v/s0.max:p.v);
+      i?g.lineTo(x,y):g.moveTo(x,y); });
+    g.stroke();
+    if(s0.peakT!=null){
+      const x=X(s0.peakT), y=Y(chainNorm?1:s0.max);
+      g.fillStyle=d.color; g.beginPath(); g.arc(x,y,3.5,0,Math.PI*2); g.fill();
+    }
+  });
+  /* 現在位置 */
+  const xc=Math.round(X(video.currentTime))+0.5;
+  if(xc>=PAD.l&&xc<=W-PAD.r){
+    g.strokeStyle="#eaf6f2"; g.lineWidth=1;
+    g.beginPath(); g.moveTo(xc,PAD.t); g.lineTo(xc,Hh-PAD.b); g.stroke();
+  }
+  $("chainLegend").innerHTML=CHAIN_DEFS.map(d=>
+    `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${d.color};margin-right:4px;"></span>${d.label}`
+  ).join("&nbsp;&nbsp;");
+
+  /* ---- 表: ピーク角速度・順番・ブレーキ ---- */
+  const res=chain.resMs;
+  const order=CHAIN_DEFS.filter(d=>chain.series[d.k]&&chain.series[d.k].peakT!=null)
+    .sort((a,b)=>chain.series[a.k].peakT-chain.series[b.k].peakT);
+  $("chainTable").innerHTML=
+    `<thead><tr><th style="text-align:left;">部位</th><th>ピーク角速度</th><th>ピーク時刻</th>
+      <th>前との差</th><th>ピーク後の最大減速</th></tr></thead><tbody>`
+    + CHAIN_DEFS.map((d,n)=>{
+        const s0=chain.series[d.k];
+        const prev=n>0?chain.series[CHAIN_DEFS[n-1].k]:null;
+        const gap=(s0&&s0.peakT!=null&&prev&&prev.peakT!=null)?realSec(s0.peakT-prev.peakT)*1000:null;
+        const same=(gap!=null&&Math.abs(gap)<res);
+        return `<tr><td class="nm"><span style="color:${d.color};">■</span> ${d.label}`
+          +(d.kind==="seg2d"?` <span style="color:#4d5a55;">2D</span>`:"")+`</td>`
+          +(s0&&s0.max!=null?`<td class="v">${Math.round(s0.max)} °/s</td>`:`<td class="v na">--</td>`)
+          +(s0&&s0.peakT!=null?`<td class="v">${s0.peakT.toFixed(3)}s</td>`:`<td class="v na">--</td>`)
+          +(gap==null?`<td class="v na">--</td>`
+            :`<td class="v"${same?' style="color:var(--alert);"':(gap<0?' style="color:var(--alert);"':'')}>${
+               gap>0?"+":""}${Math.round(gap)}ms${same?" 同時":""}</td>`)
+          +(s0&&s0.decelMax!=null?`<td class="v">${Math.round(s0.decelMax).toLocaleString()} °/s²</td>`
+            :`<td class="v na">--</td>`)
+          +`</tr>`;
+      }).join("")+`</tbody>`;
+
+  /* ---- 順序とブレーキの判定 ---- */
+  /* 判定は「測れている差」から出す。fps は注意書きで添えるだけにする。
+     1コマより短い差は分離できないが、1コマを超える逆転は 30fps でも measurable。 */
+  const gaps=(chain.rel||[]).filter(Boolean).map(r=>r.gapMs);
+  const sameCnt=gaps.filter(g=>Math.abs(g)<res).length;
+  const revCnt =gaps.filter(g=>g<=-res).length;
+  let verdict, color;
+  if(!gaps.length){ verdict="--"; color=""; }
+  else if(revCnt){ verdict=`逆順 ${revCnt}組`; color="var(--alert)"; }
+  else if(sameCnt){ verdict=`同時 ${sameCnt}組`; color="var(--alert)"; }
+  else { verdict = fps>=120 ? "順序 ✓" : "順序 ✓(参考)"; color="var(--turf)"; }
+  $("chainTag").textContent=verdict; $("chainTag").style.color=color;
+
+  const relRows=(chain.rel||[]).map(r=>{
+    if(!r) return null;
+    const same=Math.abs(r.gapMs)<res;
+    const okOrder=r.gapMs>0;
+    return `<div class="rowitem" style="border-left:3px solid ${
+      same?"var(--alert)":okOrder?(r.brakes?"var(--turf)":"var(--amber)"):"var(--alert)"};">
+      <span><span class="nm">${r.from} → ${r.to}</span><br>
+      <span class="sub">${same?"ピークがほぼ同時(分離できていません)"
+        :okOrder?`${Math.round(r.gapMs)}ms 後に${r.to}がピーク`
+                :`${r.to}のほうが ${Math.round(-r.gapMs)}ms 先にピーク(逆順)`}</span></span>
+      <span class="sub" style="color:${r.brakes?"var(--turf)":"var(--chalk-dim)"};">${
+        r.brakes?"前が減速中 ✓":"前は減速していない"}</span></div>`;
+  }).filter(Boolean).join("");
+  const warn=[];
+  if(fps<120) warn.push(`<b${fps<60?' style="color:var(--alert);"':''}>fps が ${fps.toFixed(0)}(1コマ ${res.toFixed(0)}ms)です。</b>
+    実際のピーク間の差は <b>20〜50ms 程度</b>のことが多く、1コマより短いと<b>「同時」としか出せません</b>。
+    順番をきちんと見るには <b>120fps 以上</b>で撮ってください。
+    ${res.toFixed(0)}ms を超える差(はっきりした逆転など)はこの fps でも読めます。`);
+  if(sameCnt) warn.push(`<b>${sameCnt}組のピークが1コマ以内</b>です。
+    本当に同時なのか、fps が足りなくて分離できていないだけなのかは、この動画からは区別できません`);
+  const dropped=(chain.dropped.pelvis||0)+(chain.dropped.thorax||0);
+  if(dropped) warn.push(`回旋角の復元が不安定な ${dropped} コマ(体が画像面と平行に近い区間)は角速度を出していません`);
+  warn.push(`<b>ピーク角速度は平滑化のぶんだけ低めに出ます。</b>合成データでの実測では
+    骨盤 −7%、手 −17% でした(速い部位ほど大きく下がります)。
+    <b>ピークの時刻はほとんどずれません</b>(実測 0〜1コマ)ので、順番の判定には影響しません。
+    絶対値は本人の過去との比較にのみ使ってください`);
+  $("chainSeq").innerHTML = relRows + (warn.length
+    ? `<div class="legend" style="padding:8px 0 0;">${warn.map(w=>"・"+w).join("<br>")}</div>` : "");
+  renderKneeUse(order);
+}
+$("chainNormToggle")?.addEventListener("change",e=>{ chainNorm=e.target.checked; drawChain(); });
+
+/* 見るべきポイント②: 前膝の使い方(仕様書 §8) */
+function renderKneeUse(order){
+  const el=$("kneeUse"), note=$("kneeNote");
+  const m=metrics?metrics.m:null;
+  if(!m||m.knee_fp==null||m.knee_rel==null){
+    el.innerHTML=`<span class="k" style="grid-column:span 2;">指標の算出が必要です</span>`;
+    note.textContent=""; return;
+  }
+  const ext=m.knee_ext;
+  el.innerHTML=
+     `<span class="k">FP時の前膝</span><span class="v">${Math.round(m.knee_fp)}°</span>`
+    +`<span class="k">リリース時の前膝</span><span class="v">${Math.round(m.knee_rel)}°</span>`
+    +`<span class="k">伸展量</span><span class="v ${ext<=0?"warn":"ok"}">${ext>0?"+":""}${Math.round(ext)}°</span>`;
+  note.innerHTML = ext<=0
+    ? `⚠️ 接地からリリースにかけて<b>前膝が伸びていません</b>(曲がり続けています)。
+       これは方向性がはっきりしているため注意として出しています。<br>
+       ただし<b>何度伸びていれば良いという基準は設けていません</b>。
+       伸展量の適正値は体格・柔軟性・投げ方で変わるため、判定は本人の平均との差で行ってください。`
+    : `接地からリリースにかけて前膝が伸びています。<br>
+       <b>伸展量に一律の目安角度は設けていません</b>(仕様書 §8)。
+       体格や投げ方で適正値が変わるため、この値は<b>本人の過去の投球と比べて</b>使ってください。`;
+}
+/* グラフのタップで移動 */
+$("chain").addEventListener("pointerdown",(e)=>{
+  if(!chainView||!video.duration) return;
+  const r=$("chain").getBoundingClientRect();
+  const px=(e.clientX-r.left)/r.width*$("chain").width;
+  const frac=(px-34)/($("chain").width-44);
+  const t=chainView.t0+clamp(frac,0,1)*chainView.span;
+  video.pause(); video.currentTime=clamp(t,0,Math.max(0,video.duration-0.001));
+  updateTimeRead();
+});
+const isChainVisible=()=>$("tab-chain").classList.contains("active");
+
+/* ============================================================
+   再現性・比較・アラート(仕様書 §5-F / §8 / §9)
+   表示の4階層(測定 → 比較 → 判定 → 解釈)を画面上も分ける。
+   仕様書 §8-1 は5段目にドリルを置いていたが、指導内容の提示は本ソフトの役目ではない
+   と判断して削除した(§9 も同様)。
+   ============================================================ */
+/* CSV の vis_* 列。保存時の mirror/投球腕が分かるこの場で確定させる */
+function visSummary(lmOut){
+  const stride=strideSideAnat(), pivot=throwArm();
+  const idx={
+    ankle_lead: idxOf("ankle",stride), ankle_pivot: idxOf("ankle",pivot),
+    toe_pivot: IDX.foot[mpSide(pivot)],
+    wrist_throw: idxOf("wrist",throwArm()), elbow_throw: idxOf("elbow",throwArm()),
+    hip_l: L.lHip, hip_r: L.rHip,
+  };
+  const out={};
+  for(const [k,i] of Object.entries(idx)){
+    let m=null;
+    for(const lm of Object.values(lmOut)){
+      const p=lm&&lm[i]; if(!p) continue;
+      const v=p[2]; if(v==null) continue;
+      m=(m==null)?v:Math.min(m,v);
+    }
+    out[k]=m;                 // イベント各コマのうち最も低い値(いちばん厳しい側)
+  }
+  return out;
+}
+
+/* cv: 変動係数を出してよいか。0をまたぐ量には出さない */
+const STAT_DEFS = [
+  { k:"speed_kmh",    label:"球速",                   unit:"km/h",    dec:1, c:null,       cv:true },
+  { k:"stride_ratio", label:"ストライド長",            unit:"%",       dec:1, c:"stride",   cv:true },
+  { k:"pelvis_disp",  label:"骨盤中心の前方移動",       unit:"身長比",  dec:3, c:"pelvis",   cv:true },
+  { k:"pelvis_vel",   label:"骨盤中心の移動速度",       unit:"身長/秒", dec:2, c:"pelvis",   cv:true },
+  { k:"knee_fp",      label:"FP時 前膝角度",           unit:"°",       dec:0, c:"knee_fp",  cv:true },
+  { k:"knee_rel",     label:"リリース時 前膝角度",      unit:"°",       dec:0, c:"knee_rel", cv:true },
+  { k:"knee_ext",     label:"前膝の伸展量",            unit:"°",       dec:0, c:"knee_fp",  cv:false, signed:true },
+  { k:"elbow_fp",     label:"FP時 肘角度",             unit:"°",       dec:0, c:"elbow",    cv:true },
+  { k:"trunk_fp",     label:"FP時 体幹前傾",           unit:"°",       dec:1, c:null,       cv:false, signed:true },
+  { k:"trunk_rel",    label:"リリース時 体幹前傾",      unit:"°",       dec:1, c:null,       cv:false, signed:true },
+  { k:"t_fp_arm",     label:"FP→Arm Peak",           unit:"ms",      dec:0, c:null,       cv:false, signed:true, timing:true },
+  { k:"t_fp_rel",     label:"FP→リリース",            unit:"ms",      dec:0, c:null,       cv:true,  timing:true },
+  { k:"t_arm_rel",    label:"Arm Peak→リリース",      unit:"ms",      dec:0, c:null,       cv:true,  timing:true },
+  { k:"rel_height",   label:"リリース高さ",            unit:"身長比",  dec:3, c:"release",  cv:true },
+  { k:"rel_ext",      label:"リリース前後位置",         unit:"身長比",  dec:3, c:"release",  cv:false, signed:true },
+];
+let pitcherPitches=[];
+
+/* 仕様書 §5-F: 信頼度 0.50 未満の値と、イベント未確定の投球を除外 */
+const CONF_MIN_STAT=0.50;
+function pitchEventsOk(p){
+  const ev=p.events||{};
+  return !!(ev.fp?.confirmed && ev.rel?.confirmed);
+}
+function collectValues(pitches, def){
+  const out=[];
+  for(const p of pitches){
+    if(!pitchEventsOk(p)) continue;
+    const v=p.metrics?.[def.k];
+    if(v==null||!isFinite(v)) continue;
+    if(def.c){ const c=(p.quality?.conf||{})[def.c]; if(c!=null && c<CONF_MIN_STAT) continue; }
+    out.push(v);
+  }
+  return out;
+}
+function statsOf(arr, allowCv){
+  const n=arr.length;
+  if(!n) return {n:0, mean:null, median:null, sd:null, cv:null};
+  const mean=arr.reduce((a,b)=>a+b,0)/n;
+  const s=[...arr].sort((a,b)=>a-b);
+  const median = n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2;
+  let sd=null;
+  if(n>=3) sd=Math.sqrt(arr.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(n-1));   // 不偏
+  let cv=null;
+  if(allowCv && sd!=null && Math.abs(mean)>1e-9) cv=sd/Math.abs(mean)*100;
+  return {n, mean, median, sd, cv};
+}
+/* 仕様書には成熟度の規定が無いが、1〜2球を土台に「本人比」を出すのは
+   意味が無いので、打撃版と同じ段階を実装時に決めた。 */
+function maturityOf(n){
+  if(n<5)  return {level:0, label:"データ蓄積中", note:`あと${5-n}球で参考値としての比較を始めます`};
+  if(n<10) return {level:1, label:"参考",         note:`あと${10-n}球で通常の比較になります`};
+  return     {level:2, label:"通常",              note:"通常の比較を行っています"};
+}
+function usablePitches(){ return pitcherPitches.filter(pitchEventsOk); }
+async function reloadPitcherPitches(){
+  if(!db||!currentPitcher){ pitcherPitches=[]; return; }
+  const all=await dbAll("pitches");
+  pitcherPitches=all.filter(p=>p.pitcher_id===currentPitcher.id).sort((a,b)=>a.timestamp-b.timestamp);
+}
+/* リリース位置は高さと前後を対で扱う。片方だけ欠けている球を混ぜると
+   2つのSDのnが揃わず、散布図と数値が食い違うため。 */
+function releasePairs(pitches){
+  const out=[];
+  for(const p of pitches){
+    if(!pitchEventsOk(p)) continue;
+    const c=(p.quality?.conf||{}).release;
+    if(c!=null && c<CONF_MIN_STAT) continue;
+    const x=p.metrics?.rel_ext, y=p.metrics?.rel_height;
+    if(x==null||!isFinite(x)||y==null||!isFinite(y)) continue;
+    out.push({x,y,no:p.pitch_no,id:p.id});
+  }
+  return out;
+}
+function releaseStats(pitches){
+  const pr=releasePairs(pitches);
+  const sx=statsOf(pr.map(p=>p.x),false), sy=statsOf(pr.map(p=>p.y),false);
+  const spread=(sx.sd!=null&&sy.sd!=null)?Math.hypot(sx.sd,sy.sd):null;
+  return { pairs:pr, n:pr.length, meanX:sx.mean, meanY:sy.mean, sdX:sx.sd, sdY:sy.sd, spread };
+}
+/* リリース位置のばらつき(高さと前後の2次元の広がり) */
+function releaseSpread(pitches){ return releaseStats(pitches).spread; }
+
+/* ---- リリース位置の散布図(仕様書 §5 E-3 / §10 Consistency) ---- */
+function drawRelScatter(){
+  const cv=$("relScatter"); if(!cv) return;
+  const g=cv.getContext("2d"), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
+  const PAD={l:56,r:14,t:14,b:34};
+  const usable=usablePitches();
+  const all=releaseStats(usable), rec=releaseStats(usable.slice(-10));
+  const cur=metrics?metrics.m:null;
+  const curPt=(cur&&cur.rel_ext!=null&&isFinite(cur.rel_ext)&&cur.rel_height!=null&&isFinite(cur.rel_height))
+    ? {x:cur.rel_ext, y:cur.rel_height} : null;
+
+  $("relSdTag").textContent = all.n ? `n=${all.n}` : "--";
+  const f=(v,d)=> (v==null||!isFinite(v))?"--":v.toFixed(d);
+  $("relSdKv").innerHTML=
+     `<span class="k">高さの SD</span><span class="v ${all.sdY!=null?"":"na"}">${f(all.sdY,4)}</span>`
+    +`<span class="k">前後の SD</span><span class="v ${all.sdX!=null?"":"na"}">${f(all.sdX,4)}</span>`
+    +`<span class="k">広がり √(SD²+SD²)</span><span class="v ${all.spread!=null?"":"na"}">${f(all.spread,4)}</span>`
+    +`<span class="k">直近10球の広がり</span><span class="v ${rec.spread!=null?"":"na"}">${f(rec.spread,4)}</span>`
+    +`<span class="k">直近 ÷ 全体</span><span class="v ${
+        (all.spread&&rec.spread)?((rec.spread/all.spread>=1.5)?"warn":"ok"):"na"}">${
+        (all.spread&&rec.spread&&all.spread>1e-9)?(rec.spread/all.spread).toFixed(2)+" 倍":"--"}</span>`
+    +`<span class="k">集計した球数</span><span class="v ${all.n?"":"na"}">${all.n||"--"}</span>`;
+
+  if(!all.n){
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("イベントを確定した投球を記録すると表示されます", W/2, H/2);
+    return;
+  }
+  /* 縦横を同じ縮尺にする。単位が同じ(身長比)なので、そうしないと散らばりの形が歪む */
+  const cx=(rec.meanX!=null?rec.meanX:all.meanX), cy=(rec.meanY!=null?rec.meanY:all.meanY);
+  let half=0.02;                                    // 最小の表示範囲(身長比 ±0.02)
+  const consider=(p)=>{ half=Math.max(half, Math.abs(p.x-cx), Math.abs(p.y-cy)); };
+  all.pairs.forEach(consider); if(curPt) consider(curPt);
+  if(rec.sdX!=null) half=Math.max(half, rec.sdX*1.2, rec.sdY*1.2);
+  half*=1.18;
+  const pw=W-PAD.l-PAD.r, ph=H-PAD.t-PAD.b;
+  /* 縦横同縮尺なので、描画領域も正方形にする。
+     そうしないと片側に何も無い帯ができて、グラフが壊れているように見える。 */
+  const side=Math.min(pw,ph);
+  const sc=side/(2*half);                           // px / 身長比 — 両軸で共通
+  const ox=PAD.l+pw/2, oy=PAD.t+ph/2;
+  const bx0=ox-side/2, bx1=ox+side/2, by0=oy-side/2, by1=oy+side/2;
+  const X=(v)=>ox+(v-cx)*sc, Y=(v)=>oy-(v-cy)*sc;   // 高さは上向きが正
+
+  /* 目盛り。0.01身長比ごと(170cmなら1.7cm) */
+  const stepOf=(h)=>{ const raw=h/2.2;
+    for(const s of [0.002,0.005,0.01,0.02,0.05,0.1,0.2]) if(raw<=s) return s; return 0.5; };
+  const step=stepOf(half);
+  g.font="10px monospace"; g.strokeStyle="#26362f"; g.lineWidth=1;
+  const k0=Math.ceil((cx-half)/step), k1=Math.floor((cx+half)/step);
+  g.textAlign="center"; g.fillStyle="#8fa39a";
+  for(let k=k0;k<=k1;k++){ const v=k*step, x=Math.round(X(v))+0.5;
+    if(x<bx0||x>bx1) continue;
+    g.beginPath(); g.moveTo(x,by0); g.lineTo(x,by1); g.stroke();
+    g.fillText(v.toFixed(3), x, by1+14); }
+  const j0=Math.ceil((cy-half)/step), j1=Math.floor((cy+half)/step);
+  g.textAlign="right";
+  for(let j=j0;j<=j1;j++){ const v=j*step, y=Math.round(Y(v))+0.5;
+    if(y<by0||y>by1) continue;
+    g.beginPath(); g.moveTo(bx0,y); g.lineTo(bx1,y); g.stroke();
+    g.fillText(v.toFixed(3), bx0-6, y+3); }
+  /* 正方形の枠。縦横が同じ縮尺であることを目で分かるようにする */
+  g.strokeStyle="#3a4a44"; g.lineWidth=1;
+  g.strokeRect(Math.round(bx0)+0.5, Math.round(by0)+0.5, Math.round(side), Math.round(side));
+  /* 軸の名前 */
+  g.fillStyle="#5f6f68"; g.textAlign="center"; g.font="11px sans-serif";
+  g.fillText("前後位置(身長比) →投手方向", ox, H-6);
+  g.save(); g.translate(13, oy); g.rotate(-Math.PI/2);
+  g.fillText("高さ(身長比)", 0, 0); g.restore();
+
+  /* 直近10球の平均 ±1SD */
+  if(rec.sdX!=null&&rec.sdY!=null){
+    g.strokeStyle="rgba(242,182,50,.55)"; g.lineWidth=1.2; g.setLineDash([4,3]);
+    g.strokeRect(X(rec.meanX-rec.sdX), Y(rec.meanY+rec.sdY), rec.sdX*2*sc, rec.sdY*2*sc);
+    g.setLineDash([]);
+    g.strokeStyle="rgba(242,182,50,.8)";
+    const mx=X(rec.meanX), my=Y(rec.meanY);
+    g.beginPath(); g.moveTo(mx-6,my); g.lineTo(mx+6,my);
+    g.moveTo(mx,my-6); g.lineTo(mx,my+6); g.stroke();
+  }
+  /* 点。全投球は薄く、直近10球は明るく */
+  const recIds=new Set(rec.pairs.map(p=>p.id));
+  all.pairs.forEach(p=>{
+    const isRec=recIds.has(p.id);
+    g.fillStyle=isRec?"#48c9d8":"rgba(72,201,216,.28)";
+    g.beginPath(); g.arc(X(p.x),Y(p.y),isRec?3.6:2.6,0,Math.PI*2); g.fill();
+  });
+  /* 今回の投球 */
+  if(curPt){
+    g.strokeStyle="#f2b632"; g.lineWidth=2;
+    g.beginPath(); g.arc(X(curPt.x),Y(curPt.y),7,0,Math.PI*2); g.stroke();
+    g.fillStyle="#f2b632";
+    g.beginPath(); g.arc(X(curPt.x),Y(curPt.y),2.5,0,Math.PI*2); g.fill();
+  }
+}
+
+/* ---- アラートのしきい値(仕様書 §8-2) ---- */
+const THR_DEFAULT = {
+  speed_kmh:     { l1:-2.0,  l2:-4.0,  mode:"abs", dir:"down", label:"球速", unit:"km/h" },
+  stride_ratio:  { l1:3,     l2:6,     mode:"abs", dir:"both", label:"ストライド長", unit:"pt" },
+  pelvis_vel:    { l1:-10,   l2:-20,   mode:"pct", dir:"down", label:"骨盤中心の移動速度" },
+  knee_fp:       { l1:5,     l2:10,    mode:"abs", dir:"both", label:"FP時 前膝角度", unit:"°" },
+  knee_ext:      { l1:-5,    l2:-10,   mode:"abs", dir:"down", label:"前膝の伸展量", unit:"°" },
+  t_fp_rel:      { l1:10,    l2:20,    mode:"abs", dir:"up",   label:"FP→リリース時間", unit:"ms", timing:true },
+  rel_height:    { l1:0.015, l2:0.030, mode:"abs", dir:"both", label:"リリース高さ" },
+  rel_ext:       { l1:0.015, l2:0.030, mode:"abs", dir:"both", label:"リリース前後位置" },
+  rel_sd_ratio:  { l1:1.5,   l2:2.0,   mode:"ratio", dir:"up", label:"リリース位置のばらつき", unit:"倍", special:true },
+};
+let THR=JSON.parse(JSON.stringify(THR_DEFAULT));
+function loadThr(){
+  try{
+    const o=JSON.parse(lsGet("pitchlab.thr.v1")||"null");
+    if(o) for(const k of Object.keys(THR)) if(o[k]){
+      if(isFinite(o[k].l1)) THR[k].l1=o[k].l1;
+      if(isFinite(o[k].l2)) THR[k].l2=o[k].l2;
+    }
+  }catch{}
+}
+function saveThr(){
+  const o={}; for(const k of Object.keys(THR)) o[k]={l1:THR[k].l1,l2:THR[k].l2};
+  try{ lsSet("pitchlab.thr.v1", JSON.stringify(o)); }catch{}
+}
+
+function computeAlerts(cur, recentMean, sdRatio){
+  const out=[];
+  const timingOk = fps>=50;
+  const EPS=1e-9;   // しきい値ちょうどの値を取りこぼさない
+  for(const [k,t] of Object.entries(THR)){
+    if(t.timing && !timingOk) continue;
+    let val, unit=t.unit||"";
+    if(t.special){
+      if(k!=="rel_sd_ratio" || sdRatio==null) continue;
+      val=sdRatio;
+    }else{
+      const v=cur[k], base=recentMean[k];
+      if(v==null||!isFinite(v)||base==null||!isFinite(base)) continue;
+      const d=v-base;
+      if(t.mode==="pct"){ if(Math.abs(base)<1e-9) continue; val=d/Math.abs(base)*100; unit="%"; }
+      else val=d;
+    }
+    let level=0;
+    const hit=(thr)=>{
+      if(t.dir==="down") return val<=thr+EPS;
+      if(t.dir==="up")   return val>=thr-EPS;
+      return Math.abs(val)>=Math.abs(thr)-EPS;
+    };
+    if(hit(t.l2)) level=2; else if(hit(t.l1)) level=1;
+    /* 伸展量が0以下(FPからリリースにかけて前膝が曲がり続けている)は
+       方向性が明確なので本人比によらず Level 1(仕様書 §8-2) */
+    if(k==="knee_ext" && cur.knee_ext!=null && cur.knee_ext<=0 && level<1) level=1;
+    if(level>0) out.push({key:k, label:t.label, level, val, unit,
+      cur:t.special?null:cur[k], base:t.special?null:recentMean[k]});
+  }
+  const l2n=out.filter(a=>a.level>=2).length;
+  const speedDown =out.some(a=>a.key==="speed_kmh");
+  const sdUp      =out.some(a=>a.key==="rel_sd_ratio");
+  const pelvisDown=out.some(a=>a.key==="pelvis_vel");
+  const triple = speedDown && sdUp && pelvisDown;
+  return { list:out.sort((a,b)=>b.level-a.level), level3:(l2n>=2)||triple, triple };
+}
+
+function renderRepeat(){
+  drawRelScatter();
+  const usable=usablePitches(), n=usable.length, mat=maturityOf(n);
+  $("maturityTag").textContent=`${mat.label} n=${n}`;
+  $("maturityTag").style.color = mat.level===2?"var(--turf)":mat.level===1?"var(--amber)":"var(--chalk-dim)";
+  const recent=usable.slice(-10);
+  const sessN=new Set(recent.map(p=>p.session_id)).size;
+  $("maturityKv").innerHTML=
+     `<span class="k">集計できる投球数</span><span class="v ${n?'':'na'}">${n} 球</span>`
+    +`<span class="k">直近10球が跨ぐセッション数</span><span class="v ${sessN?'':'na'}">${sessN||'--'}</span>`
+    +`<span class="k">比較の状態</span><span class="v ${mat.level===2?'ok':mat.level===1?'mid':'na'}">${mat.label}</span>`;
+  $("maturityBar").style.width=Math.min(100,n/10*100)+"%";
+  $("maturityNote").innerHTML = mat.level===0
+    ? `<b>まだ比較もアラートも出しません。</b>${mat.note}。<br>
+       本数が少ないうちの平均は、たまたま出た値に強く引きずられます。<br>
+       イベント(FP・リリース)を確定していない投球は集計に入りません。`
+    : mat.level===1
+    ? `<b>参考値として比較しています。</b>${mat.note}。`
+    : `${mat.note}。しきい値は「設定」タブで本人のSDに合わせて調整してください
+       (仕様書 §8-2 は30球程度での見直しを前提にしています)。`;
+
+  const cur=metrics?metrics.m:{};
+  const rows=[], recentMean={};
+  for(const d of STAT_DEFS){
+    const st=statsOf(collectValues(usable,d), d.cv);
+    const sr=statsOf(collectValues(recent,d), d.cv);
+    recentMean[d.k]=sr.mean;
+    rows.push({d,st,sr});
+  }
+  const num=(v,dec,signed)=> (v==null||!isFinite(v))?`<td class="v na">--</td>`
+    :`<td class="v">${signed&&v>0?"+":""}${v.toFixed(dec)}</td>`;
+  $("statTable").innerHTML=
+    `<thead><tr><th style="text-align:left;">指標</th><th>平均</th><th>中央値</th><th>SD</th><th>CV</th><th>n</th></tr></thead><tbody>`
+    + rows.map(({d,st})=>
+        `<tr><td class="nm">${d.label}${d.unit?` <span style="color:#4d5a55;">${d.unit}</span>`:""}</td>`
+        + num(st.mean,d.dec,d.signed) + num(st.median,d.dec,d.signed) + num(st.sd,d.dec)
+        + (d.cv ? num(st.cv,1) : `<td class="v na" title="0をまたぐ量のためCVは出しません">—</td>`)
+        + `<td class="v${st.n?"":" na"}">${st.n}</td></tr>`
+      ).join("") + `</tbody>`;
+
+  const showDelta = mat.level>0 && metrics;
+  $("deltaTag").textContent = showDelta ? "直近10球との差が主" : "比較しません";
+  $("deltaTable").innerHTML = !showDelta
+    ? `<tbody><tr><td class="nm" style="padding:10px 6px;">${metrics?`${mat.note}。`:"先に解析とイベントの確定を行ってください。"}</td></tr></tbody>`
+    : `<thead><tr><th style="text-align:left;">指標</th><th>今回</th>
+        <th style="color:var(--amber);">直近10球との差</th><th>全投球平均との差</th></tr></thead><tbody>`
+      + rows.map(({d,st,sr})=>{
+          const v=cur[d.k];
+          const dA=(v!=null&&st.mean!=null)?v-st.mean:null;
+          const dR=(v!=null&&sr.mean!=null)?v-sr.mean:null;
+          const cell=(x,em)=> x==null?`<td class="v na">--</td>`
+            :`<td class="v"${em?' style="color:var(--amber);"':''}>${x>0?"+":""}${x.toFixed(d.dec)}</td>`;
+          return `<tr><td class="nm">${d.label}</td>`+num(v,d.dec,d.signed)+cell(dR,true)+cell(dA)+`</tr>`;
+        }).join("") + `</tbody>`;
+
+  /* ③ 判定 */
+  const box=$("alertList"), note=$("alertNote"), interp=$("interpNote");
+  if(!metrics || mat.level===0){
+    $("alertTag").textContent="出しません"; $("alertTag").style.color="var(--chalk-dim)";
+    box.innerHTML=`<div class="legend" style="padding:0;">${
+      !metrics?"先に解析とイベントの確定を行ってください。"
+              :`ベースラインが足りないためアラートは出していません(${mat.note})。`}</div>`;
+    note.innerHTML=""; interp.innerHTML="判定が出ていないため、記述することはありません。";
+    return;
+  }
+  const sAll=releaseSpread(usable), sRec=releaseSpread(recent);
+  const sdRatio=(sAll!=null&&sRec!=null&&sAll>1e-9)?sRec/sAll:null;
+  const A=computeAlerts(cur,recentMean,sdRatio);
+  const maxL=A.list.length?Math.max(...A.list.map(a=>a.level)):0;
+  $("alertTag").textContent = A.level3?"Level 3":maxL?`Level ${maxL}`:"なし";
+  $("alertTag").style.color = A.level3||maxL>=2?"var(--alert)":maxL?"var(--amber)":"var(--turf)";
+  const col=(l)=> l>=2?"var(--alert)":"var(--amber)";
+  box.innerHTML =
+    (A.level3?`<div class="rowitem" style="border-color:var(--alert);">
+        <span><span class="nm" style="color:var(--alert);">Level 3(複合)</span></span></div>`:"")
+    + (A.list.length ? A.list.map(a=>
+        `<div class="rowitem" style="border-left:3px solid ${col(a.level)};">
+          <span><span class="nm">${a.label}</span><br>
+          <span class="sub">${a.cur!=null?`今回 ${a.cur.toFixed(3)} / 直近10球 ${a.base.toFixed(3)}`
+            :`直近10球のばらつきが全体の ${a.val.toFixed(2)} 倍`}</span></span>
+          <span class="sub" style="color:${col(a.level)};">L${a.level}</span>
+        </div>`).join("")
+      : `<div class="legend" style="padding:0;color:var(--turf);">本人のいつもの範囲内です。</div>`);
+  note.innerHTML=`<b>ここでは段階しか出しません</b>(仕様書 §8-1 ③)。
+    良し悪しも原因も判定していません。
+    ${fps<50?"<br>・fps が50未満のため、タイミング系のアラートは出していません":""}
+    ${sdRatio==null?"<br>・リリース位置のばらつきは、全体・直近とも n≥3 になると出ます":""}`;
+
+  /* ④ 解釈: 事実の記述のみ。断定しない */
+  if(!A.list.length){
+    interp.innerHTML="直近10球と比べて、しきい値を超えた指標はありません。";
+  }else{
+    const facts=A.list.map(a=> a.cur!=null
+      ? `${a.label}が直近10球平均と ${a.val>0?"+":""}${a.val.toFixed(a.unit==="%"?1:3)}${a.unit} 違います`
+      : `リリース位置のばらつきが全体の ${a.val.toFixed(2)} 倍になっています`);
+    interp.innerHTML = `直近10球と比べて、次の違いが出ています。<br>・${facts.join("<br>・")}`
+      + (A.triple
+        ? `<br><br><b>球速の低下・リリース位置のばらつきの増加・骨盤中心の移動速度の低下が同時に出ています。</b>
+           これは設計仕様書 §12 が<b>「疲労に伴う動作変化の可能性」</b>として挙げているパターンと一致します。
+           ⚠️ ただし<b>このソフトは疲労を測っていません。</b>同じパターンは、疲労以外
+           (球種を変えた・意識して動作を変えた・単なる測定のばらつき)でも起こります。
+           投球を続けるかどうかの判断は指導者が行ってください。`
+        : `<br><br>これは「本人のいつもと違う」という事実だけです。
+           良い変化か悪い変化か、原因が何かは判定していません。`);
+  }
+}
+
+/* ============================================================
+   2球の比較
+   保存済みレコードのイベントフレームの骨格だけを使う。
+   それぞれの H_norm で割ってから重ねるので、撮影距離が違っても比べられる。
+   ⚠️ カメラの角度が違うと形そのものが変わるので、そこは補正できない。
+   ============================================================ */
+const CMP_COLORS={A:"#48c9d8", B:"#f2b632"};
+let cmpRecords=[], cmpTouched=false;
+
+function cmpLabel(r){
+  const d=new Date(r.timestamp);
+  const md=`${d.getMonth()+1}/${d.getDate()}`;
+  const sp=r.metrics?.speed_kmh!=null?` ${r.metrics.speed_kmh}km/h`:"";
+  return `${md} ${r.pitch_no}球目${sp}`;
+}
+async function reloadCompare(){
+  const selA=$("cmpA"), selB=$("cmpB");
+  if(!selA) return;
+  cmpRecords=[...pitcherPitches].reverse();          // 新しい順
+  const keep={a:selA.value, b:selB.value};
+  const opts=cmpRecords.map(r=>`<option value="${r.id}">${escapeHtml(cmpLabel(r))}</option>`).join("");
+  selA.innerHTML=opts; selB.innerHTML=opts;
+  if(!cmpRecords.length){
+    selA.innerHTML=selB.innerHTML=`<option value="">記録がありません</option>`;
+  }else{
+    const has=(id)=>cmpRecords.some(r=>r.id===id);
+    if(cmpTouched && has(keep.a) && has(keep.b)){
+      selA.value=keep.a; selB.value=keep.b;         // ユーザーが選んだものを保つ
+    }else{
+      /* 既定は B=いちばん新しい、A=その1つ前。記録が増えるたび B が最新に追従する */
+      selB.value=cmpRecords[0].id;
+      selA.value=(cmpRecords[1]||cmpRecords[0]).id;
+    }
+    /* 同じ球どうしになってしまったら、別の球にずらす(比べる意味がないため) */
+    if(selA.value===selB.value && cmpRecords.length>=2){
+      const other=cmpRecords.find(r=>r.id!==selB.value);
+      if(other) selA.value=other.id;
+    }
+  }
+  const ev=$("cmpEvent");
+  if(ev && !ev.options.length)
+    ev.innerHTML=EVENTS.map(e=>`<option value="${e.id}"${e.id==="rel"?" selected":""}>${e.label}</option>`).join("");
+  drawCompare();
+}
+/* 保存形式 [x,y,vis] を等方座標にして、基準点を原点、身長=1 に正規化する */
+function cmpPoints(rec, evId, anchorKind){
+  const lm=rec.landmarks?.[evId];
+  if(!lm) return null;
+  const AR=rec.video_ar||1, H=rec.calib?.H_norm;
+  if(!H||!(H>0)) return null;
+  const P=(i)=>{ const q=lm[i]; return q?{x:q[0]*AR, y:q[1], v:q[2]}:null; };
+  const mid=(a,b)=>{ const A=P(a),B=P(b); return (A&&B)?{x:(A.x+B.x)/2,y:(A.y+B.y)/2}:null; };
+  let anchor=null;
+  if(anchorKind==="pelvis") anchor=mid(L.lHip,L.rHip);
+  else if(anchorKind==="shoulder") anchor=mid(L.lShoulder,L.rShoulder);
+  else anchor=mid(L.lAnkle,L.rAnkle);               // 既定: 両足首中点(地面に近い)
+  if(!anchor) anchor=mid(L.lHip,L.rHip);
+  if(!anchor) return null;
+  const out=new Array(33).fill(null);
+  for(let i=0;i<33;i++){ const q=P(i); if(!q) continue;
+    out[i]={ x:(q.x-anchor.x)/H, y:(q.y-anchor.y)/H, v:q.v }; }
+  return out;
+}
+function drawCompare(){
+  const cv=$("cmpCanvas"); if(!cv) return;
+  const g=cv.getContext("2d"), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
+  const a=cmpRecords.find(r=>r.id===$("cmpA").value);
+  const b=cmpRecords.find(r=>r.id===$("cmpB").value);
+  const evId=$("cmpEvent").value||"rel";
+  const anchor=$("cmpAnchor").value;
+  const leg=$("cmpLegend");
+  if(!a||!b){
+    $("cmpTag").textContent="--";
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("投球を2球以上記録すると比べられます", W/2, H/2);
+    if(leg) leg.innerHTML=""; $("cmpTable").innerHTML=""; $("cmpDiffTag").textContent="--";
+    return;
+  }
+  const pa=cmpPoints(a,evId,anchor), pb=cmpPoints(b,evId,anchor);
+  $("cmpTag").textContent = (a.id===b.id) ? "同じ球です" : `${EVENTS.find(e=>e.id===evId)?.label||evId}`;
+  if(!pa||!pb){
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("このイベントは片方に保存されていません", W/2, H/2);
+    if(leg) leg.innerHTML=""; renderCmpTable(a,b); return;
+  }
+  /* 2体を囲む枠を求めて、それが画面いっぱいになるように収める。
+     基準点を画面中央に置くと、足首基準のとき体が上半分に寄ってしまう。
+     縦横は同じ縮尺(単位が同じ身長比なので、変えると形が歪む)。 */
+  const PAD=16;
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  [pa,pb].forEach(P=>P.forEach(q=>{ if(!q||q.v<0.3) return;
+    if(q.x<minX)minX=q.x; if(q.x>maxX)maxX=q.x;
+    if(q.y<minY)minY=q.y; if(q.y>maxY)maxY=q.y; }));
+  if(!isFinite(minX)){
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("骨格を検出できたランドマークがありません", W/2, H/2);
+    if(leg) leg.innerHTML=""; renderCmpTable(a,b); return;
+  }
+  const spanX=Math.max(0.25,maxX-minX), spanY=Math.max(0.25,maxY-minY);
+  const sc=Math.min((W-PAD*2)/spanX, (H-PAD*2)/spanY);
+  const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  const X=(v)=>W/2+(v-cx)*sc, Y=(v)=>H/2+(v-cy)*sc;  // y は保存時のまま下向きが正
+  const ox=X(0), oy=Y(0);                             // 基準点(原点)の画面上の位置
+  /* 目盛り: 身長比 0.1 ごとの横線 */
+  g.strokeStyle="#1e2b26"; g.lineWidth=1;
+  for(let k=-20;k<=20;k++){ const y=Math.round(Y(k*0.1))+0.5;
+    if(y<PAD||y>H-PAD) continue;
+    g.beginPath(); g.moveTo(PAD,y); g.lineTo(W-PAD,y); g.stroke(); }
+  const drawOne=(P,color,width)=>{
+    g.strokeStyle=color; g.lineWidth=width; g.lineCap="round";
+    SKELETON_LINES.forEach(([i,j])=>{
+      const A=P[i],B=P[j]; if(!A||!B) return;
+      if(A.v<0.3||B.v<0.3) return;
+      g.beginPath(); g.moveTo(X(A.x),Y(A.y)); g.lineTo(X(B.x),Y(B.y)); g.stroke();
+    });
+    P.forEach((q,i)=>{ if(!q||i>32||q.v<0.3) return;
+      g.fillStyle=color; g.beginPath(); g.arc(X(q.x),Y(q.y),2.6,0,Math.PI*2); g.fill(); });
+  };
+  drawOne(pa, CMP_COLORS.A, 2.6);
+  drawOne(pb, CMP_COLORS.B, 2.6);
+  /* 基準点 */
+  g.strokeStyle="#e9ede9"; g.lineWidth=1;
+  g.beginPath(); g.moveTo(ox-7,oy); g.lineTo(ox+7,oy);
+  g.moveTo(ox,oy-7); g.lineTo(ox,oy+7); g.stroke();
+  if(leg) leg.innerHTML =
+     `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${CMP_COLORS.A};margin-right:4px;"></span>A ${escapeHtml(cmpLabel(a))}`
+    +`&nbsp;&nbsp;<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${CMP_COLORS.B};margin-right:4px;"></span>B ${escapeHtml(cmpLabel(b))}`
+    +`<br><span style="color:#5f6f68;">横線は身長比 0.1 ごと。＋印が重ねる基準点です。</span>`;
+  renderCmpTable(a,b);
+}
+function renderCmpTable(a,b){
+  const t=$("cmpTable"); if(!t) return;
+  let n=0;
+  const rows=STAT_DEFS.map(d=>{
+    const va=a.metrics?.[d.k], vb=b.metrics?.[d.k];
+    const ok=(va!=null&&isFinite(va)&&vb!=null&&isFinite(vb));
+    if(ok) n++;
+    const cell=(v)=> (v==null||!isFinite(v))?`<td class="v na">--</td>`
+      :`<td class="v">${d.signed&&v>0?"+":""}${v.toFixed(d.dec)}</td>`;
+    const diff=ok?vb-va:null;
+    return `<tr><td class="nm">${d.label}${d.unit?` <span style="color:#4d5a55;">${d.unit}</span>`:""}</td>`
+      + cell(va) + cell(vb)
+      + (diff==null?`<td class="v na">--</td>`
+         :`<td class="v"${Math.abs(diff)>1e-9?' style="color:var(--amber);"':''}>${diff>0?"+":""}${diff.toFixed(d.dec)}</td>`)
+      + `</tr>`;
+  }).join("");
+  $("cmpDiffTag").textContent = n?`${n}項目`:"--";
+  t.innerHTML=`<thead><tr><th style="text-align:left;">指標</th>
+    <th style="color:${CMP_COLORS.A};">A</th><th style="color:${CMP_COLORS.B};">B</th>
+    <th>B − A</th></tr></thead><tbody>${rows}</tbody>`;
+}
+["cmpA","cmpB"].forEach(id=>{
+  const e=$(id); if(e) e.addEventListener("change",()=>{ cmpTouched=true; drawCompare(); });
+});
+["cmpEvent","cmpAnchor"].forEach(id=>{
+  const e=$(id); if(e) e.addEventListener("change",drawCompare);
+});
+
+/* ---- 投球概要(仕様書 §10)。いま開いているセッションの要約 ---- */
+async function renderSummary(){
+  const kv=$("sumKv"), note=$("sumNote"), tag=$("sumTag");
+  if(!kv) return;
+  if(!currentSession){
+    tag.textContent="--";
+    kv.innerHTML=`<span class="k" style="grid-column:span 2;">セッションを開始すると表示されます</span>`;
+    note.textContent=""; return;
+  }
+  const all=await dbAll("pitches");
+  const mine=all.filter(x=>x.session_id===currentSession.id).sort((a,b)=>a.pitch_no-b.pitch_no);
+  const ok=mine.filter(pitchEventsOk);
+  tag.textContent=`${mine.length}球`;
+  const hcm=currentPitcher?currentPitcher.height_cm:null;
+  const cal=!!(currentPitcher&&currentPitcher.calibrated);
+  const def=(k)=>STAT_DEFS.find(d=>d.k===k);
+  const st=(k)=>statsOf(collectValues(ok,def(k)),false);
+  const sp=st("speed_kmh"), sr=st("stride_ratio"), rh=st("rel_height"), re=st("rel_ext");
+  const speeds=collectValues(ok,def("speed_kmh"));
+  const spread=releaseSpread(ok);
+  const f=(v,d,suf)=> (v==null||!isFinite(v))?`<span class="v na">--</span>`
+    :`<span class="v">${v.toFixed(d)}${suf||""}</span>`;
+  const cm=(v)=> (v!=null&&isFinite(v)&&hcm&&cal)?` <span style="color:#5f6f68;">(${(v*hcm).toFixed(1)}cm)</span>`:"";
+  const t0=currentSession.started_at;
+  const t1=mine.length?mine[mine.length-1].timestamp:(currentSession.ended_at||Date.now());
+  const mins=Math.max(0,Math.round((t1-t0)/60000));
+  kv.innerHTML=
+     `<span class="k">投球数(記録)</span><span class="v">${mine.length} 球</span>`
+    +`<span class="k">うち集計できる球</span><span class="v ${ok.length?"":"na"}">${ok.length} 球</span>`
+    +`<span class="k">平均球速</span>${f(sp.mean,1," km/h")}`
+    +`<span class="k">最高球速</span>${speeds.length?`<span class="v ok">${Math.max(...speeds).toFixed(1)} km/h</span>`:`<span class="v na">--</span>`}`
+    +`<span class="k">平均ストライド長</span>${f(sr.mean,1," %")}`
+    +`<span class="k">平均リリース高さ</span>${rh.mean!=null?`<span class="v">${rh.mean.toFixed(3)}${cm(rh.mean)}</span>`:`<span class="v na">--</span>`}`
+    +`<span class="k">平均リリース前後位置</span>${re.mean!=null?`<span class="v">${re.mean.toFixed(3)}${cm(re.mean)}</span>`:`<span class="v na">--</span>`}`
+    +`<span class="k">リリース位置のばらつき</span>${f(spread,4)}`
+    +`<span class="k">経過時間</span><span class="v">${mins} 分</span>`;
+  const w=[];
+  if(mine.length>ok.length) w.push(`<b>${mine.length-ok.length}球</b>はイベント(接地・リリース)が未確定のため、平均から除いています`);
+  if(!speeds.length) w.push("球速が1球も入力されていません。球速は「指標」タブで手入力します");
+  if(!cal) w.push("未較正のため cm 換算は表示していません");
+  note.innerHTML = w.length ? w.map(x=>"・"+x).join("<br>")
+    : "このセッションで記録した投球の要約です。他人の値とは比べていません。";
+}
+
+/* ---- FP→Arm Peak→リリース のタイムライン(仕様書 §10 Timing) ---- */
+function drawTimeline(){
+  const cv=$("timeline"); if(!cv) return;
+  const g=cv.getContext("2d"), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
+  const m=metrics?metrics.m:null;
+  const tFA=m?m.t_fp_arm:null, tFR=m?m.t_fp_rel:null, tAR=m?m.t_arm_rel:null;
+  const kv=$("tlKv");
+  if(tFR==null||!isFinite(tFR)||tFR<=0){
+    $("tlTag").textContent="--";
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("接地とリリースを確定すると表示されます", W/2, H/2);
+    kv.innerHTML=""; return;
+  }
+  $("tlTag").textContent=`FP→リリース ${Math.round(tFR)}ms`;
+  const PAD={l:14,r:14,t:26,b:30};
+  const pw=W-PAD.l-PAD.r;
+  /* Arm Peak が FP より前なら、その分だけ左に余白を取る */
+  const lo=Math.min(0, tFA!=null?tFA:0), hi=tFR;
+  const span=Math.max(1, hi-lo);
+  const X=(ms)=>PAD.l+(ms-lo)/span*pw;
+  const yBar=PAD.t+18, hBar=26;
+  /* 帯 */
+  const seg=(a,b,color)=>{ const x0=X(a), x1=X(b);
+    g.fillStyle=color; g.fillRect(x0, yBar, Math.max(1,x1-x0), hBar); };
+  if(tFA!=null&&isFinite(tFA)){
+    seg(Math.min(0,tFA), Math.max(0,tFA), tFA<0?"rgba(155,126,222,.45)":"rgba(242,182,50,.40)");
+    seg(Math.max(0,tFA), tFR, "rgba(224,90,78,.40)");
+  }else{
+    seg(0, tFR, "rgba(224,90,78,.40)");
+  }
+  g.strokeStyle="#26362f"; g.lineWidth=1;
+  g.strokeRect(Math.round(X(lo))+0.5, yBar+0.5, Math.round(pw), hBar);
+  /* イベントの縦線とラベル */
+  /* 端に来たラベルが画面外で切れないように、寄せ方を位置で切り替える */
+  const alignAt=(x,w)=> x<PAD.l+w ? "left" : (x>W-PAD.r-w ? "right" : "center");
+  const mark=(ms,label,color)=>{
+    const x=Math.round(X(ms))+0.5;
+    g.strokeStyle=color; g.lineWidth=2;
+    g.beginPath(); g.moveTo(x, yBar-8); g.lineTo(x, yBar+hBar+8); g.stroke();
+    g.fillStyle=color; g.font="11px sans-serif"; g.textAlign=alignAt(x,34);
+    g.fillText(label, x, yBar-12);
+  };
+  mark(0,"接地(FP)","#f2b632");
+  if(tFA!=null&&isFinite(tFA)) mark(tFA,"Arm Peak","#9b7ede");
+  mark(tFR,"リリース","#e05a4e");
+  /* 時間目盛り */
+  g.fillStyle="#5f6f68"; g.font="10px monospace";
+  const tick=(ms,txt)=>{ const x=X(ms); g.textAlign=alignAt(x,24); g.fillText(txt, x, yBar+hBar+22); };
+  tick(0,"0ms");
+  tick(tFR,Math.round(tFR)+"ms");
+  if(tFA!=null&&isFinite(tFA)&&Math.abs(X(tFA)-X(0))>30&&Math.abs(X(tFA)-X(tFR))>30)
+    tick(tFA,(tFA>0?"+":"")+Math.round(tFA)+"ms");
+  const res=1000/fps/slowFactor();
+  kv.innerHTML=
+     `<span class="k">FP → Arm Peak</span><span class="v ${tFA!=null?"":"na"}">${
+        tFA==null?"--":(tFA>0?"+":"")+Math.round(tFA)+" ms"}</span>`
+    +`<span class="k">Arm Peak → リリース</span><span class="v ${tAR!=null?"":"na"}">${
+        tAR==null?"--":Math.round(tAR)+" ms"}</span>`
+    +`<span class="k">FP → リリース</span><span class="v">${Math.round(tFR)} ms</span>`
+    +`<span class="k">時間分解能(1コマ)</span><span class="v ${fps>=50?"ok":"warn"}">±${res.toFixed(1)} ms${
+        fps<50?" 不足":""}</span>`;
+}
+
+/* ---- 10球ブロックごとの変化(仕様書 §8-3 / §10 Fatigue) ---- */
+const BLOCK_KEYS=["speed_kmh","stride_ratio","rel_height","rel_ext","knee_fp","t_fp_rel"];
+const BLOCK_COLORS=["#f2b632","#48c9d8","#5fbf7a","#9b7ede","#e05a4e","#c9a227"];
+/* 単位がばらばらなので、第1ブロックからの変化率[%]で重ねる。
+   絶対値は下の表で見る。0付近の量は%が発散するので系列ごと外す。 */
+function drawBlockChart(blocks, defs){
+  const cv=$("blockChart"); if(!cv) return;
+  const g=cv.getContext("2d"), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
+  const PAD={l:46,r:12,t:14,b:28};
+  const leg=$("blockLegend");
+  if(!blocks||blocks.length<2){
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    g.fillText("2ブロック(20球)以上で推移を表示します", W/2, H/2);
+    if(leg) leg.innerHTML=""; return;
+  }
+  const series=[];
+  defs.forEach((d,i)=>{
+    const ms=blocks.map(b=>statsOf(collectValues(b,d),false).mean);
+    const v0=ms[0];
+    if(v0==null||!isFinite(v0)||Math.abs(v0)<1e-6) { series.push({d,skip:true}); return; }
+    series.push({ d, color:BLOCK_COLORS[i%BLOCK_COLORS.length],
+                  pts:ms.map(v=> (v==null||!isFinite(v))?null:(v-v0)/Math.abs(v0)*100) });
+  });
+  let lim=5;
+  series.forEach(s=>{ if(s.skip) return; s.pts.forEach(v=>{ if(v!=null) lim=Math.max(lim,Math.abs(v)); }); });
+  lim*=1.15;
+  const pw=W-PAD.l-PAD.r, ph=H-PAD.t-PAD.b;
+  const X=(i)=>PAD.l+(blocks.length===1?pw/2:i/(blocks.length-1)*pw);
+  const Y=(v)=>PAD.t+ph/2-(v/lim)*(ph/2);
+  /* 0% の基準線と目盛り */
+  g.strokeStyle="#26362f"; g.lineWidth=1;
+  [-lim/2,0,lim/2].forEach(v=>{ const y=Math.round(Y(v))+0.5;
+    g.beginPath(); g.moveTo(PAD.l,y); g.lineTo(W-PAD.r,y); g.stroke(); });
+  g.strokeStyle="#3a4a44"; g.lineWidth=1.5;
+  g.beginPath(); g.moveTo(PAD.l,Math.round(Y(0))+0.5); g.lineTo(W-PAD.r,Math.round(Y(0))+0.5); g.stroke();
+  g.fillStyle="#8fa39a"; g.font="10px monospace"; g.textAlign="right";
+  [lim/2,0,-lim/2].forEach(v=>g.fillText((v>0?"+":"")+v.toFixed(1)+"%", PAD.l-6, Y(v)+3));
+  /* 端のラベルが切れないように寄せ方を変える */
+  blocks.forEach((b,i)=>{
+    const x=X(i);
+    g.textAlign = x<PAD.l+26 ? "left" : (x>W-PAD.r-26 ? "right" : "center");
+    g.fillText(`${i*10+1}〜${i*10+b.length}`, x, H-8);
+  });
+  /* 系列 */
+  series.forEach(s=>{
+    if(s.skip) return;
+    g.strokeStyle=s.color; g.lineWidth=2; g.lineJoin="round";
+    g.beginPath(); let started=false;
+    s.pts.forEach((v,i)=>{ if(v==null) return;
+      const x=X(i), y=Y(v); started?g.lineTo(x,y):g.moveTo(x,y); started=true; });
+    g.stroke();
+    s.pts.forEach((v,i)=>{ if(v==null) return;
+      g.fillStyle=s.color; g.beginPath(); g.arc(X(i),Y(v),3.2,0,Math.PI*2); g.fill(); });
+  });
+  if(leg) leg.innerHTML = series.map(s=> s.skip
+    ? `<span style="color:#3d4a45;">${s.d.label}(0付近のため非表示)</span>`
+    : `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${s.color};margin-right:4px;"></span>${s.d.label}`
+  ).join("&nbsp;&nbsp;")
+  + `<br><span style="color:#5f6f68;">第1ブロックからの変化率です。絶対値は下の表を見てください。</span>`;
+}
+async function renderBlocks(){
+  const t=$("blockTable"), note=$("blockNote");
+  const baseNote=`セッション内を<b>10球ずつのブロック</b>に区切り、ブロック平均を並べています(仕様書 §8-3)。<br>
+    比較する指標は 球速・ストライド長・リリース高さ・リリース前後位置・FP時前膝角度・FP→リリース時間 です。`;
+  const defs=STAT_DEFS.filter(d=>BLOCK_KEYS.includes(d.k));
+  if(!currentSession){ $("blockTag").textContent="--";
+    t.innerHTML=`<tbody><tr><td class="nm" style="padding:10px 6px;">セッションを開始すると表示されます。</td></tr></tbody>`;
+    note.innerHTML=baseNote; drawBlockChart(null,defs); return; }
+  const all=await dbAll("pitches");
+  const mine=all.filter(p=>p.session_id===currentSession.id).sort((a,b)=>a.pitch_no-b.pitch_no);
+  if(mine.length<10){ $("blockTag").textContent=`${mine.length}/10球`;
+    t.innerHTML=`<tbody><tr><td class="nm" style="padding:10px 6px;">
+      10球ごとに区切って比べます。あと${10-mine.length}球です。</td></tr></tbody>`;
+    note.innerHTML=baseNote; drawBlockChart(null,defs); return; }
+  const blocks=[];
+  for(let i=0;i<mine.length;i+=10) blocks.push(mine.slice(i,i+10));
+  $("blockTag").textContent=`${blocks.length}ブロック / ${mine.length}球`;
+  drawBlockChart(blocks, defs);
+  t.innerHTML=`<thead><tr><th style="text-align:left;">指標</th>`
+    + blocks.map((b,i)=>`<th>${i*10+1}〜${i*10+b.length}</th>`).join("")
+    + `<th>1→最後</th></tr></thead><tbody>`
+    + defs.map(d=>{
+        const ms=blocks.map(b=>statsOf(collectValues(b,d),false).mean);
+        const first=ms[0], last=ms[ms.length-1];
+        const diff=(first!=null&&last!=null)?last-first:null;
+        return `<tr><td class="nm">${d.label}</td>`
+          + ms.map(m=> m==null?`<td class="v na">--</td>`:`<td class="v">${m.toFixed(d.dec)}</td>`).join("")
+          + (diff==null?`<td class="v na">--</td>`:`<td class="v">${diff>0?"+":""}${diff.toFixed(d.dec)}</td>`)
+          + `</tr>`;
+      }).join("")
+    /* リリース位置のばらつきもブロックごとに出す(§8-3 の Level 3 判定材料) */
+    + (()=>{ const sp=blocks.map(b=>releaseSpread(b));
+        const f=sp[0], l=sp[sp.length-1];
+        return `<tr><td class="nm">リリース位置のばらつき</td>`
+          + sp.map(s=> s==null?`<td class="v na">--</td>`:`<td class="v">${s.toFixed(3)}</td>`).join("")
+          + ((f!=null&&l!=null)?`<td class="v">${l-f>0?"+":""}${(l-f).toFixed(3)}</td>`:`<td class="v na">--</td>`)
+          + `</tr>`; })()
+    + `</tbody>`;
+  /* 球速低下 かつ ばらつき増加 が同時に見られたら Level 3 として書く */
+  const sp0=statsOf(collectValues(blocks[0],STAT_DEFS.find(d=>d.k==="speed_kmh")),false).mean;
+  const spN=statsOf(collectValues(blocks[blocks.length-1],STAT_DEFS.find(d=>d.k==="speed_kmh")),false).mean;
+  const r0=releaseSpread(blocks[0]), rN=releaseSpread(blocks[blocks.length-1]);
+  const both = (sp0!=null&&spN!=null&&spN<sp0) && (r0!=null&&rN!=null&&rN>r0);
+  note.innerHTML = baseNote + (both
+    ? `<br><br><b style="color:var(--alert);">後半のブロックで、球速が下がり、同時にリリース位置のばらつきが増えています。</b>
+       設計仕様書 §12 が「疲労に伴う動作変化の可能性」として挙げているパターンです。
+       ⚠️ <b>疲労そのものを測ってはいません。</b>投球を続けるかどうかの判断は指導者が行ってください。`
+    : "");
+}
+
+/* ---- しきい値の編集UI ---- */
+function renderThr(){
+  $("thrTable").innerHTML=
+    `<thead><tr><th style="text-align:left;">指標</th><th>Level 1</th><th>Level 2</th></tr></thead><tbody>`
+    + Object.entries(THR).map(([k,v])=>{
+        const u=v.mode==="pct"?"%":(v.unit||"");
+        const inp=(lv)=>`<input type="number" step="0.005" data-thr="${k}" data-lv="${lv}" value="${v[lv]}"
+          style="width:74px;background:var(--bg-1);border:1px solid var(--panel-line);color:var(--chalk);
+                 border-radius:6px;min-height:36px;padding:0 6px;font-size:12px;font-family:inherit;text-align:right;">`;
+        return `<tr><td class="nm">${v.label}${v.timing?' <span style="color:#4d5a55;">(fps≥50のみ)</span>':""}</td>`
+          +`<td>${inp("l1")}${u}</td><td>${inp("l2")}${u}</td></tr>`;
+      }).join("") + `</tbody>`;
+}
+$("thrTable").addEventListener("input",(e)=>{
+  const i=e.target.closest("input[data-thr]"); if(!i) return;
+  const v=parseFloat(i.value); if(!isFinite(v)) return;
+  THR[i.dataset.thr][i.dataset.lv]=v; saveThr(); renderRepeat();
+});
+$("btnThrReset").addEventListener("click",()=>{
+  THR=JSON.parse(JSON.stringify(THR_DEFAULT)); saveThr(); renderThr(); renderRepeat();
+  toast("初期値に戻しました");
+});
+
+/* ============================================================
+   書き出し・読み込み(仕様書 §7)。すべて端末内で完結する。
+   ============================================================ */
+function download(name, text, mime){
+  const blob=new Blob([text],{type:mime});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); },1500);
+}
+const CSV_COLS=["date","session_id","pitch_no","pitcher_name","height_cm","throws","fps","capture_fps",
+  "slow_factor","calibrated","speed_kmh","stride_ratio","stride_cm","pelvis_disp","pelvis_vel",
+  "knee_fp","knee_rel","knee_ext","elbow_fp","trunk_fp","trunk_rel",
+  "t_fp_arm_ms","t_fp_rel_ms","t_arm_rel_ms",
+  "rel_height_ratio","rel_height_cm","rel_ext_ratio","rel_ext_cm",
+  "conf_stride","conf_pelvis","conf_knee_fp","conf_elbow","conf_release",
+  "vis_ankle_lead","vis_ankle_pivot","vis_toe_pivot","vis_wrist_throw","vis_elbow_throw","vis_hip_l","vis_hip_r",
+  "event_fp_confirmed","event_arm_confirmed","event_rel_confirmed","fps_warning","note"];
+function csvCell(v){
+  if(v==null||v==="") return "";                      // 欠測は空欄(0 を入れない)
+  if(typeof v==="number"){ if(!isFinite(v)) return ""; return String(Math.round(v*1000)/1000); }
+  if(typeof v==="boolean") return v?"1":"0";
+  let s=String(v);
+  /* Excel は = + - @ で始まるセルを数式として実行する。
+     選手名などの自由入力がそのまま数式にならないよう、先頭に ' を付けて無害化する。
+     数値は上の分岐で処理済みなので、マイナスの数値には影響しない。 */
+  if(/^[=+\-@\t\r]/.test(s)) s="'"+s;
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function pitchToRow(p, pitcher){
+  const m=p.metrics||{}, q=p.quality||{}, cf=q.conf||{}, vs=q.vis||{}, ev=p.events||{}, cal=p.calib||{};
+  const d=new Date(p.timestamp);
+  const date=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const o={ date, session_id:p.session_id, pitch_no:p.pitch_no,
+    pitcher_name:pitcher?pitcher.name:"", height_cm:pitcher?pitcher.height_cm:null,
+    throws:pitcher?pitcher.throws:"", fps:p.fps, capture_fps:cal.capture_fps,
+    slow_factor:cal.slow_factor, calibrated:cal.calibrated, note:p.note||"",
+    fps_warning:q.fps_warning,
+    speed_kmh:m.speed_kmh, stride_ratio:m.stride_ratio, stride_cm:m.stride_cm,
+    pelvis_disp:m.pelvis_disp, pelvis_vel:m.pelvis_vel,
+    knee_fp:m.knee_fp, knee_rel:m.knee_rel, knee_ext:m.knee_ext, elbow_fp:m.elbow_fp,
+    trunk_fp:m.trunk_fp, trunk_rel:m.trunk_rel,
+    t_fp_arm_ms:m.t_fp_arm, t_fp_rel_ms:m.t_fp_rel, t_arm_rel_ms:m.t_arm_rel,
+    rel_height_ratio:m.rel_height, rel_height_cm:m.rel_height_cm,
+    rel_ext_ratio:m.rel_ext, rel_ext_cm:m.rel_ext_cm,
+    conf_stride:cf.stride, conf_pelvis:cf.pelvis, conf_knee_fp:cf.knee_fp,
+    conf_elbow:cf.elbow, conf_release:cf.release,
+    event_fp_confirmed:ev.fp?.confirmed, event_arm_confirmed:ev.arm?.confirmed,
+    event_rel_confirmed:ev.rel?.confirmed };
+  ["ankle_lead","ankle_pivot","toe_pivot","wrist_throw","elbow_throw","hip_l","hip_r"]
+    .forEach(k=>{ o["vis_"+k]=vs[k]; });
+  return CSV_COLS.map(c=>csvCell(o[c])).join(",");
+}
+$("btnExportCsv").addEventListener("click",async()=>{
+  if(!currentPitcher){ toast("先に選手を選択してください"); return; }
+  const all=(await dbAll("pitches")).filter(p=>p.pitcher_id===currentPitcher.id)
+    .sort((a,b)=>a.timestamp-b.timestamp);
+  if(!all.length){ toast("書き出せる投球がありません"); return; }
+  const body=all.map(p=>pitchToRow(p,currentPitcher)).join("\r\n");
+  /* Excel が UTF-8 と判別できるよう BOM を付ける(仕様書 §7) */
+  download(`pitching_${currentPitcher.name}_${new Date().toISOString().slice(0,10)}.csv`,
+           "﻿"+CSV_COLS.join(",")+"\r\n"+body+"\r\n", "text/csv;charset=utf-8");
+  toast(`${all.length}球を書き出しました`);
+});
+$("btnExportJson").addEventListener("click",async()=>{
+  if(!currentPitcher){ toast("先に選手を選択してください"); return; }
+  const pitches=(await dbAll("pitches")).filter(p=>p.pitcher_id===currentPitcher.id);
+  const ids=new Set(pitches.map(p=>p.session_id));
+  const sess=(await dbAll("sessions")).filter(s=>s.pitcher_id===currentPitcher.id||ids.has(s.id));
+  const pack={ format:"pitchlab", version:1, exported_at:new Date().toISOString(),
+    pitchers:[currentPitcher], sessions:sess, pitches };
+  download(`pitching_${currentPitcher.name}_${new Date().toISOString().slice(0,10)}.json`,
+           JSON.stringify(pack), "application/json");
+  toast(`${pitches.length}球を書き出しました`);
+});
+$("btnImportJson").addEventListener("click",()=>$("jsonInput").click());
+$("jsonInput").addEventListener("change",async()=>{
+  const f=$("jsonInput").files[0]; $("jsonInput").value="";
+  if(!f) return;
+  if(!dbOk()) return;
+  try{
+    const pack=JSON.parse(await f.text());
+    if(pack.format!=="pitchlab") throw new Error("この JSON は投球解析の書き出しではありません");
+    let added=0;
+    for(const x of pack.pitchers||[]) await dbPut("pitchers",x);
+    for(const x of pack.sessions||[]) await dbPut("sessions",x);
+    for(const x of pack.pitches||[]){ await dbPut("pitches",x); added++; }
+    await reloadPitchers();
+    /* 選手が選ばれていないと集計も本人比も出ない。
+       別端末で書き出したJSONを開いた直後は必ずこの状態になる。 */
+    if(!currentPitcher && pitchers.length){
+      const lastId=lsGet("pitchlab.lastPitcher");
+      await setCurrentPitcher(pitchers.find(x=>x.id===lastId) || pitchers[0]);
+    }else{
+      await reloadSessions(); await renderPitchList(); await refreshData();
+    }
+    /* 直前に失敗していると赤いままなので、成功したら必ず戻す */
+    setStatus("ok",`${added}球を読み込みました${currentPitcher?` (選手: ${currentPitcher.name})`:""}`);
+    toast(`${added}球を読み込みました`);
+  }catch(err){
+    console.error(err);
+    setStatus("err","JSON を読み込めませんでした: "+(err.message||"形式が違います"));
+  }
+});
+async function refreshData(){
+  await reloadPitcherPitches();
+  const e=$("exportCount");
+  e.textContent=pitcherPitches.length?`${pitcherPitches.length} 球`:"--";
+  e.className="v"+(pitcherPitches.length?"":" na");
+  renderRepeat(); await renderBlocks(); await renderSummary(); await reloadCompare();
+}
+
+/* 動作確認用のフック。内部の系列を読めるようにしておく(表示には影響しない) */
+window.__pitchlab = {
+  get raw(){ return rawSeries; },
+  get smooth(){ return smoothSeries; },
+  get analysis(){ return analysis; },
+  get events(){ return events; },
+  get metrics(){ return metrics; },
+  get chain(){ return chain; },
+  detectEvents, renderMetrics, buildChain,
+  computeAlerts, statsOf, maturityOf, collectValues, releaseSpread, releaseStats, drawRelScatter,
+  drawTimeline, drawBlockChart,
+  get THR(){ return THR; },
+  get pitches(){ return pitcherPitches; },
+  get fps(){ return fps; },
+};
+
+/* ============ 起動 ============ */
+(async function boot(){
+  try{
+    db=await openDB();
+    await reloadPitchers();
+    const lastId=lsGet("pitchlab.lastPitcher");
+    if(lastId){
+      const p=pitchers.find(x=>x.id===lastId);
+      if(p){ currentPitcher=p; $("pName").value=p.name; $("pHeight").value=p.height_cm; $("pThrows").value=p.throws;
+             await reloadPitchers(); }
+    }
+    /* 進行中のセッションは、いま選んでいる選手のものだけ引き継ぐ */
+    const open=currentPitcher
+      ? (await dbAll("sessions")).find(s=>!s.ended_at&&s.pitcher_id===currentPitcher.id) : null;
+    if(open) currentSession=open;
+    await reloadSessions();
+  }catch(err){
+    console.error(err);
+    storageFail("この端末ではデータを保存できません(プライベートブラウズか、ブラウザの設定で保存が無効です)。解析と数値の表示は使えますが、記録は残りません");
+  }
+  loadThr(); renderThr();
+  updateTrimDisplay(); renderAnalysis(); renderEvents(); refreshReady();
+  renderMetrics(); renderPitchList(); drawChain(); drawTimeline();
+  try{ await refreshData(); }catch(err){ console.error(err); }
+  initModel(modelKind);
+})();
+</script>
+</body>
+</html>
