@@ -1513,6 +1513,165 @@ function batDrawPoints(t, lm){
   const fore=Math.hypot(u.x,u.y);            // 1 なら画面と平行、0 ならカメラ正面
   return { knob, tip, b, depth:u.z, fore };
 }
+/* ===== ヘッドスピード(インパクト時) =====
+   バットは映像から検出していない。両手の並びから軸を推定し、
+   握り幅(約12cm)とバット長(約70cm)の比のぶんだけ、手の検出のばらつきが
+   先端で拡大される。合成データでの実測では、手が1cmずれると先端は2.5cmずれた。
+   1コマの差分ではその誤差がそのまま速度に乗るので(240fpsなら 2.5cm/4.2ms ≒ 30km/h)、
+   接触までの数コマに2次式を当てて「接触の瞬間の傾き」を取る。
+   窓は必ず接触までで閉じる。接触後はバットが打球にエネルギーを渡して減速するため、
+   接触をまたぐ窓で均すと必ず低く出る。 */
+const BATSPD_WIN_SEC = 0.045;   // 「接触の瞬間」に当てる窓(実時間)
+const BATSPD_AVG_SEC = 0.060;   // 「接触前の平均」に当てる窓(実時間)
+const BATSPD_MIN_PTS = 5;       // 瞬間値に必要なコマ数
+const BATSPD_AVG_PTS = 7;       // 平均値に必要なコマ数
+/* p(τ)=a+bτ+cτ² の最小二乗。返すのは τ=0 での傾き b */
+function fitSlope0(ts, ys){
+  let s0=0,s1=0,s2=0,s3=0,s4=0, y0=0,y1=0,y2=0;
+  for(let i=0;i<ts.length;i++){
+    const t=ts[i], y=ys[i], t2=t*t;
+    s0+=1; s1+=t; s2+=t2; s3+=t2*t; s4+=t2*t2;
+    y0+=y; y1+=y*t; y2+=y*t2;
+  }
+  const det = s0*(s2*s4-s3*s3) - s1*(s1*s4-s3*s2) + s2*(s1*s3-s2*s2);
+  if(Math.abs(det) < 1e-18) return null;
+  const detB = s0*(y1*s4-y2*s3) - y0*(s1*s4-s3*s2) + s2*(s1*y2-y1*s2);
+  return detB/det;
+}
+/* 同じ当てはめの τ=0 での値 a */
+function fitValue0(ts, ys){
+  let s0=0,s1=0,s2=0,s3=0,s4=0, y0=0,y1=0,y2=0;
+  for(let i=0;i<ts.length;i++){
+    const t=ts[i], y=ys[i], t2=t*t;
+    s0+=1; s1+=t; s2+=t2; s3+=t2*t; s4+=t2*t2;
+    y0+=y; y1+=y*t; y2+=y*t2;
+  }
+  const det = s0*(s2*s4-s3*s3) - s1*(s1*s4-s3*s2) + s2*(s1*s3-s2*s2);
+  if(Math.abs(det) < 1e-18) return null;
+  const detA = y0*(s2*s4-s3*s3) - s1*(y1*s4-y2*s3) + s2*(y1*s3-y2*s2);
+  return detA/det;
+}
+/* 1次の最小二乗。2次より当てはめる自由度が1つ少ないぶん、ばらつきに強い。
+   傾きと一緒に「傾きの標準誤差」も返す。これがそのスイング自身から測った
+   検出のばらつきになるので、数字に ± を付けて出せる。 */
+function fitLin(ts, ys){
+  const n=ts.length; if(n<3) return null;
+  let mt=0,my=0; for(let i=0;i<n;i++){mt+=ts[i];my+=ys[i];} mt/=n; my/=n;
+  let num=0,den=0;
+  for(let i=0;i<n;i++){ const d=ts[i]-mt; num+=d*(ys[i]-my); den+=d*d; }
+  if(den<=1e-18) return null;
+  const b=num/den, a0=my-b*mt;
+  let ss=0; for(let i=0;i<n;i++){ const r=ys[i]-(a0+b*ts[i]); ss+=r*r; }
+  const sig=Math.sqrt(ss/Math.max(1,n-2));
+  return { b, se: sig/Math.sqrt(den), resid: sig };
+}
+const fitLinSlope=(ts,ys)=>{ const r=fitLin(ts,ys); return r?r.b:null; };
+/* 実時間のfps。スロー撮影の補正込み */
+const realFps=()=> (fps||30)*slowFactor();
+function batSpeedImpact(){
+  const ev=events.impact;
+  if(!ev||!ev.confirmed) return {ok:false, why:"インパクトが未確定です"};
+  if(!analysis||!analysis.H_norm) return {ok:false, why:"先に範囲を解析してください"};
+  const hcm=currentBatter&&currentBatter.height_cm;
+  if(!hcm) return {ok:false, why:"打者の身長が未入力です"};
+  const mpi=(hcm/100)/analysis.H_norm;      // 等方座標1あたりのメートル
+  const Lm=(batInch*2.54)/100;              // バット長(m)
+  const lever=Lm*0.93;                      // 下の手から芯の端まで(ノブは手より7%手前)
+
+  /* スイング面。奥行きが解けないときは画面そのものを面として使う */
+  const nrm=swingNormal3(ev.t);
+  const use3=!!(use3D && nrm && Math.abs(nrm.z)>=PLANE_ZMIN);
+  const n = use3 ? nrm : {x:0,y:0,z:1};
+  const seed = Math.abs(n.z)<0.9 ? {x:0,y:0,z:1} : {x:1,y:0,z:0};
+  const e1 = v3norm(v3cross(seed, n)); if(!e1) return {ok:false, why:"スイング面が決まりません"};
+  const e2 = v3norm(v3cross(n, e1));   if(!e2) return {ok:false, why:"スイング面が決まりません"};
+
+  const W=Math.max(BATSPD_WIN_SEC, BATSPD_AVG_SEC);
+  const ts=[], PH=[], KX=[], KY=[];
+  let prev=null, inWin=0;
+  for(const fr of smoothSeries){
+    const d=realSec(fr.t-ev.t);
+    if(d>1e-6 || d<-W) continue;              // 窓は必ず接触までで閉じる
+    inWin++;
+    const b=batAxis(fr.lm); if(!b) continue;
+    let u={x:b.ux, y:b.uy, z:0};
+    if(use3){
+      const q=-(n.x*u.x+n.y*u.y)/n.z;
+      u=v3norm({x:u.x, y:u.y, z:q}); if(!u) continue;
+    }
+    let ph=Math.atan2(v3dot(u,e2), v3dot(u,e1));
+    if(prev!=null){ while(ph-prev> Math.PI) ph-=2*Math.PI;
+                    while(ph-prev<-Math.PI) ph+=2*Math.PI; }
+    prev=ph;
+    ts.push(d); PH.push(ph); KX.push(b.knob.x*mpi); KY.push(b.knob.y*mpi);
+  }
+  const rf=realFps();
+  const pick=(sec)=>{ const T=[],P=[],X=[],Y=[];
+    for(let i=0;i<ts.length;i++) if(ts[i]>=-sec-1e-9){ T.push(ts[i]/sec); P.push(PH[i]); X.push(KX[i]); Y.push(KY[i]); }
+    return {T,P,X,Y}; };
+  /* 面内の角度と握りの動きから先端の速さを出す。
+     角度は等角加速度でよく当てはまる。位置を直接当てると、
+     45msで80°も回る円弧が2次式に乗らず低く出る。 */
+  const speedFrom=(T,P,X,Y,sec,lin)=>{
+    const k=1/sec;
+    const fp = lin ? fitLin(T,P) : null;
+    const om = lin ? (fp?fp.b:null) : fitSlope0(T,P);
+    const vkx= lin ? fitLinSlope(T,X) : fitSlope0(T,X);
+    const vky= lin ? fitLinSlope(T,Y) : fitSlope0(T,Y);
+    const ph0= fitValue0(T,P);
+    if(om==null||vkx==null||vky==null||ph0==null) return null;
+    const w=om*k;
+    const c0=Math.cos(ph0), s0=Math.sin(ph0);
+    const perp={ x:-s0*e1.x+c0*e2.x, y:-s0*e1.y+c0*e2.y, z:-s0*e1.z+c0*e2.z };
+    const v={ x:vkx*k + lever*w*perp.x, y:vky*k + lever*w*perp.y, z:lever*w*perp.z };
+    const mps=Math.hypot(v.x,v.y,v.z);
+    if(!isFinite(mps)) return null;
+    /* 角度の当てはめ残差から出した「傾きの標準誤差」を速さの ± に直す。
+       検出のばらつきが前後のコマで似た向きに出る(MediaPipe は実際そうなる)と
+       残差は小さく見えるのに傾きは狂うので、合成データで測った実測に合わせて
+       2.5倍に広げてある。これでも足りないことはあるが、狭すぎるよりはよい。 */
+    const SE_INFLATE=3.5;
+    const seMps = fp ? lever*(fp.se*k)*SE_INFLATE : null;
+    return {mps, kmh:mps*3.6, omega:w,
+            seKmh: seMps!=null ? seMps*3.6 : null,
+            residDeg: fp ? fp.resid*180/Math.PI : null};
+  };
+  const out={ ok:false, realFps:rf, use3, nz:nrm?Math.abs(nrm.z):null,
+              nAvg:pick(BATSPD_AVG_SEC).T.length, nPeak:pick(BATSPD_WIN_SEC).T.length };
+  out.inWin=inWin;
+  if(out.nAvg < BATSPD_AVG_PTS){
+    const need=`${BATSPD_AVG_PTS}コマ必要`;
+    out.why = (inWin>=BATSPD_AVG_PTS)
+      /* コマ数はあるのにバット軸が取れない = 両手が重なって見えている */
+      ? `接触前の${(BATSPD_AVG_SEC*1000).toFixed(0)}msは${inWin}コマありますが、`
+        +`バットの向きが取れたのは${out.nAvg}コマだけです(${need})。`
+        +`両手が重なって写っていると向きが決まりません`
+      : `接触前の${(BATSPD_AVG_SEC*1000).toFixed(0)}msに${inWin}コマしかありません`
+        +`(${need} = 実fps ${Math.ceil(BATSPD_AVG_PTS/BATSPD_AVG_SEC)} 以上)`;
+    return out;
+  }
+  const a=pick(BATSPD_AVG_SEC);
+  const avg=speedFrom(a.T,a.P,a.X,a.Y,BATSPD_AVG_SEC,true);
+  if(!avg){ out.why="当てはめに失敗しました"; return out; }
+  out.ok=true; out.avgKmh=avg.kmh; out.avgMps=avg.mps; out.omega=avg.omega;
+  out.seKmh=avg.seKmh; out.residDeg=avg.residDeg;
+  /* ± が値の3割を超えたら、数字として意味がないので出さない */
+  if(avg.seKmh!=null && avg.seKmh > avg.kmh*0.30){
+    out.ok=false;
+    out.why=`この動画では検出のばらつきが大きく、±${avg.seKmh.toFixed(0)}km/h より細かく決まりません`
+      +`(バット軸のぶれ ${avg.residDeg.toFixed(1)}°)`;
+  }
+  /* 「接触の瞬間」の値も出せるが、ばらつきが大きすぎて数字にできない
+     (合成データでの実測: 手のずれ1cmで ±19〜34%)。診断用にだけ持つ。 */
+  const q=pick(BATSPD_WIN_SEC);
+  if(q.T.length>=BATSPD_MIN_PTS){
+    const pk=speedFrom(q.T,q.P,q.X,q.Y,BATSPD_WIN_SEC,false);
+    if(pk){ out.peakKmh=pk.kmh; out.peakOmega=pk.omega; }
+  }
+  return out;
+}
+
+
 function drawBat(c,cv,lm,t){
   const d=batDrawPoints(t==null?video.currentTime:t, lm);
   if(!d) return;
@@ -3243,6 +3402,7 @@ const METRIC_ROWS = [
   { k:"back_knee_impact",  label:"インパクト時 軸足膝角度",      unit:"°",       dec:0, c:"bknee" },
   { k:"grip_speed_max",    label:"グリップ速度(最大)",          unit:"身長/秒", dec:2, c:"grip" },
   { k:"grip_speed_impact", label:"グリップ速度(インパクト時)",   unit:"身長/秒", dec:2, c:"grip" },
+  { k:"bat_speed_avg",     label:"ヘッド速度(接触前60msの平均)", unit:"km/h",  dec:1, c:"grip", pm:"bat_speed_se" },
   { k:"base_pos_fs",       label:"支持基底内の身体中心(接地時)", unit:"",        dec:2, signed:true, c:"base" },
   { k:"base_pos_impact",   label:"支持基底内の身体中心(インパクト時)", unit:"",  dec:2, signed:true, c:"base" },
   { k:"top_lag_ms",        label:"トップのタイムラグ",           unit:"ms",      dec:0, signed:true, c:"top", timing:true },
@@ -3251,6 +3411,7 @@ const METRIC_ROWS = [
   { k:"Commit_to_Impact_ms",label:"始動→インパクト",             unit:"ms",      dec:0, timing:true },
 ];
 let metrics=null;
+let batSpd=null;      // ヘッドスピードの計算結果(出せない理由も持つ)
 
 function lmAt(id){ const e=events[id]; return e ? smoothedAt(e.t) : null; }
 const P2=(lm,i)=> (lm&&lm[i]) ? { x:lm[i].x*videoAR, y:lm[i].y } : null;
@@ -3334,6 +3495,10 @@ function computeMetricsAll(){
     m.grip_speed_impact=gripSpeed[iImpact]??null;
     conf.grip=A.impact?minVis([A.impact,L.lWrist],[A.impact,L.rWrist]):null;
   }
+  /* 5-6b ヘッドスピード。撮影が遅いと出さない(出すと嘘になるため) */
+  batSpd=batSpeedImpact();
+  m.bat_speed_avg = batSpd.ok ? batSpd.avgKmh : null;
+  m.bat_speed_se  = batSpd.ok ? batSpd.seKmh  : null;
   /* 5-7 支持基底内の身体中心(近似)。体重配分ではない */
   const basePos=(lm)=>{
     const hp=midOf(lm,L.lHip,L.rHip), f=P2(lm,iAnkF), b=P2(lm,iAnkB);
@@ -3402,6 +3567,7 @@ function renderMetrics(){
       const sign=(r.signed&&v>0)?"+":"";
       txt=sign+v.toFixed(r.dec)+(r.unit?" "+r.unit:"");
       if(r.cm&&m[r.cm]!=null) txt+=` (${m[r.cm].toFixed(1)}cm)`;
+      if(r.pm&&m[r.pm]!=null) txt+=` ± ${m[r.pm].toFixed(0)}`;
       const lab=r.c?label[r.c]:null;
       cls = lab==="Invalid" ? "warn" : lab==="Poor" ? "" : lab==="Fair" ? "mid" : "ok";
       if(lab) badge=`<span class="lab-badge lab-${lab}">${lab}</span>`;
@@ -3429,6 +3595,27 @@ function renderMetrics(){
     + `はみ出した側を使う数値は当てになりません。撮り直すか、全身が入るように撮ってください`);
   const bad=Object.entries(label).filter(([,v])=>v==="Poor"||v==="Invalid").map(([k])=>k);
   if(bad.length) warns.push(`検出信頼度が低い項目があります(${bad.join(", ")})。Invalid の値は集計から除外してください`);
+  /* ヘッド速度は条件が揃わないと出ない。出ない理由を必ず言う */
+  if(batSpd){
+    if(batSpd.ok){
+      let t=`<b>ヘッド速度は「接触前${(BATSPD_AVG_SEC*1000).toFixed(0)}msの平均」です。接触の瞬間の値ではありません</b>`
+           +`(${batSpd.nAvg}コマ / 実fps ${batSpd.realFps.toFixed(0)})。`
+           +`スイングは接触に向かって加速しているので、<b>瞬間の最大値より2〜4割低い数字になります。</b>`;
+      t += `<br>バットは映像から検出していません。両手の並びから軸を推定していて、`
+         + `<b>手の検出のばらつきが握り幅とバット長の比だけ先端で拡大されます</b>`
+         + `(合成データでの実測: 手が1cmずれると先端は2.5cm)。`
+         + `± はこのスイング自身のバット軸のぶれ(${batSpd.residDeg.toFixed(1)}°)から出したものです。`;
+      t += batSpd.use3
+        ? `奥行きはスイング面から補正しています。`
+        : `<b>画面上の動きだけの値で、奥行き方向の速さは入っていません。</b>スイング面が画面と平行になる位置(一塁側/三塁側)から撮ってください。`;
+      t += `平滑化のぶん<b>さらに6〜7%低く出ます</b>(合成データでの実測)。`
+         + `<b>絶対値ではなく本人の過去のスイングとの差で見てください。</b>`;
+      warns.push(t);
+    }else if(batSpd.why){
+      warns.push(`<b>ヘッド速度は出していません</b> — ${batSpd.why}。`
+        + `速いものを少ないコマ数・粗い検出で測ると、誤差がそのまま速度になって嘘の数字が出ます`);
+    }
+  }
   warns.push("<b>グリップ速度の最大値は平滑化のぶんだけ低めに出ます</b>(合成データでの実測 −5%)。スイングの加速は50msの平滑化窓と同じくらい短いためです。絶対値ではなく<b>本人の過去のスイングとの差</b>で見てください");
   $("metricsNote").innerHTML=warns.map(w=>"・"+w).join("<br>");
   renderTopLag(); renderKneeUse(); renderQuality(); renderRepeat();
@@ -3727,6 +3914,7 @@ const STAT_DEFS = [
   { k:"step_ratio",         label:"ステップ幅",           unit:"%",       dec:1, c:"step",  cv:true },
   { k:"grip_speed_max",     label:"グリップ速度(最大)",    unit:"身長/秒", dec:2, c:"grip",  cv:true },
   { k:"grip_speed_impact",  label:"グリップ速度(接触時)",  unit:"身長/秒", dec:2, c:"grip",  cv:true },
+  { k:"bat_speed_avg",      label:"ヘッド速度(接触前60ms)",unit:"km/h",   dec:1, c:"grip",  cv:true },
   { k:"knee_fs",            label:"接地時 前膝角度",       unit:"°",       dec:0, c:"knee",  cv:true },
   { k:"knee_impact",        label:"接触時 前膝角度",       unit:"°",       dec:0, c:"knee",  cv:true },
   { k:"back_knee_fs",       label:"接地時 軸足膝角度",     unit:"°",       dec:0, c:"bknee", cv:true },
@@ -4263,7 +4451,8 @@ const CSV_COLS = ["date","session_id","swing_no","batter_name","height_cm","bats
   "slow_factor","calibrated","Commit_to_FS_ms","FS_to_Impact_ms","Commit_to_Impact_ms","top_lag_ms",
   "step_ratio","step_cm","head_fwd_impact","head_vert_impact","head_fwd_max","head_vert_drop",
   "knee_fs","knee_impact","knee_ext","back_knee_fs","back_knee_impact",
-  "grip_speed_max","grip_speed_impact","base_pos_fs","base_pos_impact","commit_source",
+  "grip_speed_max","grip_speed_impact","bat_speed_avg","bat_speed_se",
+  "base_pos_fs","base_pos_impact","commit_source",
   "exit_velocity_kmh","launch_angle_deg","spray_dir",
   "conf_step","conf_head","conf_knee","conf_grip","conf_top",
   "label_step","label_head","label_knee","label_grip","label_top",
@@ -4293,6 +4482,7 @@ function swingToRow(s, batter, session){
   ["Commit_to_FS_ms","FS_to_Impact_ms","Commit_to_Impact_ms","top_lag_ms","step_ratio","step_cm",
    "head_fwd_impact","head_vert_impact","head_fwd_max","head_vert_drop","knee_fs","knee_impact",
    "knee_ext","back_knee_fs","back_knee_impact","grip_speed_max","grip_speed_impact",
+   "bat_speed_avg","bat_speed_se",
    "base_pos_fs","base_pos_impact","exit_velocity_kmh","launch_angle_deg","spray_dir"]
    .forEach(k=>{ o[k]=m[k]; });
   ["step","head","knee","grip","top"].forEach(k=>{ o["conf_"+k]=cf[k]; o["label_"+k]=lb[k]; });
@@ -4426,6 +4616,8 @@ window.__batlab = {
   get fps(){ return fps; },
   detectEvents, renderMetrics, buildSignals, confirmEvent,
   angle2, smoothedAt, get videoAR(){ return videoAR; },
+  batSpeedImpact, fitSlope0, fitValue0, fitLinSlope, realFps,
+  get BATSPD(){ return {avgSec:BATSPD_AVG_SEC, winSec:BATSPD_WIN_SEC, avgPts:BATSPD_AVG_PTS}; }, get batSpd(){ return batSpd; },
   batAxis, batAxisAt, batFaceDir, batFace3, batDir3At, swingNormal3, batDrawPoints,
   get use3D(){ return use3D; }, set use3D(v){ use3D=v; },
   get ballPt(){ return ballPt; }, set ballPt(v){ ballPt=v; },
