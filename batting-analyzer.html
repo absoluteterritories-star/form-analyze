@@ -69,7 +69,13 @@
   .cropwrap{position:absolute;inset:0;transform-origin:0 0;}
   .crop-box{position:absolute;border:2px solid var(--amber);
     background:rgba(242,182,50,.14);pointer-events:none;z-index:4;}
-  .stage.cropping .pane{cursor:crosshair;}
+  .stage.cropping .pane{cursor:crosshair;touch-action:none;}
+  /* 拡大中は指でなぞって位置を直せる。touch-action を切らないと
+     なぞってもページのほうが動いてしまい、動かせない */
+  .pane.zoomed{touch-action:none;cursor:grab;}
+  .pane.zoomed:active{cursor:grabbing;}
+  .zoombar{display:flex;gap:6px;align-items:center;margin-left:2px;}
+  .zoombar[hidden]{display:none;}
   .stage.cropping{outline:2px solid var(--amber);outline-offset:-4px;}
   video{display:block;width:100%;height:100%;object-fit:contain;background:#000;}
   video.mirrored{transform:scaleX(-1);}
@@ -371,7 +377,8 @@
           <button class="ghost" id="btnToStart">|◀◀ 先頭</button>
           <button class="ghost" id="btnToTrim">範囲の開始へ</button>
           <button class="ghost" id="btnCrop" title="選手が小さいときに拡大する">🔍 拡大</button>
-          <button class="ghost" id="btnCropReset" hidden>全体に戻す</button>
+          <button class="ghost" id="btnCropAuto" title="骨格から選手の入る範囲を出して合わせる">選手に合わせる</button>
+          <span class="zoombar" id="zoomBar" hidden><button class="ghost" id="btnZoomOut" title="引く">−</button><button class="ghost" id="btnZoomIn" title="寄る">＋</button><button class="ghost" id="btnCropReset">全体に戻す</button></span>
           <button class="ghost" id="pickBtn2" style="margin-left:auto;">別の動画</button>
         </div>
       </div>
@@ -1216,10 +1223,15 @@ $("modelSel").addEventListener("change",async(e)=>{
 let crop=null, cropMode=false, cropDrag=null, cropGeom=null;
 const cropCanvas=document.createElement("canvas");
 const cropCtx=cropCanvas.getContext("2d");
+/* 正規化座標では x が幅・y が高さで別々に 0..1 化されているので、
+   w===h の箱が「動画と同じ縦横比」になる。常にその形に揃えると、
+   拡大したときにペインいっぱいに出て、指の操作と見え方が一致する。 */
+const CROP_MIN=0.10;      // これ以上寄っても粗くなるだけ
 
 function applyCropTransform(){
   const wrap=$("cropWrapA"), pane=$("paneA");
   if(!wrap) return;
+  if(pane) pane.classList.toggle("zoomed", !!crop);
   if(!crop || !cropGeom){ wrap.style.transform=""; return; }
   const pw=pane.clientWidth, ph=pane.clientHeight;
   const {ox,oy,dw,dh}=cropGeom;
@@ -1251,14 +1263,44 @@ function unmapCrop(lm){
   if(!crop||!lm) return lm;
   return lm.map(p=>p?{...p, x:crop.x+p.x*crop.w, y:crop.y+p.y*crop.h}:p);
 }
+/* 画面の座標 → 動画全体の正規化座標。拡大中の変形も戻す */
+function paneToNorm(clientX, clientY){
+  if(!cropGeom) return null;
+  const r=$("paneA").getBoundingClientRect();
+  let px=clientX-r.left, py=clientY-r.top;
+  const {ox,oy,dw,dh}=cropGeom;
+  if(crop){
+    const pw=$("paneA").clientWidth, ph=$("paneA").clientHeight;
+    const sc=Math.min(pw/(crop.w*dw), ph/(crop.h*dh));
+    const cx=ox+(crop.x+crop.w/2)*dw, cy=oy+(crop.y+crop.h/2)*dh;
+    px=(px-(pw/2-sc*cx))/sc; py=(py-(ph/2-sc*cy))/sc;
+  }
+  return { x:(px-ox)/dw, y:(py-oy)/dh };
+}
+const cropState=()=> crop ? {x:crop.x+crop.w/2, y:crop.y+crop.h/2, s:crop.w} : {x:0.5, y:0.5, s:1};
+function setCropCentered(cx,cy,s){
+  s=clamp(s, CROP_MIN, 1);
+  if(s>=0.999){ setCrop(null); return; }
+  setCrop({ x:clamp(cx-s/2,0,1-s), y:clamp(cy-s/2,0,1-s), w:s, h:s });
+}
+/* 注視点(fx,fy)を画面上の同じ場所に留めたまま寄る/引く */
+function zoomBy(f, fx, fy){
+  const c=cropState();
+  const s2=clamp(c.s/f, CROP_MIN, 1);
+  if(fx==null || s2>=0.999){ setCropCentered(c.x, c.y, s2); return; }
+  const k=s2/c.s;
+  setCropCentered(fx-(fx-c.x)*k, fy-(fy-c.y)*k, s2);
+}
+/* 指でなぞった箱を、動画と同じ縦横比(w===h)に広げてから使う */
+function cropFromBox(x0,y0,x1,y1){
+  const s=clamp(Math.max(Math.abs(x1-x0), Math.abs(y1-y0)), CROP_MIN, 1);
+  return { cx:(x0+x1)/2, cy:(y0+y1)/2, s };
+}
 function cropRectFromDrag(){
   if(!cropDrag||!cropGeom) return null;
-  const {ox,oy,dw,dh}=cropGeom;
-  const x0=Math.min(cropDrag.x0,cropDrag.x1), x1=Math.max(cropDrag.x0,cropDrag.x1);
-  const y0=Math.min(cropDrag.y0,cropDrag.y1), y1=Math.max(cropDrag.y0,cropDrag.y1);
-  const nx=(x0-ox)/dw, ny=(y0-oy)/dh;
-  const cx=clamp(nx,0,1), cy=clamp(ny,0,1);
-  return { x:cx, y:cy, w:clamp((x1-x0)/dw,0,1-cx), h:clamp((y1-y0)/dh,0,1-cy) };
+  const a=paneToNorm(cropDrag.cx0, cropDrag.cy0), b=paneToNorm(cropDrag.cx1, cropDrag.cy1);
+  if(!a||!b) return null;
+  return cropFromBox(a.x,a.y,b.x,b.y);
 }
 function endCropMode(){
   cropMode=false; cropDrag=null;
@@ -1269,45 +1311,150 @@ function endCropMode(){
 function setCrop(c){
   crop=c;
   $("btnCropReset").hidden=!crop;
+  const z=$("zoomBar"); if(z) z.hidden=!crop;
   layout();
   if(!smoothSeries.length) detectAndRender(); else draw();
+}
+/* 骨格から選手の入る範囲を出して、そこに合わせる。
+   画面外に出た点は MediaPipe が作り話をするので使わない。
+   バットや腕の振りが外に出るぶん、体の高さを基準に横へ余白を足す。 */
+function autoCropFromPose(){
+  const frames = smoothSeries.length ? smoothSeries.map(f=>f.lm)
+               : (lastLandmarks ? [lastLandmarks] : []);
+  if(!frames.length) return null;
+  let x0=1,y0=1,x1=0,y1=0,n=0;
+  for(const lm of frames){
+    if(!lm) continue;
+    for(let i=0;i<=32;i++){
+      const p=lm[i]; if(!p) continue;
+      if(p.visibility!=null && p.visibility<0.5) continue;
+      if(p.x<0.01||p.x>0.99||p.y<0.01||p.y>0.99) continue;
+      x0=Math.min(x0,p.x); x1=Math.max(x1,p.x);
+      y0=Math.min(y0,p.y); y1=Math.max(y1,p.y); n++;
+    }
+  }
+  if(n<12 || x1<=x0 || y1<=y0) return null;
+  const bodyH=y1-y0;
+  const mx=bodyH*0.45/(videoAR||1);      // 道具と腕の振りのぶん
+  const my=bodyH*0.12;
+  return cropFromBox(x0-mx, y0-my, x1+mx, y1+my);
 }
 $("btnCrop").addEventListener("click",()=>{
   if(!video.src){ toast("先に動画を読み込んでください"); return; }
   if(cropMode){ endCropMode(); return; }
-  if(crop) setCrop(null);          // まず全体を出してから囲んでもらう
-  cropMode=true; calibMode=0; ballMode=false;
+  cropMode=true; calibMode=0; ballMode=false; setAnnotTool("");
   stage.classList.add("cropping");
   $("btnCrop").textContent="やめる";
-  toast("拡大したい範囲を指でなぞって囲んでください");
+  toast("拡大したい範囲を囲んでください(1回タップでもその場所に寄ります)");
 });
 $("btnCropReset").addEventListener("click",()=>{ endCropMode(); setCrop(null); toast("全体に戻しました"); });
-$("paneA").addEventListener("pointerdown",(e)=>{
-  if(!cropMode) return;
-  const r=$("paneA").getBoundingClientRect();
-  cropDrag={x0:e.clientX-r.left, y0:e.clientY-r.top, x1:e.clientX-r.left, y1:e.clientY-r.top};
-  $("cropBox").hidden=false; e.preventDefault();
-});
-$("paneA").addEventListener("pointermove",(e)=>{
-  if(!cropMode||!cropDrag) return;
-  const r=$("paneA").getBoundingClientRect();
-  cropDrag.x1=e.clientX-r.left; cropDrag.y1=e.clientY-r.top;
-  const box=$("cropBox");
-  box.style.left=Math.min(cropDrag.x0,cropDrag.x1)+"px";
-  box.style.top =Math.min(cropDrag.y0,cropDrag.y1)+"px";
-  box.style.width =Math.abs(cropDrag.x1-cropDrag.x0)+"px";
-  box.style.height=Math.abs(cropDrag.y1-cropDrag.y0)+"px";
-});
-$("paneA").addEventListener("pointerup",()=>{
-  if(!cropMode||!cropDrag) return;
-  const c=cropRectFromDrag();
+$("btnCropAuto").addEventListener("click",()=>{
+  if(!video.src){ toast("先に動画を読み込んでください"); return; }
   endCropMode();
-  if(!c||c.w<0.05||c.h<0.05){ toast("範囲が小さすぎます"); return; }
-  setCrop(c);
+  const c=autoCropFromPose();
+  if(!c){ toast("骨格が取れていません。先に解析するか、骨格の出ているコマで押してください"); return; }
+  setCropCentered(c.cx, c.cy, c.s);
+  toast(smoothSeries.length
+    ? `選手に合わせました(全体の ${Math.round(c.s*100)}%)。解析をやり直すと検出が良くなります`
+    : `選手に合わせました(全体の ${Math.round(c.s*100)}%)`);
+});
+$("btnZoomIn") .addEventListener("click",()=>zoomBy(1.25));
+$("btnZoomOut").addEventListener("click",()=>zoomBy(1/1.25));
+
+/* ---- 指とマウスの操作 ----
+   拡大中は動かして位置を直せる。囲み直しのためにいちいち全体へ戻さなくてよい。
+   touch-action を切らないと、なぞってもページのほうが動いてしまう。 */
+const ptrs=new Map();
+let panFrom=null, pinchFrom=null;
+$("paneA").addEventListener("pointerdown",(e)=>{
+  if(annotTool || calibMode || ballMode) return;
+  ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  try{ $("paneA").setPointerCapture(e.pointerId); }catch{}
+  if(cropMode){
+    cropDrag={cx0:e.clientX, cy0:e.clientY, cx1:e.clientX, cy1:e.clientY,
+              x0:e.clientX, y0:e.clientY, moved:false};
+    $("cropBox").hidden=false; drawCropBox();
+    e.preventDefault(); return;
+  }
+  if(!crop) return;
+  if(ptrs.size===1){ const c=cropState(); panFrom={px:e.clientX, py:e.clientY, cx:c.x, cy:c.y, s:c.s}; }
+  else if(ptrs.size===2){ panFrom=null; pinchFrom={d:ptrDist(), c:cropState(), mid:ptrMidNorm()}; }
+  e.preventDefault();
+});
+function ptrDist(){
+  const a=[...ptrs.values()]; if(a.length<2) return 0;
+  return Math.hypot(a[0].x-a[1].x, a[0].y-a[1].y);
+}
+function ptrMidNorm(){
+  const a=[...ptrs.values()]; if(a.length<2) return null;
+  return paneToNorm((a[0].x+a[1].x)/2, (a[0].y+a[1].y)/2);
+}
+function drawCropBox(){
+  if(!cropDrag) return;
+  const r=$("paneA").getBoundingClientRect(), box=$("cropBox");
+  const x0=Math.min(cropDrag.cx0,cropDrag.cx1)-r.left, y0=Math.min(cropDrag.cy0,cropDrag.cy1)-r.top;
+  box.style.left=x0+"px"; box.style.top=y0+"px";
+  box.style.width =Math.abs(cropDrag.cx1-cropDrag.cx0)+"px";
+  box.style.height=Math.abs(cropDrag.cy1-cropDrag.cy0)+"px";
+}
+$("paneA").addEventListener("pointermove",(e)=>{
+  if(ptrs.has(e.pointerId)) ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(cropMode&&cropDrag){
+    cropDrag.cx1=e.clientX; cropDrag.cy1=e.clientY;
+    if(Math.hypot(e.clientX-cropDrag.x0, e.clientY-cropDrag.y0)>6) cropDrag.moved=true;
+    drawCropBox(); return;
+  }
+  if(pinchFrom && ptrs.size>=2){
+    const d=ptrDist();
+    if(pinchFrom.d>4 && d>4){
+      const s2=clamp(pinchFrom.c.s*(pinchFrom.d/d), CROP_MIN, 1);
+      const m=pinchFrom.mid;
+      if(m){ const k=s2/pinchFrom.c.s;
+             setCropCentered(m.x-(m.x-pinchFrom.c.x)*k, m.y-(m.y-pinchFrom.c.y)*k, s2); }
+      else setCropCentered(pinchFrom.c.x, pinchFrom.c.y, s2);
+    }
+    return;
+  }
+  if(panFrom && crop && cropGeom && ptrs.size===1){
+    const pane=$("paneA"), {ox,oy,dw,dh}=cropGeom;
+    const sc=Math.min(pane.clientWidth/(crop.w*dw), pane.clientHeight/(crop.h*dh));
+    setCropCentered(panFrom.cx-(e.clientX-panFrom.px)/(sc*dw),
+                    panFrom.cy-(e.clientY-panFrom.py)/(sc*dh), panFrom.s);
+  }
+});
+function endPointer(e){
+  ptrs.delete(e.pointerId);
+  try{ $("paneA").releasePointerCapture(e.pointerId); }catch{}
+  if(ptrs.size<2) pinchFrom=null;
+  if(ptrs.size===0) panFrom=null;
+  if(!cropMode||!cropDrag) return;
+  const moved=cropDrag.moved;
+  const c=cropRectFromDrag();
+  const tapAt=paneToNorm(cropDrag.cx1, cropDrag.cy1);
+  cropDrag=null; endCropMode();
+  if(!moved){
+    /* 1回タップ = その場所に寄る。囲むのが難しい場面のため */
+    if(!tapAt){ return; }
+    const cur=cropState();
+    setCropCentered(tapAt.x, tapAt.y, clamp(cur.s*0.6, CROP_MIN, 1));
+    toast("タップした場所に寄りました。指で動かして位置を直せます");
+    return;
+  }
+  if(!c || c.s<CROP_MIN*0.9){ toast("範囲が小さすぎます"); return; }
+  setCropCentered(c.cx, c.cy, c.s);
   toast(smoothSeries.length
     ? "拡大しました。事前解析をやり直すと検出が良くなります"
-    : `拡大しました(全体の ${Math.round(c.w*100)}% × ${Math.round(c.h*100)}%)`);
-});
+    : `拡大しました(全体の ${Math.round(c.s*100)}%)`);
+}
+$("paneA").addEventListener("pointerup", endPointer);
+$("paneA").addEventListener("pointercancel", endPointer);
+$("paneA").addEventListener("wheel",(e)=>{
+  if(!crop && !cropMode) return;
+  if(annotTool||calibMode||ballMode) return;
+  e.preventDefault();
+  const at=paneToNorm(e.clientX, e.clientY);
+  zoomBy(e.deltaY<0 ? 1.15 : 1/1.15, at?at.x:null, at?at.y:null);
+},{passive:false});
 
 /* ============ 検出 ============ */
 let lastTs=-1;
@@ -4759,6 +4906,7 @@ window.__batlab = {
   detectEvents, renderMetrics, buildSignals, confirmEvent,
   angle2, smoothedAt, get videoAR(){ return videoAR; },
   get annots(){ return annots; },
+  setCropCentered, zoomBy, autoCropFromPose, paneToNorm,
   batSpeedImpact, fitSlope0, fitValue0, fitLinSlope, realFps,
   get BATSPD(){ return {avgSec:BATSPD_AVG_SEC, winSec:BATSPD_WIN_SEC, avgPts:BATSPD_AVG_PTS}; }, get batSpd(){ return batSpd; },
   batAxis, batAxisAt, batFaceDir, batFace3, batDir3At, swingNormal3, batDrawPoints,
