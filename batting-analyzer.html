@@ -120,6 +120,34 @@
     .fine-note{grid-column:span 2;}
   }
   .transport-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  /* クイックバー: どのタブにいても動画のすぐ下に出す。
+     現場でいちばん押すものだけを並べ、タブの往復を無くすのが目的 */
+  .quickbar{margin:2px 0 10px;padding-top:8px;border-top:1px solid var(--panel-line);}
+  .quickbar[hidden]{display:none;}
+  .quick-evs{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;}
+  .quick-evs::-webkit-scrollbar{height:5px;}
+  .quick-evs::-webkit-scrollbar-thumb{background:var(--panel-line);border-radius:3px;}
+  .quick-acts{display:flex;gap:6px;flex-wrap:wrap;}
+  .qbtn{flex:0 0 auto;background:var(--panel);color:var(--chalk);
+    border:1px solid var(--panel-line);border-radius:8px;min-height:var(--tap);
+    padding:8px 12px;font-size:12.5px;font-family:inherit;cursor:pointer;white-space:nowrap;}
+  .qbtn:hover:not(:disabled){border-color:var(--amber);}
+  .qbtn:disabled{opacity:.42;cursor:default;}
+  .qbtn.primary{background:var(--amber);color:#1a1206;border-color:var(--amber);font-weight:700;}
+  .qbtn.primary:disabled{background:var(--panel);color:var(--chalk);font-weight:400;}
+  .qbtn.on{border-color:var(--sky);color:var(--sky);}
+  .qbtn.cand{border-color:var(--chalk-dim);}
+  .qbtn.done{border-color:var(--amber);}
+  .qbtn.need:not(.done){border-color:var(--alert);}
+  .qbtn .num{font-family:'JetBrains Mono',monospace;font-size:10px;opacity:.7;margin-right:5px;}
+  .qbtn .tick{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--amber);margin-left:5px;}
+  /* 映像を消して骨格だけにする。骨格は overlay 側なので video だけ隠せばよい */
+  .pane.novideo video{visibility:hidden;}
+  @media (max-width:820px){
+    .quick-acts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+    .qbtn{width:100%;}
+    .quick-evs .qbtn{width:auto;}
+  }
   select.mini{font-family:'JetBrains Mono',monospace;background:var(--bg-1);border:1px solid var(--panel-line);
     color:var(--chalk);padding:0 8px;min-height:36px;border-radius:7px;font-size:12px;}
   .ghost{font-size:12px;background:var(--bg-1);border:1px solid var(--panel-line);color:var(--chalk);
@@ -316,6 +344,16 @@
         </div>
         <div class="steps fine-row">
           <span class="fine-note" id="fineNote"></span>
+        </div>
+        <!-- タブを行き来しなくても、動画を見ながら押せるところに置く -->
+        <div class="quickbar" id="quickBar" hidden>
+          <div class="quick-evs" id="quickEvents"></div>
+          <div class="quick-acts">
+            <button class="qbtn primary" id="qAnalyze">この範囲を解析する</button>
+            <button class="qbtn" id="qDetect">候補を検出</button>
+            <button class="qbtn" id="qSave">セッションに記録</button>
+            <button class="qbtn" id="qVideo">映像 ON</button>
+          </div>
         </div>
         <div class="transport-row">
           <button class="ghost" id="btnToStart">|◀◀ 先頭</button>
@@ -1024,6 +1062,9 @@ const toastEl=$("toast");
 /* ---- 状態 ---- */
 let poseLandmarker=null, modelKind="lite", libFailed=false;
 let VIS_MIN=0.4, mirror=false, showRaw=false, captureFps=0;
+/* 映像を消して骨格だけにする。見せながら説明するときの一時的な状態なので、
+   設定には残さない(次に開いたとき映像が出ないと故障に見えるため) */
+let showVideo=true;
 let FS_ANK=0.15, FS_TOE=0.20;
 let videoAR=1, fps=30, fpsLocked=false, fpsMeasured=false;
 let mediaTimeNow=null, frameIndexNow=null, sameFrameFlag=false;
@@ -1947,6 +1988,7 @@ function loadFile(file){
   $("confirmHereWrap").style.display="none";
   $("dropUI").style.display="none"; $("paneA").style.display="block";
   $("transport").classList.add("show");
+  $("quickBar").hidden=false;
   video.src=objectUrl; video.load();
   refreshReady(); renderEvents(); renderMetrics(); drawTiming(); loadDraft();
 }
@@ -2852,11 +2894,11 @@ if("serviceWorker" in navigator && location.protocol.startsWith("http")){
    インパクトは手動確定が必須(未確定のスイングは保存できない)。
    ============================================================ */
 const EVENTS = [
-  { id:"setup",  label:"構え (Setup)",        need:false },
-  { id:"commit", label:"始動 (Commit)",       need:true  },
-  { id:"fs",     label:"踏み込み足接地 (FS)", need:true  },
-  { id:"impact", label:"インパクト",          need:true  },
-  { id:"finish", label:"フォロースルー",      need:false },
+  { id:"setup", short:"構え",  label:"構え (Setup)",        need:false },
+  { id:"commit", short:"始動", label:"始動 (Commit)",       need:true  },
+  { id:"fs", short:"接地",     label:"踏み込み足接地 (FS)", need:true  },
+  { id:"impact", short:"インパクト", label:"インパクト",          need:true  },
+  { id:"finish", short:"フォロー", label:"フォロースルー",      need:false },
 ];
 const REQUIRED=EVENTS.filter(e=>e.need).map(e=>e.id);
 let events={};          // id -> {t, frame, confirmed, auto}
@@ -3079,6 +3121,7 @@ $("commitCands").addEventListener("click",(e)=>{
 });
 
 function renderEvents(){
+  renderQuickEvents();
   const n=Object.keys(events).length;
   const c=Object.values(events).filter(e=>e.confirmed).length;
   $("eventTag").textContent = n? `${c}/${n} 確定` : "未検出";
@@ -4316,6 +4359,60 @@ async function refreshData(){
 }
 
 /* 動作確認用のフック。内部の系列を読めるようにしておく(表示には影響しない) */
+
+/* ---- クイックバー: タブを移らずに押せる場所へ主要な操作を出す ----
+   本体のボタンを作り直すのではなく「押し替え」にしてある。
+   文言と押せる/押せないは MutationObserver で本体から写すので、
+   押せる条件の判定が2か所に分かれて食い違うことがない。 */
+const QUICK_SRC = [["qAnalyze","btnAnalyze"],["qDetect","btnDetectEvents"],["qSave","btnSaveSwing"]];
+function buildQuickEvents(){
+  $("quickEvents").innerHTML = EVENTS.map((ev,i)=>
+    `<button class="qbtn${ev.need?" need":""}" data-qev="${ev.id}" title="いま表示しているコマで確定">`
+    + `<span class="num">${i+1}</span>${ev.short||ev.label}<span class="tick"></span></button>`
+  ).join("");
+  renderQuickEvents();
+}
+function renderQuickEvents(){
+  for(const ev of EVENTS){
+    const b=document.querySelector(`[data-qev="${ev.id}"]`); if(!b) continue;
+    const e=events[ev.id];
+    b.classList.toggle("done", !!(e&&e.confirmed));
+    b.classList.toggle("cand", !!(e&&!e.confirmed));
+    const t=b.querySelector(".tick");
+    if(t) t.textContent = e ? (e.confirmed?`✓${e.frame}`:`?${e.frame}`) : "";
+  }
+}
+function syncQuick(){
+  for(const [q,src] of QUICK_SRC){
+    const a=$(q), b=$(src); if(!a||!b) continue;
+    a.textContent=b.textContent; a.disabled=b.disabled;
+    a.title=b.disabled ? (b.title||"") : "";
+  }
+}
+function renderQuickVideo(){
+  const v=$("qVideo"); if(!v) return;
+  v.classList.toggle("on", !showVideo);
+  v.textContent = showVideo ? "映像 ON" : "映像 OFF(骨格だけ)";
+}
+function applyVideoVisibility(){
+  const p=$("paneA"); if(p) p.classList.toggle("novideo", !showVideo);
+  renderQuickVideo();
+}
+$("quickEvents").addEventListener("click",(e)=>{
+  const b=e.target.closest("[data-qev]"); if(!b) return;
+  if(!video.src||!isFinite(video.duration)){ toast("先に動画を読み込んでください"); return; }
+  const t=shownTime();
+  confirmEvent(b.dataset.qev, t, Math.round(t*fps));
+});
+for(const [q,src] of QUICK_SRC){
+  const a=$(q), b=$(src); if(!a||!b) continue;
+  a.addEventListener("click",()=>{ if(!b.disabled) b.click(); });
+  new MutationObserver(syncQuick).observe(b,
+    {attributes:true, attributeFilter:["disabled","title"], childList:true, characterData:true, subtree:true});
+}
+$("qVideo").addEventListener("click",()=>{ showVideo=!showVideo; applyVideoVisibility(); savePrefs(); });
+buildQuickEvents(); syncQuick(); applyVideoVisibility();
+
 window.__batlab = {
   get crop(){ return crop; },
   get lastLandmarks(){ return lastLandmarks; },
