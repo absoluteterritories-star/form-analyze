@@ -75,6 +75,9 @@
   video.mirrored{transform:scaleX(-1);}
   canvas.overlay{position:absolute;left:0;top:0;pointer-events:none;}
   canvas.overlay.calib{pointer-events:auto;cursor:crosshair;}
+  canvas.overlay.drawing{pointer-events:auto;cursor:crosshair;}
+  .quick-draw{display:flex;gap:6px;flex-wrap:wrap;padding-top:8px;}
+  .quick-draw[hidden]{display:none;}
   .drop{text-align:center;padding:32px 22px;color:var(--chalk-dim);}
   .drop .glyph{font-family:'Oswald',sans-serif;font-size:15px;letter-spacing:.16em;color:var(--amber);display:block;margin-bottom:10px;}
   .drop .hint{font-size:12px;margin-top:10px;color:#5f6f68;line-height:1.7;}
@@ -338,6 +341,15 @@
             <button class="qbtn" id="qDetect">候補を検出</button>
             <button class="qbtn" id="qSave">セッションに記録</button>
             <button class="qbtn" id="qVideo">映像 ON</button>
+            <button class="qbtn" id="qDraw">✎ 描き込み</button>
+          </div>
+          <div class="quick-draw" id="drawBar" hidden>
+            <button class="qbtn" data-atool="line">／ 線</button>
+            <button class="qbtn" data-atool="arrow">→ 矢印</button>
+            <button class="qbtn" data-atool="angle">∠ 角度</button>
+            <button class="qbtn" data-atool="dist">↔ 距離</button>
+            <button class="qbtn" id="qUndo">1つ戻す</button>
+            <button class="qbtn" id="qClearDraw">全部消す</button>
           </div>
         </div>
         <div class="transport-row">
@@ -1418,6 +1430,7 @@ function draw(){
   drawGuides(ctx,overlay,shown);
   drawCross(ctx,overlay,shown);
   if(showAngles) drawAngles(ctx,overlay,shown);
+  drawAnnots(ctx,overlay);
   ctx.save();
   if(mirror){ ctx.translate(overlay.width,0); ctx.scale(-1,1); }
   // 較正で置いた点
@@ -1468,6 +1481,7 @@ function loadFile(file){
   $("dropUI").style.display="none"; $("paneA").style.display="block";
   $("transport").classList.add("show");
   $("quickBar").hidden=false;
+  annots=[]; annotPend=[]; setAnnotTool("");
   video.src=objectUrl; video.load();
   renderEvents(); loadDraft();
 }
@@ -1723,6 +1737,13 @@ $("btnCalib").addEventListener("click",()=>{
 });
 function calibCancel(){ calibMode=0; calibPts=[]; overlay.classList.remove("calib"); calibBanner(null); draw(); }
 overlay.addEventListener("pointerdown",(e)=>{
+  if(annotTool && !cropMode && !calibMode){
+    const ra=overlay.getBoundingClientRect();
+    let ax=(e.clientX-ra.left)/ra.width, ay=(e.clientY-ra.top)/ra.height;
+    if(mirror) ax=1-ax;
+    addAnnotPoint(ax,ay); e.preventDefault();
+    return;
+  }
   if(!calibMode) return;
   const r=overlay.getBoundingClientRect();
   let nx=(e.clientX-r.left)/r.width, ny=(e.clientY-r.top)/r.height;
@@ -4066,10 +4087,132 @@ for(const [q,src] of QUICK_SRC){
     {attributes:true, attributeFilter:["disabled","title"], childList:true, characterData:true, subtree:true});
 }
 $("qVideo").addEventListener("click",()=>{ showVideo=!showVideo; applyVideoVisibility(); savePrefs(); });
+/* ================= 画面への描き込み =================
+   選手に見せながら「ここ」と指すためのもの。点は動画の座標(0..1)で持つので、
+   拡大しても画面の大きさが変わっても、映した場所からずれない。
+   数字(角度・距離)は測定値と同じ換算を通す。
+   ・角度は angle2(画面上の2D角度) = 指標に出る角度と同じ計算
+   ・距離は 等方距離 ÷ 身長ピクセル長 × 身長cm = step_cm と同じ換算
+   線は骨格の色と紛れないよう紫にしてある。 */
+let annots=[], annotTool="", annotPend=[];
+const COLOR_ANNOT="#9b7ede";
+const ANNOT_STEPS={ line:2, arrow:2, dist:2, angle:3 };
+const ANNOT_NAME={ line:"線", arrow:"矢印", angle:"角度", dist:"距離" };
+const ANNOT_HINT={
+  line:  ["① 線の始点をタップ","② 線の終点をタップ"],
+  arrow: ["① 矢印の根元をタップ","② 矢印の先をタップ"],
+  dist:  ["① 測りたい一方の点をタップ","② もう一方の点をタップ"],
+  angle: ["① 1本目の先をタップ","② 角の頂点をタップ","③ 2本目の先をタップ"],
+};
+/* 鏡像でも文字が裏返らないよう、画面座標は自分で反転させる */
+function annotPx(q,cv){ const x=mirror?(1-q.x):q.x; return {x:x*cv.width, y:q.y*cv.height}; }
+/* 等方距離 → cm。較正していれば身長ピクセル長がそのぶん正しくなる */
+function annotCm(a,b){
+  const h=currentPitcher&&currentPitcher.height_cm;
+  if(!h||!analysis||!analysis.H_norm) return null;
+  return Math.hypot((a.x-b.x)*videoAR, a.y-b.y)/analysis.H_norm*h;
+}
+function annotLabel(c,cv,x,y,txt){
+  c.font=`600 ${Math.max(11, Math.round(cv.width*0.028))}px 'JetBrains Mono', monospace`;
+  c.textBaseline="middle";
+  const w=c.measureText(txt).width, hh=Math.max(14, cv.width*0.032);
+  const X=Math.min(cv.width-w-6, Math.max(6, x-w/2)), Y=Math.min(cv.height-hh/2-2, Math.max(hh/2+2, y));
+  c.fillStyle="rgba(13,20,18,.72)"; c.fillRect(X-4, Y-hh/2, w+8, hh);
+  c.fillStyle=COLOR_ANNOT; c.fillText(txt, X, Y);
+}
+function annotHead(c,from,to,size){
+  const a=Math.atan2(to.y-from.y, to.x-from.x);
+  c.beginPath();
+  c.moveTo(to.x, to.y);
+  c.lineTo(to.x-size*Math.cos(a-0.4), to.y-size*Math.sin(a-0.4));
+  c.lineTo(to.x-size*Math.cos(a+0.4), to.y-size*Math.sin(a+0.4));
+  c.closePath(); c.fill();
+}
+function drawOneAnnot(c,cv,an,pending){
+  const P=an.pts.map(q=>annotPx(q,cv));
+  c.save();
+  c.strokeStyle=COLOR_ANNOT; c.fillStyle=COLOR_ANNOT;
+  c.lineWidth=Math.max(2, cv.width*0.004); c.lineCap="round"; c.lineJoin="round";
+  if(pending) c.setLineDash([6,5]);
+  const dot=(p)=>{ c.beginPath(); c.arc(p.x,p.y,Math.max(3,cv.width*0.006),0,Math.PI*2); c.fill(); };
+  if(an.kind==="angle"){
+    if(P.length>=2){ c.beginPath(); c.moveTo(P[0].x,P[0].y); c.lineTo(P[1].x,P[1].y); c.stroke(); }
+    if(P.length>=3){ c.beginPath(); c.moveTo(P[1].x,P[1].y); c.lineTo(P[2].x,P[2].y); c.stroke(); }
+    P.forEach(dot);
+    if(P.length===3){
+      const iso=(q)=>({x:q.x*videoAR, y:q.y});
+      const v=angle2(iso(an.pts[0]), iso(an.pts[1]), iso(an.pts[2]));
+      c.setLineDash([]);
+      if(v!=null) annotLabel(c,cv,P[1].x, P[1].y-Math.max(18,cv.width*0.05), v.toFixed(1)+"°");
+    }
+  }else{
+    if(P.length>=2){
+      c.beginPath(); c.moveTo(P[0].x,P[0].y); c.lineTo(P[1].x,P[1].y); c.stroke();
+      c.setLineDash([]);
+      if(an.kind==="arrow") annotHead(c,P[0],P[1],Math.max(12,cv.width*0.035));
+      if(an.kind==="dist"){
+        /* 数字は線に直交する向きへ逃がす。線の上に重ねると読めない */
+        const dx=P[1].x-P[0].x, dy=P[1].y-P[0].y, m=Math.hypot(dx,dy)||1;
+        const off=Math.max(16,cv.width*0.045);
+        const cm=annotCm(an.pts[0],an.pts[1]);
+        annotLabel(c,cv,(P[0].x+P[1].x)/2 - dy/m*off, (P[0].y+P[1].y)/2 + dx/m*off,
+          cm!=null ? cm.toFixed(1)+" cm" : "cmは解析後");
+      }
+    }
+    /* 矢印の先は頭が印になるので、点は打たない */
+    (an.kind==="arrow" ? P.slice(0,1) : P).forEach(dot);
+  }
+  c.restore();
+}
+function drawAnnots(c,cv){
+  for(const an of annots) drawOneAnnot(c,cv,an,false);
+  if(annotPend.length) drawOneAnnot(c,cv,{kind:annotTool, pts:annotPend}, true);
+}
+function annotBanner(){
+  if(!annotTool){ calibBanner(null); return; }
+  const h=ANNOT_HINT[annotTool];
+  calibBanner(`${ANNOT_NAME[annotTool]}: ${h[Math.min(annotPend.length, h.length-1)]}`);
+}
+function setAnnotTool(t){
+  annotTool = (annotTool===t) ? "" : t;
+  annotPend=[];
+  calibMode=0;
+  overlay.classList.toggle("drawing", !!annotTool);
+  document.querySelectorAll("[data-atool]").forEach(b=>b.classList.toggle("on", b.dataset.atool===annotTool));
+  annotBanner(); draw();
+}
+function addAnnotPoint(nx,ny){
+  annotPend.push({x:clamp(nx,0,1), y:clamp(ny,0,1)});
+  if(annotPend.length>=ANNOT_STEPS[annotTool]){
+    annots.push({ kind:annotTool, pts:annotPend, t:video.currentTime });
+    annotPend=[];
+  }
+  annotBanner(); draw();
+}
+document.querySelectorAll("[data-atool]").forEach(b=>
+  b.addEventListener("click",()=>setAnnotTool(b.dataset.atool)));
+$("qUndo").addEventListener("click",()=>{
+  if(annotPend.length){ annotPend.pop(); }
+  else if(annots.length){ annots.pop(); }
+  else { toast("消すものがありません"); return; }
+  annotBanner(); draw();
+});
+$("qClearDraw").addEventListener("click",()=>{
+  if(!annots.length && !annotPend.length){ toast("消すものがありません"); return; }
+  annots=[]; annotPend=[]; annotBanner(); draw(); toast("描き込みを消しました");
+});
+$("qDraw").addEventListener("click",()=>{
+  const bar=$("drawBar");
+  bar.hidden=!bar.hidden;
+  $("qDraw").classList.toggle("on", !bar.hidden);
+  if(bar.hidden) setAnnotTool("");
+});
+
 buildQuickEvents(); syncQuick(); applyVideoVisibility();
 
 window.__pitchlab = {
   angle2, smoothedAt, get videoAR(){ return videoAR; },
+  get annots(){ return annots; },
   get crop(){ return crop; },
   get lastLandmarks(){ return lastLandmarks; },
   get raw(){ return rawSeries; },
