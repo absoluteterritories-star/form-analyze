@@ -64,7 +64,13 @@
     background:repeating-linear-gradient(0deg,#241a13 0 2px,#2a1f16 2px 42px),var(--dirt);
     display:flex;align-items:center;justify-content:center;aspect-ratio:9/13;max-height:64vh;overflow:hidden;}
   .stage.dragover{outline:2px dashed var(--amber);outline-offset:-6px;}
-  .pane{position:relative;flex:1 1 0;height:100%;min-width:0;}
+  .pane{position:relative;flex:1 1 0;height:100%;min-width:0;overflow:hidden;}
+  /* 拡大表示。映像と骨格を同じ入れ物ごと変形するので、位置がずれない */
+  .cropwrap{position:absolute;inset:0;transform-origin:0 0;}
+  .crop-box{position:absolute;border:2px solid var(--amber);
+    background:rgba(242,182,50,.14);pointer-events:none;z-index:4;}
+  .stage.cropping .pane{cursor:crosshair;}
+  .stage.cropping{outline:2px solid var(--amber);outline-offset:-4px;}
   video{display:block;width:100%;height:100%;object-fit:contain;background:#000;}
   video.mirrored{transform:scaleX(-1);}
   canvas.overlay{position:absolute;left:0;top:0;pointer-events:none;}
@@ -270,8 +276,11 @@
           </div>
         </div>
         <div class="pane" id="paneA" style="display:none;">
-          <video id="video" playsinline preload="auto"></video>
-          <canvas class="overlay" id="overlay"></canvas>
+          <div class="cropwrap" id="cropWrapA">
+            <video id="video" playsinline preload="auto"></video>
+            <canvas class="overlay" id="overlay"></canvas>
+          </div>
+          <div class="crop-box" id="cropBox" hidden></div>
         </div>
       </div>
 
@@ -306,13 +315,13 @@
           <button class="tbtn fine" data-step="0.1"   title="0.1秒進む (→)">＋0.1<em>秒</em></button>
         </div>
         <div class="steps fine-row">
-          <button class="tbtn fine" data-nudge="-0.001" title="0.001秒戻る ([)">−0.001<em>秒</em></button>
-          <button class="tbtn fine" data-nudge="0.001"  title="0.001秒進む (])">＋0.001<em>秒</em></button>
           <span class="fine-note" id="fineNote"></span>
         </div>
         <div class="transport-row">
           <button class="ghost" id="btnToStart">|◀◀ 先頭</button>
           <button class="ghost" id="btnToTrim">範囲の開始へ</button>
+          <button class="ghost" id="btnCrop" title="選手が小さいときに拡大する">🔍 拡大</button>
+          <button class="ghost" id="btnCropReset" hidden>全体に戻す</button>
           <button class="ghost" id="pickBtn2" style="margin-left:auto;">別の動画</button>
         </div>
       </div>
@@ -334,6 +343,10 @@
 
       <!-- ===== 打者・撮影 ===== -->
       <div class="tabpage active" id="tab-setup">
+        <div class="panel" id="videoWarn" style="display:none;border-color:var(--alert);">
+          <h2 style="color:var(--alert);">動画を再生できません</h2>
+          <div class="legend" id="videoWarnText"></div>
+        </div>
         <div class="panel" id="storageWarn" style="display:none;border-color:var(--alert);">
           <h2 style="color:var(--alert);">保存できません</h2>
           <div class="legend" id="storageWarnText"></div>
@@ -451,7 +464,13 @@
             <span class="k">身長ピクセル長 H_norm</span><span class="v na" id="kHnorm">--</span>
             <span class="k">投手方向</span><span class="v na" id="kDir">--</span>
             <span class="k">検出できたコマ</span><span class="v na" id="kDetected">--</span>
+            <span class="k">画面からのはみ出し</span><span class="v na" id="kEdge">--</span>
             <span class="k">1コマの実時間</span><span class="v na" id="kFrameMs">--</span>
+            <span class="k">解析にかかった時間</span><span class="v na" id="kCost">--</span>
+          </div>
+          <div id="takesRow" style="display:none;">
+            <div class="legend" style="padding-bottom:6px;" id="takesNote"></div>
+            <div class="toolbar" id="takesBtns" style="padding-top:0;"></div>
           </div>
           <div class="legend">
             範囲全体を1コマずつ解析し、<b>平滑化した骨格</b>を作ります。
@@ -735,6 +754,101 @@
             <span class="lab">平滑化前の骨格も表示</span>
             <label class="switch"><input type="checkbox" id="rawToggle"><span class="slider-toggle"></span></label>
           </div>
+          <div class="opt-row">
+            <span class="lab">関節角度を数字で表示</span>
+            <label class="switch"><input type="checkbox" id="angToggle" checked><span class="slider-toggle"></span></label>
+          </div>
+          <div class="opt-row" id="angSetRow">
+            <span class="lab">出す関節</span>
+            <span style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+              <label><input type="checkbox" class="angset" data-set="knee" checked> 膝</label>
+              <label><input type="checkbox" class="angset" data-set="elbow"> 肘</label>
+              <label><input type="checkbox" class="angset" data-set="hip"> 股関節</label>
+              <label><input type="checkbox" class="angset" data-set="shoulder"> 肩</label>
+            </span>
+          </div>
+          <div class="opt-row">
+            <span class="lab">十字線</span>
+            <select class="mini" id="crossSel">
+              <option value="">表示しない</option>
+              <option value="頭">頭</option>
+              <option value="左肩">左肩</option><option value="右肩">右肩</option>
+              <option value="左肘">左肘</option><option value="右肘">右肘</option>
+              <option value="左手首">左手首</option><option value="右手首">右手首</option>
+              <option value="左腰">左腰</option><option value="右腰">右腰</option>
+              <option value="左膝">左膝</option><option value="右膝">右膝</option>
+              <option value="左足首">左足首</option><option value="右足首">右足首</option>
+            </select>
+          </div>
+          <div class="opt-row">
+            <span class="lab">補助線</span>
+            <span style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+              <label><input type="checkbox" id="gHip"> 腰</label>
+              <label><input type="checkbox" id="gSh"> 肩</label>
+              <label><input type="checkbox" id="gBack"> 軸足</label>
+              <label><input type="checkbox" id="gFront"> 前足</label>
+            </span>
+          </div>
+          <div class="opt-row">
+            <span class="lab">残像（前のコマを重ねる）</span>
+            <label class="switch"><input type="checkbox" id="onionToggle"><span class="slider-toggle"></span></label>
+          </div>
+          <div class="range-row">
+            <label>残像の長さ <b id="onionVal">0.20</b> 秒前まで</label>
+            <input type="range" class="thin" id="onionSpan" min="0.05" max="0.6" step="0.05" value="0.2">
+          </div>
+          <div class="legend">
+            <b>角度の数字は、記録される数値と同じ計算</b>（画面上の2D角度）です。表示と記録は食い違いません。<br>
+            <b>十字線</b>は選んだ関節を縦横の線で追います。頭に付けると、突っ込みや沈み込みが目で見えます。<br>
+            <b>残像</b>は前のコマの骨格をうすく重ねます。どこがどれだけ動いたかが1枚で分かります。
+          </div>
+          <div class="opt-row">
+            <span class="lab">バットを表示</span>
+            <label class="switch"><input type="checkbox" id="batToggle" checked><span class="slider-toggle"></span></label>
+          </div>
+          <div class="opt-row">
+            <span class="lab">バットが通った面を表示</span>
+            <label class="switch"><input type="checkbox" id="batPathToggle" checked><span class="slider-toggle"></span></label>
+          </div>
+          <div class="opt-row">
+            <span class="lab">芯の向きを矢印で表示</span>
+            <label class="switch"><input type="checkbox" id="batFaceToggle" checked><span class="slider-toggle"></span></label>
+          </div>
+          <div class="opt-row">
+            <span class="lab">奥行きも使う(3D)</span>
+            <label class="switch"><input type="checkbox" id="use3DToggle" checked><span class="slider-toggle"></span></label>
+          </div>
+          <div class="range-row">
+            <label>バットの長さ <b id="batInchVal">33 インチ</b></label>
+            <input type="range" class="thin" id="batInch" min="26" max="36" step="0.5" value="33">
+          </div>
+          <div class="toolbar" style="padding-top:10px;">
+            <button id="btnBallPick">ボールの位置を指定</button>
+            <button id="btnBallClear">ボールを消す</button>
+          </div>
+          <div class="legend">
+            <b>ボールは映像から検出できません。</b>インパクトのコマまで進めてから
+            「ボールの位置を指定」を押し、画面のボールをタップしてください。
+            指定したコマ以外では<b>破線の輪</b>になります(根拠はその1点だけなので)。<br>
+            <b>矢印は芯の向き</b>です。丸いバットに「面」はないので、
+            スイングプレーンの中で軸に直交する向き(バレルが進む側)を出しています。打球が飛ぶ側です。
+            バットが止まって見えるコマでは向きが決まらないので出ません。<br>
+            <b>奥行きも使う(3D)</b>を入れると、矢印とバットが奥行きに応じて短く描かれます。
+            手前を向くほど明るく短く、真正面を向くと丸(◎)になり、奥向きは丸の中が抜けます。
+            ただし<b>奥行きはモデルの推定値で、左右・上下よりはるかに粗い値です。</b>
+            おかしいと感じたら切ってください(平面で描きます)。
+          </div>
+          <div class="legend">
+            <b>バットは映像から検出していません。</b>両手が同じ棒を握っていることを使って、
+            下の手→上の手の並びから軸を推定し、設定した長さぶん伸ばして描いています。
+            長さは打者の身長から換算しています。<br>
+            両手の間隔は10cm前後しかないため、手の検出が少しぶれるだけで軸は大きく振れます。
+            平滑化後の骨格を使い、さらに前後のコマの角度をならしてから描いています。
+            合成データでの実測(手の検出が1cmずれる想定)で、ならす前は平均6.5°・最大20.6°、
+            ならしたあとは<b>平均1.7°・最大4.8°</b>のずれ(先端で約2.5cm)。<br>
+            <b>向きの目安として見るもので、角度の数値としては使えません。</b>
+            両手が重なって見えるコマは向きが決まらないので描きません。
+          </div>
           <div class="range-row">
             <label>検出しきい値 <b id="visVal">0.40</b></label>
             <input type="range" class="thin" id="visMin" min="0.1" max="0.8" step="0.05" value="0.4">
@@ -824,7 +938,6 @@
               <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>0.1秒</td></tr>
               <tr><td><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd></td><td>0.01秒</td></tr>
               <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>1コマ(確実に1コマ)</td></tr>
-              <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>0.001秒</td></tr>
               <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>トリミングの開始 / 終了</td></tr>
             </table>
           </div>
@@ -967,8 +1080,8 @@ function openDB(){
 }
 /* プライベートブラウズやブラウザ設定で localStorage / IndexedDB が
    使えないことがある。触っただけで例外になる環境もあるので、必ずここを通す。 */
-const lsGet=(k)=>{ try{ return lsGet(k); }catch{ return null; } };
-const lsSet=(k,v)=>{ try{ lsSet(k, v); }catch{} };
+const lsGet=(k)=>{ try{ return localStorage.getItem(k); }catch{ return null; } };
+const lsSet=(k,v)=>{ try{ localStorage.setItem(k, v); }catch{} };
 let dbBroken=false;
 function storageFail(msg){
   const first=!dbBroken;
@@ -1043,15 +1156,116 @@ $("modelSel").addEventListener("change",async(e)=>{
   video.pause(); await initModel(e.target.value); savePrefs();
 });
 
+
+/* ================= 拡大表示(部分トリミング) =================
+   選手が小さく写っている動画向け。見やすくなるだけでなく、
+   切り出した範囲を検出にも渡すので、小さい選手の検出精度も上がる。 */
+let crop=null, cropMode=false, cropDrag=null, cropGeom=null;
+const cropCanvas=document.createElement("canvas");
+const cropCtx=cropCanvas.getContext("2d");
+
+function applyCropTransform(){
+  const wrap=$("cropWrapA"), pane=$("paneA");
+  if(!wrap) return;
+  if(!crop || !cropGeom){ wrap.style.transform=""; return; }
+  const pw=pane.clientWidth, ph=pane.clientHeight;
+  const {ox,oy,dw,dh}=cropGeom;
+  const cw=crop.w*dw, ch=crop.h*dh;
+  if(cw<1||ch<1){ wrap.style.transform=""; return; }
+  const sc=Math.min(pw/cw, ph/ch);
+  const cx=ox+(crop.x+crop.w/2)*dw, cy=oy+(crop.y+crop.h/2)*dh;
+  wrap.style.transform=`translate(${(pw/2-sc*cx).toFixed(2)}px, ${(ph/2-sc*cy).toFixed(2)}px) scale(${sc.toFixed(4)})`;
+}
+/* 検出に渡す画。全体のときは動画そのまま、拡大中は切り出したキャンバス
+   (縮めて渡す案は実測で 679ms→626ms の8%しか縮まず、精度は平均0.9〜1.5cm
+    落ちたので採らない。遅さの主因は入力の大きさではなくモデルの計算量) */
+function detectSource(){
+  if(!crop) return video;
+  const vw=video.videoWidth, vh=video.videoHeight;
+  if(!vw||!vh) return video;
+  const sx=crop.x*vw, sy=crop.y*vh, sw=crop.w*vw, sh=crop.h*vh;
+  if(sw<8||sh<8) return video;
+  // 小さく写っている選手を検出しやすくするため、切り出しは長辺512px程度まで引き伸ばす
+  const k=Math.max(1, Math.min(4, 512/Math.max(sw,sh)));
+  const w=Math.round(sw*k), h=Math.round(sh*k);
+  if(cropCanvas.width!==w) cropCanvas.width=w;
+  if(cropCanvas.height!==h) cropCanvas.height=h;
+  cropCtx.drawImage(video, sx,sy,sw,sh, 0,0,w,h);
+  return cropCanvas;
+}
+/* 切り出しの中の座標を、動画全体の座標に戻す */
+function unmapCrop(lm){
+  if(!crop||!lm) return lm;
+  return lm.map(p=>p?{...p, x:crop.x+p.x*crop.w, y:crop.y+p.y*crop.h}:p);
+}
+function cropRectFromDrag(){
+  if(!cropDrag||!cropGeom) return null;
+  const {ox,oy,dw,dh}=cropGeom;
+  const x0=Math.min(cropDrag.x0,cropDrag.x1), x1=Math.max(cropDrag.x0,cropDrag.x1);
+  const y0=Math.min(cropDrag.y0,cropDrag.y1), y1=Math.max(cropDrag.y0,cropDrag.y1);
+  const nx=(x0-ox)/dw, ny=(y0-oy)/dh;
+  const cx=clamp(nx,0,1), cy=clamp(ny,0,1);
+  return { x:cx, y:cy, w:clamp((x1-x0)/dw,0,1-cx), h:clamp((y1-y0)/dh,0,1-cy) };
+}
+function endCropMode(){
+  cropMode=false; cropDrag=null;
+  stage.classList.remove("cropping");
+  $("cropBox").hidden=true;
+  $("btnCrop").textContent="🔍 拡大";
+}
+function setCrop(c){
+  crop=c;
+  $("btnCropReset").hidden=!crop;
+  layout();
+  if(!smoothSeries.length) detectAndRender(); else draw();
+}
+$("btnCrop").addEventListener("click",()=>{
+  if(!video.src){ toast("先に動画を読み込んでください"); return; }
+  if(cropMode){ endCropMode(); return; }
+  if(crop) setCrop(null);          // まず全体を出してから囲んでもらう
+  cropMode=true; calibMode=0; ballMode=false;
+  stage.classList.add("cropping");
+  $("btnCrop").textContent="やめる";
+  toast("拡大したい範囲を指でなぞって囲んでください");
+});
+$("btnCropReset").addEventListener("click",()=>{ endCropMode(); setCrop(null); toast("全体に戻しました"); });
+$("paneA").addEventListener("pointerdown",(e)=>{
+  if(!cropMode) return;
+  const r=$("paneA").getBoundingClientRect();
+  cropDrag={x0:e.clientX-r.left, y0:e.clientY-r.top, x1:e.clientX-r.left, y1:e.clientY-r.top};
+  $("cropBox").hidden=false; e.preventDefault();
+});
+$("paneA").addEventListener("pointermove",(e)=>{
+  if(!cropMode||!cropDrag) return;
+  const r=$("paneA").getBoundingClientRect();
+  cropDrag.x1=e.clientX-r.left; cropDrag.y1=e.clientY-r.top;
+  const box=$("cropBox");
+  box.style.left=Math.min(cropDrag.x0,cropDrag.x1)+"px";
+  box.style.top =Math.min(cropDrag.y0,cropDrag.y1)+"px";
+  box.style.width =Math.abs(cropDrag.x1-cropDrag.x0)+"px";
+  box.style.height=Math.abs(cropDrag.y1-cropDrag.y0)+"px";
+});
+$("paneA").addEventListener("pointerup",()=>{
+  if(!cropMode||!cropDrag) return;
+  const c=cropRectFromDrag();
+  endCropMode();
+  if(!c||c.w<0.05||c.h<0.05){ toast("範囲が小さすぎます"); return; }
+  setCrop(c);
+  toast(smoothSeries.length
+    ? "拡大しました。事前解析をやり直すと検出が良くなります"
+    : `拡大しました(全体の ${Math.round(c.w*100)}% × ${Math.round(c.h*100)}%)`);
+});
+
 /* ============ 検出 ============ */
 let lastTs=-1;
 function nextTimestamp(){ let t=Math.round(performance.now()); if(t<=lastTs) t=lastTs+1; lastTs=t; return t; }
 function detect(){
   if(!poseLandmarker || video.readyState<2) return null;
   try{
-    const r=poseLandmarker.detectForVideo(video,nextTimestamp());
+    // 拡大中は切り出した画を渡す(小さい選手の検出が良くなる)
+    const r=poseLandmarker.detectForVideo(detectSource(),nextTimestamp());
     if(!r||!r.landmarks||!r.landmarks.length) return null;
-    return { lm:r.landmarks[0], wlm:r.worldLandmarks?r.worldLandmarks[0]:null };
+    return { lm:unmapCrop(r.landmarks[0]), wlm:r.worldLandmarks?r.worldLandmarks[0]:null };
   }catch(err){ console.warn("detection skipped",err); return undefined; }
 }
 function detectAndRender(){
@@ -1071,18 +1285,23 @@ function smoothWindow(f){
 function smoothLandmarkSeries(series, W){
   const half=(W-1)/2;
   return series.map((f,i)=>{
-    if(!f.lm) return {t:f.t, lm:null};
+    if(!f.lm) return {t:f.t, lm:null, wlm:null};
     const out=new Array(33).fill(null);
+    // 奥行き(worldLandmarks)も同じ窓で均す。3D表示の土台になる
+    const outW=f.wlm ? new Array(33).fill(null) : null;
     for(let j=0;j<33;j++){
       let sx=0,sy=0,sv=0,n=0;
+      let wx=0,wy=0,wz=0,wn=0;
       for(let k=Math.max(0,i-half);k<=Math.min(series.length-1,i+half);k++){
         const p=series[k].lm && series[k].lm[j];
-        if(!p) continue;
-        sx+=p.x; sy+=p.y; sv+=(p.visibility==null?1:p.visibility); n++;
+        if(p){ sx+=p.x; sy+=p.y; sv+=(p.visibility==null?1:p.visibility); n++; }
+        const q=series[k].wlm && series[k].wlm[j];
+        if(q){ wx+=q.x; wy+=q.y; wz+=q.z; wn++; }
       }
       if(n) out[j]={x:sx/n,y:sy/n,visibility:sv/n};
+      if(outW && wn) outW[j]={x:wx/wn,y:wy/wn,z:wz/wn};
     }
-    return {t:f.t, lm:out};
+    return {t:f.t, lm:out, wlm:outW};
   });
 }
 function smoothedAt(t){
@@ -1129,13 +1348,17 @@ function pct(arr,p){
 }
 
 /* ============ 描画 ============ */
+/* 拡大の変形が掛かっていても値が変わらないよう、レイアウト上の寸法で計算する
+   (getBoundingClientRect は変形後の値を返すので使えない) */
 function fitOverlay(){
-  const vw=video.videoWidth, vh=video.videoHeight, r=video.getBoundingClientRect();
-  if(!vw||!vh||!r.width||!r.height) return;
-  const sc=Math.min(r.width/vw, r.height/vh), dw=vw*sc, dh=vh*sc;
-  const pr=$("paneA").getBoundingClientRect();
-  overlay.style.left=(r.left-pr.left+(r.width-dw)/2)+"px";
-  overlay.style.top =(r.top -pr.top +(r.height-dh)/2)+"px";
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const rw=video.offsetWidth, rh=video.offsetHeight;
+  if(!vw||!vh||!rw||!rh) return;
+  const sc=Math.min(rw/vw, rh/vh), dw=vw*sc, dh=vh*sc;
+  const ox=video.offsetLeft+(rw-dw)/2, oy=video.offsetTop+(rh-dh)/2;
+  cropGeom={ox,oy,dw,dh};
+  overlay.style.left=ox+"px";
+  overlay.style.top =oy+"px";
   overlay.style.width=dw+"px"; overlay.style.height=dh+"px";
   const dpr=Math.min(window.devicePixelRatio||1,2);
   const w=Math.max(1,Math.round(dw*dpr)), h=Math.max(1,Math.round(dh*dpr));
@@ -1146,7 +1369,7 @@ function layout(){
     const ar=`${video.videoWidth} / ${video.videoHeight}`;
     if(stage.style.aspectRatio!==ar) stage.style.aspectRatio=ar;
   }
-  fitOverlay(); draw();
+  fitOverlay(); applyCropTransform(); draw();
 }
 function drawSkeleton(c,cv,lm,color,width,dots){
   if(!lm) return;
@@ -1162,6 +1385,376 @@ function drawSkeleton(c,cv,lm,color,width,dots){
     if(p.visibility!=null&&p.visibility<0.3) return;
     const q=P(i); c.fillStyle=COLOR_POINT; c.beginPath(); c.arc(q.x,q.y,3,0,Math.PI*2); c.fill(); });
 }
+
+/* ================= バット(推定) =================
+   重要: MediaPipe が返すのは体の33点だけで、バットは映像から検出していない。
+   両手が同じ棒を握っていることを使い、下の手→上の手の並びから軸を推定している。
+   両手の間隔は10cm前後しかないため1コマだけでは軸が大きく振れる。
+   平滑化後の系列を使い、さらに前後のコマの角度に直線をあてはめてから描く。 */
+const HAND={ L:{wrist:15,pinky:17,index:19,thumb:21}, R:{wrist:16,pinky:18,index:20,thumb:22} };
+const COLOR_BAT="#d9a15c", COLOR_FACE="#e05a4e", COLOR_BALL="#f4f6f4";
+let showBat=true, showBatPath=true, showBatFace=true, batInch=33;
+let ballPt=null, ballMode=false;   // ボールは検出できないので手で指してもらう
+
+const vOK=(p)=> !!p && (p.visibility==null || p.visibility>=0.3);
+/* 握りの中心あたり。指が取れていれば人差し指・小指・親指の平均、無ければ手首 */
+function gripPoint(lm,anat){
+  const g=HAND[mpSide(anat)];
+  const fs=[lm[g.index],lm[g.pinky],lm[g.thumb]].filter(vOK);
+  if(fs.length>=2) return { x:fs.reduce((s,q)=>s+q.x,0)/fs.length*videoAR,
+                            y:fs.reduce((s,q)=>s+q.y,0)/fs.length };
+  const w=lm[g.wrist];
+  return vOK(w) ? {x:w.x*videoAR, y:w.y} : null;
+}
+function midIso(lm,i,j){
+  const a=lm[i], b=lm[j];
+  if(!vOK(a)||!vOK(b)) return null;
+  return { x:(a.x+b.x)/2*videoAR, y:(a.y+b.y)/2 };
+}
+function torsoIso(lm){
+  const sh=midIso(lm,L.lShoulder,L.rShoulder), hp=midIso(lm,L.lHip,L.rHip);
+  if(!sh||!hp) return null;
+  const d=Math.hypot(sh.x-hp.x, sh.y-hp.y);
+  return d>1e-4 ? d : null;
+}
+function batFrom(cBot,ux,uy,len){
+  const knob={ x:cBot.x-ux*len*0.07, y:cBot.y-uy*len*0.07 };
+  return { ux,uy,len,knob,cBot,
+           tip:{x:knob.x+ux*len, y:knob.y+uy*len},
+           mid:{x:knob.x+ux*len*0.45, y:knob.y+uy*len*0.45} };
+}
+/* 右打ちなら下の手=左、上の手=右。バレルは上の手の先へ伸びる */
+function batAxis(lm){
+  if(!lm) return null;
+  const topA=batsSide(), botA=topA==="R"?"L":"R";
+  const cTop=gripPoint(lm,topA), cBot=gripPoint(lm,botA), tl=torsoIso(lm);
+  if(!cTop||!cBot||!tl) return null;
+  const dx=cTop.x-cBot.x, dy=cTop.y-cBot.y, grip=Math.hypot(dx,dy);
+  if(grip < tl*0.05) return null;          // 両手が重なって見えるコマは向きが決まらない
+  const h=(currentBatter && currentBatter.height_cm) || 170;
+  const len=(batInch*2.54)/(K_TORSO_DEFAULT*h)*tl;
+  return batFrom(cBot, dx/grip, dy/grip, len);
+}
+const BAT_SMOOTH_SEC=0.09;
+function batAxisAt(t,lm){
+  const raw=batAxis(lm);
+  if(!raw || !smoothSeries.length) return raw;
+  const a0=Math.atan2(raw.uy,raw.ux), pts=[];
+  for(const f of smoothSeries){
+    if(Math.abs(f.t-t)>BAT_SMOOTH_SEC) continue;
+    const b=batAxis(f.lm); if(!b) continue;
+    let d=Math.atan2(b.uy,b.ux)-a0;
+    while(d> Math.PI) d-=2*Math.PI;
+    while(d<-Math.PI) d+=2*Math.PI;
+    pts.push([f.t, a0+d]);
+  }
+  if(pts.length<3) return raw;
+  const n=pts.length;
+  let mt=0,ma=0; for(const[ft,a]of pts){mt+=ft;ma+=a;} mt/=n; ma/=n;
+  let num=0,den=0; for(const[ft,a]of pts){num+=(ft-mt)*(a-ma); den+=(ft-mt)*(ft-mt);}
+  const ang=ma+(den>1e-9?num/den:0)*(t-mt);
+  return batFrom(raw.cBot, Math.cos(ang), Math.sin(ang), raw.len);
+}
+const isoToPx=(q,cv)=>({ x:(q.x/(videoAR||1))*cv.width, y:q.y*cv.height });
+/* 3D が使えるときは、奥行きに応じて画面上の長さを縮める。
+   カメラ側/奥に向いたバットは映像でも短く写るため。 */
+function batDrawPoints(t, lm){
+  const b=batAxisAt(t, lm);
+  if(!b) return null;
+  if(!use3D) return { knob:b.knob, tip:b.tip, b, depth:0, fore:1 };
+  const w=smoothedWorldAt(t), k=worldScale(lm, w), A=batAxis3(t, lm);
+  if(!w || !k || !A) return { knob:b.knob, tip:b.tip, b, depth:0, fore:1 };
+  const u=A.u;
+  const lenM=(batInch*2.54)/100;
+  // 画面上の位置は2Dの握りに合わせ、そこから3Dの向きで伸ばす
+  const knob={ x:b.cBot.x - u.x*k*lenM*0.07, y:b.cBot.y - u.y*k*lenM*0.07 };
+  const tip ={ x:knob.x + u.x*k*lenM,        y:knob.y + u.y*k*lenM };
+  const fore=Math.hypot(u.x,u.y);            // 1 なら画面と平行、0 ならカメラ正面
+  return { knob, tip, b, depth:u.z, fore };
+}
+function drawBat(c,cv,lm,t){
+  const d=batDrawPoints(t==null?video.currentTime:t, lm);
+  if(!d) return;
+  const b=d.b;
+  const knob=isoToPx(d.knob,cv), tip=isoToPx(d.tip,cv);
+  const dx=tip.x-knob.x, dy=tip.y-knob.y, len=Math.hypot(dx,dy)||1;
+  const nx=-dy/len, ny=dx/len;
+  const wK=Math.max(2.0,cv.width*0.0045), wT=Math.max(4.0,cv.width*0.011);
+  c.save();
+  c.beginPath();
+  c.moveTo(knob.x+nx*wK, knob.y+ny*wK); c.lineTo(tip.x+nx*wT, tip.y+ny*wT);
+  c.lineTo(tip.x-nx*wT, tip.y-ny*wT);   c.lineTo(knob.x-nx*wK, knob.y-ny*wK);
+  c.closePath();
+  c.fillStyle=COLOR_BAT; c.fill();
+  c.strokeStyle="rgba(20,14,8,.85)"; c.lineWidth=1.5; c.stroke();
+  c.beginPath(); c.arc(knob.x,knob.y,wK*1.5,0,Math.PI*2);
+  c.fillStyle=COLOR_BAT; c.fill(); c.stroke();
+  c.restore();
+}
+/* バットが掃いた面。インパクト前後のスイングプレーンの目安 */
+const BAT_PATH_SEC=0.25;
+function drawBatPath(c,cv,t){
+  if(!smoothSeries.length) return;
+  const axes=[];
+  for(const f of smoothSeries){
+    if(f.t<t-BAT_PATH_SEC || f.t>t+1e-4) continue;
+    const b=batAxisAt(f.t,f.lm);
+    if(b) axes.push({tip:isoToPx(b.tip,cv), mid:isoToPx(b.mid,cv)});
+  }
+  if(axes.length<2) return;
+  c.save();
+  for(let i=1;i<axes.length;i++){
+    const a=axes[i-1], b=axes[i], k=i/axes.length;
+    c.beginPath();
+    c.moveTo(a.mid.x,a.mid.y); c.lineTo(a.tip.x,a.tip.y);
+    c.lineTo(b.tip.x,b.tip.y); c.lineTo(b.mid.x,b.mid.y);
+    c.closePath();
+    c.fillStyle=`rgba(217,161,92,${(k*0.30+0.04).toFixed(3)})`;
+    c.fill();
+  }
+  c.lineWidth=2; c.lineCap="round";
+  for(let i=1;i<axes.length;i++){
+    const a=axes[i-1], b=axes[i], k=i/axes.length;
+    c.strokeStyle=`rgba(217,161,92,${(k*0.85+0.1).toFixed(3)})`;
+    c.beginPath(); c.moveTo(a.tip.x,a.tip.y); c.lineTo(b.tip.x,b.tip.y); c.stroke();
+  }
+  c.restore();
+}
+
+
+/* ================= 奥行き(3D)の扱い =================
+   MediaPipe は worldLandmarks として腰中点を原点にしたメートル系の3D座標も返す。
+   左右・上下は映像そのものなので信頼できるが、奥行き(z)はモデルの推定値で
+   はるかに粗い。ここでは「向き」にだけ z を使い、画面上の位置は
+   2Dのランドマーク(確かなほう)に合わせる。 */
+let use3D = true;
+
+const v3 = (a,b)=>({x:a.x-b.x, y:a.y-b.y, z:a.z-b.z});
+const v3len = (a)=>Math.hypot(a.x,a.y,a.z);
+function v3norm(a){ const m=v3len(a); return m>1e-9 ? {x:a.x/m,y:a.y/m,z:a.z/m} : null; }
+const v3dot = (a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
+const v3cross = (a,b)=>({ x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x });
+
+/* 世界座標(m)での握りの中心。指が取れていれば3点平均、無ければ手首 */
+function gripWorld(w, anat){
+  const g=HAND[mpSide(anat)];
+  const fs=[w[g.index],w[g.pinky],w[g.thumb]].filter(Boolean);
+  if(fs.length>=2) return { x:fs.reduce((s,q)=>s+q.x,0)/fs.length,
+                            y:fs.reduce((s,q)=>s+q.y,0)/fs.length,
+                            z:fs.reduce((s,q)=>s+q.z,0)/fs.length };
+  const q=w[g.wrist];
+  return q ? {x:q.x,y:q.y,z:q.z} : null;
+}
+/* 世界(m) → 等方の画面座標。胴体長どうしの比で倍率を取る */
+function worldScale(lm, w){
+  const tIso = torsoIso(lm);
+  if(!tIso || !w) return null;
+  const sh=w[L.lShoulder], sh2=w[L.rShoulder], hp=w[L.lHip], hp2=w[L.rHip];
+  if(!sh||!sh2||!hp||!hp2) return null;
+  const a={x:(sh.x+sh2.x)/2, y:(sh.y+sh2.y)/2, z:(sh.z+sh2.z)/2};
+  const b={x:(hp.x+hp2.x)/2, y:(hp.y+hp2.y)/2, z:(hp.z+hp2.z)/2};
+  const tW = v3len(v3(a,b));
+  return tW>1e-4 ? tIso/tW : null;
+}
+/* 3Dのバット軸(単位ベクトル、メートル系)。右打ちなら下の手→上の手 */
+function batDir3(w){
+  if(!w) return null;
+  const topA=batsSide(), botA=topA==="R"?"L":"R";
+  const a=gripWorld(w,topA), b=gripWorld(w,botA);
+  if(!a||!b) return null;
+  const d=v3(a,b);
+  if(v3len(d) < 0.03) return null;       // 両手が重なって見えるコマ
+  return v3norm(d);
+}
+/* 3D軸をその時刻の前後で均す。z は特にぶれるので必須 */
+function batDir3At(t){
+  const here = smoothedWorldAt(t);
+  const u0 = here && batDir3(here);
+  if(!u0) return null;
+  let sx=0, sy=0, sz=0, n=0;
+  for(const f of smoothSeries){
+    if(Math.abs(f.t-t) > BAT_SMOOTH_SEC || !f.wlm) continue;
+    const u = batDir3(f.wlm);
+    if(!u) continue;
+    const sgn = v3dot(u,u0) < 0 ? -1 : 1;   // 向きを揃えてから足す
+    sx+=u.x*sgn; sy+=u.y*sgn; sz+=u.z*sgn; n++;
+  }
+  return n ? v3norm({x:sx,y:sy,z:sz}) : u0;
+}
+function smoothedWorldAt(t){
+  if(!smoothSeries.length) return null;
+  let best=null, bd=1.5/(fps||30);
+  for(const f of smoothSeries){
+    const d=Math.abs(f.t-t);
+    if(f.wlm && d<=bd){ bd=d; best=f.wlm; }
+  }
+  return best;
+}
+/* スイングプレーンの法線。前後2つのバット軸が張る面がプレーンになる。
+   プレーンはスイング全体でほぼ変わらないので、広い窓でたくさんの組を平均する。
+   z のばらつきはここで一番よく落ちる。 */
+const PLANE_WIN_SEC = 0.30;
+function swingNormal3(t){
+  const step = 1/(fps||30);
+  const acc = {x:0,y:0,z:0}; let n=0, ref=null;
+  for(let d=step; d<=PLANE_WIN_SEC+1e-6; d+=step){
+    const a=batDir3At(t-d), b=batDir3At(t+d);
+    if(!a||!b) continue;
+    // 正規化せずに足す。|a×b| = sin(なす角) なので、
+    // 開いた組ほど自然に重みが大きくなる。近すぎる組は法線が決まらないので効かせない
+    const c=v3cross(a,b);
+    if(v3len(c) < 0.05) continue;
+    if(!ref) ref=v3norm(c);
+    const sgn=v3dot(c,ref)<0?-1:1;
+    acc.x+=c.x*sgn; acc.y+=c.y*sgn; acc.z+=c.z*sgn; n++;
+  }
+  return n>=2 ? v3norm(acc) : null;
+}
+
+/* バット軸の3D。奥行きはモデルの z をそのまま使わない。
+   左右・上下は映像から取れて確かなので、その向きと「軸はスイングプレーンの中にある」
+   という条件から z を解く。z の誤差がプレーンの推定だけに閉じ込められる。 */
+const PLANE_ZMIN = 0.15;
+function batAxis3(t, lm){
+  const b2 = batAxisAt(t, lm);
+  if(!b2) return null;
+  const nrm = swingNormal3(t);
+  if(!nrm || Math.abs(nrm.z) < PLANE_ZMIN){
+    const u = batDir3At(t);          // プレーンが真横から見える配置。z は解けない
+    return u ? { u, n:nrm, solved:false } : null;
+  }
+  const q = -(nrm.x*b2.ux + nrm.y*b2.uy)/nrm.z;
+  let u = v3norm({ x:b2.ux, y:b2.uy, z:q });
+  if(!u) return null;
+  const raw = batDir3At(t);          // 前後どちら向きかは z 込みの推定に合わせる
+  if(raw && v3dot(u,raw)<0) u={x:-u.x,y:-u.y,z:-u.z};
+  return { u, n:nrm, solved:true };
+}
+
+/* 芯の向き(3D)。スイングプレーンの中で軸に直交する向き、進行方向側。
+   向きの表裏は2Dの動き(確かなほう)で決める。 */
+function batFace3(t, lm){
+  const A = batAxis3(t, lm);
+  if(!A || !A.n) return null;
+  let f = v3norm(v3cross(A.n, A.u));
+  if(!f) return null;
+  const f2 = batFaceDir(t, lm);
+  if(f2){
+    if(f.x*f2.nx + f.y*f2.ny < 0) f={x:-f.x,y:-f.y,z:-f.z};
+  }else{
+    const h=2/(fps||30), a=batDir3At(t-h), b=batDir3At(t+h);
+    if(a&&b){ const vel={x:b.x-a.x,y:b.y-a.y,z:b.z-a.z};
+      if(v3dot(f,vel)<0) f={x:-f.x,y:-f.y,z:-f.z}; }
+  }
+  return { u:A.u, f, n:A.n, solved:A.solved };
+}
+/* バットの芯がどちらを向いているか。丸いバットに「面」は無いので、
+   バレルが実際に動いている向き(軸に直交する成分)を芯の向きとして描く。
+   ここが打球の飛ぶ側になる。 */
+function batFaceDir(t, lm){
+  const b = batAxisAt(t, lm);
+  if(!b) return null;
+  const h = 2/(fps||30);
+  const a = smoothedAt(t-h), c = smoothedAt(t+h);
+  if(!a || !c) return null;
+  const ba = batAxisAt(t-h, a), bc = batAxisAt(t+h, c);
+  if(!ba || !bc) return null;
+  let vx = bc.tip.x - ba.tip.x, vy = bc.tip.y - ba.tip.y;
+  const along = vx*b.ux + vy*b.uy;          // 軸に沿う成分は芯の向きではない
+  vx -= along*b.ux; vy -= along*b.uy;
+  const m = Math.hypot(vx, vy);
+  if(m < b.len*0.004) return null;           // ほぼ止まっているコマは向きが決まらない
+  return { b, nx:vx/m, ny:vy/m };
+}
+function drawBatFace(c,cv,lm,t){
+  t = (t==null) ? video.currentTime : t;
+  const d = batDrawPoints(t, lm);
+  if(!d) return;
+  const b = d.b;
+  // 芯(先端の少し手前)を矢印の根元にする
+  const root = { x:d.knob.x + (d.tip.x-d.knob.x)*0.85, y:d.knob.y + (d.tip.y-d.knob.y)*0.85 };
+
+  let nx, ny, fore = 1, toward = 0;
+  if(use3D){
+    const w = smoothedWorldAt(t), k = worldScale(lm, w), F = batFace3(t, lm);
+    if(!F || !k) return;
+    const Lm = (batInch*2.54)/100 * 0.20;      // 矢印の実長(m)
+    nx = F.f.x*k*Lm; ny = F.f.y*k*Lm;          // 奥行きぶんは投影で自然に縮む
+    fore = Math.hypot(F.f.x, F.f.y);
+    toward = -F.f.z;                            // z が小さいほどカメラ側
+  }else{
+    const f = batFaceDir(t, lm);
+    if(!f) return;
+    const Lp = b.len*0.20;
+    nx = f.nx*Lp; ny = f.ny*Lp;
+  }
+
+  const P = isoToPx(root,cv);
+  const Q = isoToPx({x:root.x+nx, y:root.y+ny},cv);
+  const dx=Q.x-P.x, dy=Q.y-P.y, len=Math.hypot(dx,dy);
+  const full = Math.hypot(nx,ny)/Math.max(1e-6,fore) * cv.width/(videoAR||1);
+  // カメラ側は明るく、奥は暗く。奥行きが読めるようにする
+  const alpha = 0.55 + 0.45*Math.max(0,Math.min(1,(toward+1)/2));
+  const col = (a)=>`rgba(224,90,78,${a.toFixed(3)})`;
+  c.save();
+
+  // ほぼ真正面/真後ろを向いていて線として描けないときは、丸で表す
+  if(len < full*0.16){
+    const r = Math.max(5, cv.width*0.011);
+    c.fillStyle = col(alpha);
+    c.beginPath(); c.arc(P.x,P.y,r,0,Math.PI*2); c.fill();
+    c.strokeStyle = col(Math.min(1,alpha+0.2)); c.lineWidth = Math.max(2, cv.width*0.003);
+    c.beginPath(); c.arc(P.x,P.y,r*1.9,0,Math.PI*2); c.stroke();
+    if(toward < 0){   // 奥向きは中を抜いて区別する
+      c.globalCompositeOperation="destination-out";
+      c.beginPath(); c.arc(P.x,P.y,r*0.45,0,Math.PI*2); c.fill();
+      c.globalCompositeOperation="source-over";
+    }
+    c.restore(); return;
+  }
+
+  const ux=dx/len, uy=dy/len, px=-uy, py=ux;
+  // 短縮されているほど頭を相対的に大きくする。こちらを向いて見える
+  const head = Math.max(6, cv.width*0.013) * (1 + 0.7*(1-Math.max(0,Math.min(1,len/full))));
+  c.strokeStyle=col(alpha); c.fillStyle=col(alpha);
+  c.lineWidth=Math.max(2, cv.width*0.0035); c.lineCap="round";
+  c.beginPath(); c.moveTo(P.x,P.y); c.lineTo(Q.x-ux*head*0.8, Q.y-uy*head*0.8); c.stroke();
+  c.beginPath();
+  c.moveTo(Q.x,Q.y);
+  c.lineTo(Q.x-ux*head+px*head*0.5, Q.y-uy*head+py*head*0.5);
+  c.lineTo(Q.x-ux*head-px*head*0.5, Q.y-uy*head-py*head*0.5);
+  c.closePath(); c.fill();
+  c.restore();
+}
+
+/* ボールは検出できないので、インパクトのコマで位置を指で指してもらう。
+   指した1点だけが根拠なので、それ以外のコマでは輪だけにする。 */
+function ballRadiusIso(lm){
+  const tl = torsoIso(lm);
+  return tl ? tl*0.075 : null;      // 硬式球 直径7.4cm / 胴体長 約49cm
+}
+function drawBall(c, cv, lm){
+  if(!ballPt || !lm) return;
+  const r0 = ballRadiusIso(lm);
+  if(!r0) return;
+  const p = { x:ballPt.x*cv.width, y:ballPt.y*cv.height };
+  const r = Math.max(3, r0*cv.width/(videoAR||1));
+  const imp = events.impact;
+  const atImpact = imp && Math.abs(video.currentTime - imp.t) <= 1.5/(fps||30);
+  c.save();
+  if(!atImpact){
+    c.strokeStyle="rgba(244,246,244,.5)"; c.lineWidth=1.5; c.setLineDash([3,3]);
+    c.beginPath(); c.arc(p.x,p.y,r,0,Math.PI*2); c.stroke();
+    c.restore(); return;
+  }
+  c.beginPath(); c.arc(p.x,p.y,r,0,Math.PI*2);
+  c.fillStyle=COLOR_BALL; c.fill();
+  c.strokeStyle="rgba(20,26,24,.9)"; c.lineWidth=1.2; c.stroke();
+  c.strokeStyle="rgba(190,60,50,.85)"; c.lineWidth=Math.max(1,r*0.16);
+  c.beginPath(); c.arc(p.x-r*0.55,p.y,r*1.05,-0.9,0.9); c.stroke();
+  c.beginPath(); c.arc(p.x+r*0.55,p.y,r*1.05,Math.PI-0.9,Math.PI+0.9); c.stroke();
+  c.restore();
+}
 /* グリップ(両手首中点)を強調する。打撃ではここが基準点になるため */
 function drawGrip(c,cv,lm){
   if(!lm) return;
@@ -1171,14 +1764,142 @@ function drawGrip(c,cv,lm){
   c.strokeStyle="#f2b632"; c.lineWidth=2;
   c.beginPath(); c.arc(x,y,7,0,Math.PI*2); c.stroke();
 }
+
+/* ================= 画面に出すもの(角度・十字線・補助線・残像) =================
+   実写で分かったこと: この動画で一番読めたのは「前膝の角度」と「頭の動き」だった。
+   その2つを画面上で直接見えるようにする。角度は記録される数値と同じ angle2
+   (画面上の2D角度)で出すので、表示と記録が食い違わない。 */
+let showAngles=true, angleSets={elbow:false, knee:true, hip:false, shoulder:false};
+let crossJoint="";                       // "" = 表示しない
+let guideHip=false, guideShoulder=false, guideBackVert=false, guideFrontVert=false;
+let onionOn=false, onionSpan=0.20, onionCount=3;
+
+const COLOR_ANGLE="#f2b632", COLOR_GUIDE="rgba(242,182,50,.55)", COLOR_CROSS="rgba(72,201,216,.75)";
+const ANGLE_DEFS=[
+  { set:"elbow",    at:"elbow",    a:"shoulder", c:"wrist" },
+  { set:"knee",     at:"knee",     a:"hip",      c:"ankle" },
+  { set:"hip",      at:"hip",      a:"shoulder", c:"knee"  },
+  { set:"shoulder", at:"shoulder", a:"elbow",    c:"hip"   },
+];
+const JOINT_IDX={ 頭:L.nose, 左肩:L.lShoulder, 右肩:L.rShoulder, 左肘:L.lElbow, 右肘:L.rElbow,
+  左手首:L.lWrist, 右手首:L.rWrist, 左腰:L.lHip, 右腰:L.rHip,
+  左膝:L.lKnee, 右膝:L.rKnee, 左足首:L.lAnkle, 右足首:L.rAnkle };
+const SIDE_IDX={ shoulder:{R:L.rShoulder,L:L.lShoulder}, elbow:{R:L.rElbow,L:L.lElbow},
+  wrist:{R:L.rWrist,L:L.lWrist}, hip:{R:L.rHip,L:L.lHip},
+  knee:{R:L.rKnee,L:L.lKnee}, ankle:{R:L.rAnkle,L:L.lAnkle} };
+
+/* 鏡像のときも文字が裏返らないよう、画面座標は自分で反転させる */
+function pxOf(lm, idx, cv){
+  const q=lm&&lm[idx];
+  if(!q) return null;
+  const x=mirror ? (1-q.x) : q.x;
+  return { x:x*cv.width, y:q.y*cv.height };
+}
+/* 角度の数字。値は記録される数値と同じ計算(画面上の2D角度) */
+function drawAngles(c, cv, lm){
+  if(!lm) return;
+  c.save();
+  c.font=`600 ${Math.max(11, Math.round(cv.width*0.028))}px 'JetBrains Mono', monospace`;
+  c.textBaseline="middle";
+  for(const d of ANGLE_DEFS){
+    if(!angleSets[d.set]) continue;
+    for(const side of ["R","L"]){
+      const iB=SIDE_IDX[d.at][side], iA=SIDE_IDX[d.a][side], iC=SIDE_IDX[d.c][side];
+      const A=lm[iA], B=lm[iB], C=lm[iC];
+      if(!A||!B||!C) continue;
+      if([A,B,C].some(q=>q.visibility!=null&&q.visibility<VIS_MIN)) continue;
+      const v=angle2({x:A.x*videoAR,y:A.y},{x:B.x*videoAR,y:B.y},{x:C.x*videoAR,y:C.y});
+      if(v==null) continue;
+      const p=pxOf(lm,iB,cv), pA=pxOf(lm,iA,cv), pC=pxOf(lm,iC,cv);
+      if(!p) continue;
+      /* 数字は関節の「外側」(2本の骨がなす角の反対側)に置く。
+         こうすると左右の数字が重ならず、どちらの関節の数字かが見て分かる。 */
+      let ux=0, uy=-1;
+      if(pA&&pC){
+        const dir=(q)=>{ const dx=q.x-p.x, dy=q.y-p.y, m=Math.hypot(dx,dy)||1; return [dx/m,dy/m]; };
+        const [ax,ay]=dir(pA), [cx2,cy2]=dir(pC);
+        const bx=-(ax+cx2), by=-(ay+cy2), m=Math.hypot(bx,by);
+        if(m>0.2){ ux=bx/m; uy=by/m; }
+      }
+      const txt=v.toFixed(1)+"°";
+      const w=c.measureText(txt).width, h=Math.max(14, cv.width*0.032);
+      const r=Math.max(16, cv.width*0.05);
+      const x=Math.min(cv.width-w-6, Math.max(6, p.x+ux*r-w/2));
+      const y=Math.min(cv.height-h/2-2, Math.max(h/2+2, p.y+uy*r));
+      c.fillStyle="rgba(13,20,18,.72)";
+      c.fillRect(x-4, y-h/2, w+8, h);
+      c.fillStyle=COLOR_ANGLE;
+      c.fillText(txt, x, y);
+    }
+  }
+  c.restore();
+}
+/* 十字線。選んだ関節を縦横の線で追う */
+function drawCross(c, cv, lm){
+  if(!crossJoint || !lm) return;
+  const idx=JOINT_IDX[crossJoint]; if(idx==null) return;
+  const p=pxOf(lm, idx, cv); if(!p) return;
+  c.save();
+  c.strokeStyle=COLOR_CROSS; c.lineWidth=1.5; c.setLineDash([6,5]);
+  c.beginPath(); c.moveTo(0,p.y); c.lineTo(cv.width,p.y);
+  c.moveTo(p.x,0); c.lineTo(p.x,cv.height); c.stroke();
+  c.setLineDash([]);
+  c.beginPath(); c.arc(p.x,p.y,4,0,Math.PI*2); c.fillStyle=COLOR_CROSS; c.fill();
+  c.restore();
+}
+/* 補助線。腰・肩のライン、軸足/前足の垂直線 */
+function drawGuides(c, cv, lm){
+  if(!lm) return;
+  const line=(p,q)=>{
+    if(!p||!q) return;
+    const dx=q.x-p.x, dy=q.y-p.y, m=Math.hypot(dx,dy)||1;
+    const ex=dx/m*cv.width, ey=dy/m*cv.width;
+    c.beginPath(); c.moveTo(p.x-ex,p.y-ey); c.lineTo(q.x+ex,q.y+ey); c.stroke();
+  };
+  const vert=(p)=>{ if(!p) return; c.beginPath(); c.moveTo(p.x,0); c.lineTo(p.x,cv.height); c.stroke(); };
+  c.save();
+  c.strokeStyle=COLOR_GUIDE; c.lineWidth=2; c.setLineDash([7,6]);
+  if(guideHip)      line(pxOf(lm,L.lHip,cv), pxOf(lm,L.rHip,cv));
+  if(guideShoulder) line(pxOf(lm,L.lShoulder,cv), pxOf(lm,L.rShoulder,cv));
+  if(guideBackVert)  vert(pxOf(lm, idxOf("ankle", backSideAnat()), cv));
+  if(guideFrontVert) vert(pxOf(lm, idxOf("ankle", frontSideAnat()), cv));
+  c.restore();
+}
+/* 残像。今より前のコマの骨格をうすく重ねる */
+function drawOnion(c, cv, t){
+  if(!onionOn || !smoothSeries.length) return;
+  for(let k=onionCount;k>=1;k--){
+    const tt=t - onionSpan*k/onionCount;
+    const lm=smoothedAt(tt);
+    if(!lm) continue;
+    c.save();
+    c.globalAlpha=0.16 + 0.16*(1-k/onionCount);
+    drawSkeleton(c,cv,lm,COLOR_SKELETON,2,false);
+    c.restore();
+  }
+}
+
 function draw(){
   ctx.clearRect(0,0,overlay.width,overlay.height);
   ctx.save();
   if(mirror){ ctx.translate(overlay.width,0); ctx.scale(-1,1); }
   const sm=smoothedAt(video.currentTime);
+  drawOnion(ctx,overlay,video.currentTime);
+  if(showBat && showBatPath) drawBatPath(ctx,overlay,video.currentTime);
   if(showRaw || !sm) drawSkeleton(ctx,overlay,lastLandmarks, sm?COLOR_RAW:COLOR_SKELETON, sm?2:3, !sm);
   if(sm) drawSkeleton(ctx,overlay,sm,COLOR_SKELETON,3,true);
+  if(showBat) drawBat(ctx,overlay, sm||lastLandmarks, video.currentTime);
+  if(showBat && showBatFace) drawBatFace(ctx,overlay, sm||lastLandmarks, video.currentTime);
+  drawBall(ctx,overlay, sm||lastLandmarks);
   drawGrip(ctx,overlay, sm||lastLandmarks);
+  ctx.restore();
+  /* ここから下は鏡像の変形を掛けない(文字が裏返らないように) */
+  const shown=sm||lastLandmarks;
+  drawGuides(ctx,overlay,shown);
+  drawCross(ctx,overlay,shown);
+  if(showAngles) drawAngles(ctx,overlay,shown);
+  ctx.save();
+  if(mirror){ ctx.translate(overlay.width,0); ctx.scale(-1,1); }
   if(calibPts.length){
     ctx.strokeStyle="#f2b632"; ctx.fillStyle="#f2b632"; ctx.lineWidth=2;
     if(calibPts.length===2){
@@ -1211,6 +1932,7 @@ function formatWarning(file){
   return null;
 }
 function loadFile(file){
+  lastPickedFile=file; clearVideoFail();
   currentFileName=(file.name||"").replace(/\.[^.]+$/,"").slice(0,60);
   const w=formatWarning(file); if(w) setStatus("err",w);
   events={}; commitCands=null; commitSource="grip"; selectedEvent=null; dirManual=null;
@@ -1237,11 +1959,48 @@ video.addEventListener("loadedmetadata",()=>{
   refreshReady();
 });
 video.addEventListener("loadeddata",()=>{ layout(); detectAndRender(); });
-video.addEventListener("error",()=>{
-  const c=video.error&&video.error.code;
-  setStatus("err", c===4 ? "この形式/コーデックを再生できません。mp4(H.264)に変換してお試しください"
-                         : "動画を再生できませんでした");
-});
+
+/* ================= 動画が開けないときの案内 =================
+   iPhone の既定は HEVC(高効率)。Safari では再生できるが、
+   Windows/Android の Chrome では再生できないことがある。
+   「動画を再生できません」だけでは直しようがないので、直し方まで出す。 */
+let lastPickedFile = null;
+function browserPlaysHEVC(){
+  const v = document.createElement("video");
+  return !!(v.canPlayType('video/mp4; codecs="hvc1"') || v.canPlayType('video/mp4; codecs="hev1"'));
+}
+function videoFailHelp(code){
+  const f = lastPickedFile;
+  const looksMov = !!f && (/\.mov$/i.test(f.name||"") || f.type==="video/quicktime");
+  const hevc = browserPlaysHEVC();
+  const head = code===4 ? "この動画をこのブラウザで再生できません。" : "動画を読み込めませんでした。";
+  let why = "", how = "";
+  if (looksMov && !hevc){
+    why = "iPhone で撮った .mov は既定で <b>HEVC(高効率)</b> という形式です。"
+        + "このブラウザは HEVC に対応していないため再生できません(iPhone の Safari なら再生できます)。";
+    how = "直し方は3つあります。<br>"
+        + "① <b>iPhone の Safari で開く</b>(いちばん早い)<br>"
+        + "② iPhone の <b>設定 → カメラ → フォーマット → 「互換性優先」</b> にして撮り直す"
+        + "(以後 H.264 で撮れます)<br>"
+        + "③ すでに撮った動画は、共有時に <b>MP4 で書き出す</b>";
+  }else if (looksMov){
+    why = ".mov の中の映像形式にこのブラウザが対応していない可能性があります。";
+    how = "iPhone の Safari で開くか、<b>MP4(H.264)</b> に変換してお試しください。";
+  }else{
+    why = "形式かコーデックにブラウザが対応していない可能性があります。";
+    how = "<b>MP4(H.264)</b> に変換してお試しください。iPhone なら "
+        + "<b>設定 → カメラ → フォーマット → 「互換性優先」</b> で撮ると確実です。";
+  }
+  return { line: head + (looksMov && !hevc ? " iPhone の HEVC 形式です。" : ""), html: head + "<br>" + why + "<br><br>" + how };
+}
+function showVideoFail(code){
+  const m = videoFailHelp(code);
+  const w = $("videoWarn"), t = $("videoWarnText");
+  if (w && t){ t.innerHTML = m.html; w.style.display = "block"; }
+  setStatus("err", m.line);
+}
+function clearVideoFail(){ const w=$("videoWarn"); if(w) w.style.display="none"; }
+video.addEventListener("error",()=>{ showVideoFail(video.error&&video.error.code); });
 
 /* ============ fps 実測 ============ */
 const fpsSamples=[];
@@ -1269,8 +2028,7 @@ function showFps(measured){
     +" / 1コマ "+ms.toFixed(1)+"ms";
   const n=$("fineNote");
   if(n) n.innerHTML=`1コマ = <b style="color:#b9c7c0;">${ms.toFixed(1)}ms</b>`
-    +(f>1?`(実時間)`:"")+`。0.001秒は1コマより細かいため、押しても画が変わらないことがあります。`
-    +`確実に1コマ送るには <b style="color:#b9c7c0;">◀| |▶</b>。`;
+    +(f>1?`(実時間)`:"")+`。確実に1コマ送るには <b style="color:#b9c7c0;">◀| |▶</b>。`;
 }
 
 /* ============ コマ送り(投球版と同じ実装) ============ */
@@ -1400,8 +2158,6 @@ document.addEventListener("keydown",(e)=>{
   else if(k==="ArrowRight"){e.preventDefault();stepBy(e.shiftKey?0.01:0.1);}
   else if(k===","){e.preventDefault();stepFrames(-1);}
   else if(k==="."){e.preventDefault();stepFrames(1);}
-  else if(k==="["){e.preventDefault();nudgeBy(-0.001);}
-  else if(k==="]"){e.preventDefault();nudgeBy(0.001);}
   else if(k==="i"||k==="I"){e.preventDefault();$("btnTrimStart").click();}
   else if(k==="o"||k==="O"){e.preventDefault();$("btnTrimEnd").click();}
 });
@@ -1446,6 +2202,16 @@ $("btnCalib").addEventListener("click",()=>{
   draw();
 });
 overlay.addEventListener("pointerdown",(e)=>{
+  if(ballMode){
+    const r0=overlay.getBoundingClientRect();
+    let bx=(e.clientX-r0.left)/r0.width, by=(e.clientY-r0.top)/r0.height;
+    if(mirror) bx=1-bx;
+    ballPt={x:clamp(bx,0,1), y:clamp(by,0,1)};
+    ballMode=false; overlay.classList.remove("calib"); calibBanner(null);
+    $("btnBallPick").textContent="ボールの位置を指定";
+    draw(); toast("ボールの位置を記録しました");
+    return;
+  }
   if(!calibMode) return;
   const r=overlay.getBoundingClientRect();
   let nx=(e.clientX-r.left)/r.width, ny=(e.clientY-r.top)/r.height;
@@ -1659,6 +2425,14 @@ $("btnSessionEnd").addEventListener("click",async()=>{
 });
 
 /* ============ 事前解析 ============ */
+
+/* 解析にかかった時間の内訳。どこが遅いのかを画面に出す */
+let analyzeCost=null;
+function fmtLeft(sec){
+  if(sec<60) return `${Math.max(1,Math.round(sec))}秒`;
+  const m=Math.floor(sec/60), s=Math.round(sec%60);
+  return s? `${m}分${s}秒` : `${m}分`;
+}
 function seekTo(t){
   return new Promise(res=>{
     const dur=video.duration;
@@ -1691,19 +2465,26 @@ $("btnAnalyze").addEventListener("click",async()=>{
   const truncated=wanted>FRAME_CAP;
   const series=[];
   try{
+    /* 残り時間を出す。実写(1080x1920, 11秒)で4分かかったので、
+       あと何分かが分からないと待てない。内訳(シーク/推論)も測って出す。 */
+    const t0=performance.now(); let msSeek=0, msDetect=0;
     for(let i=0;i<=total;i++){
       if(cancelBusy) break;
       const t=start+Math.min(dur-0.001,i*step);
-      await seekTo(t);
-      const r=detect();
+      const a0=performance.now(); await seekTo(t); const a1=performance.now();
+      const r=detect(); const a2=performance.now();
+      msSeek+=a1-a0; msDetect+=a2-a1;
       const got=(r===undefined)?null:r;
       series.push({ t:video.currentTime, lm:got?got.lm:null, wlm:got?got.wlm:null });
       if(i%4===0){
         const pct2=Math.round(i/total*100);
         $("analyzeBar").style.width=pct2+"%";
-        setStatus("busy",`解析中… ${pct2}%`);
+        const el=performance.now()-t0;
+        const left=i>3 ? (el/(i+1))*(total-i)/1000 : null;
+        setStatus("busy",`解析中… ${pct2}%` + (left!=null?` — 残り約${fmtLeft(left)}`:""));
       }
     }
+    analyzeCost={ total:performance.now()-t0, seek:msSeek, detect:msDetect, frames:series.length };
     rawSeries=series;
     const W=smoothWindow(fps);
     smoothSeries=smoothLandmarkSeries(series,W);
@@ -1766,7 +2547,8 @@ function renderAnalysis(){
   const set=(id,val,cls)=>{ const e=$(id); e.textContent=val; e.className="v"+(cls?" "+cls:""); };
   if(!analysis){
     $("analyzeTag").textContent="未実行";
-    ["kFrames","kWindow","kTnorm","kHnorm","kDir","kDetected","kFrameMs"].forEach(id=>set(id,"--","na"));
+    ["kFrames","kWindow","kTnorm","kHnorm","kDir","kDetected","kEdge","kFrameMs","kCost"].forEach(id=>set(id,"--","na"));
+    const tr0=$("takesRow"); if(tr0) tr0.style.display="none";
     return;
   }
   $("analyzeTag").textContent=analysis.truncated?"一部のみ":"完了";
@@ -1783,14 +2565,161 @@ function renderAnalysis(){
   const ratio=analysis.total?analysis.detected/analysis.total:0;
   set("kDetected", `${analysis.detected} / ${analysis.total} (${Math.round(ratio*100)}%)`,
       ratio>=0.9?"ok":(ratio>=0.7?"":"warn"));
+  /* 「検出できた」と「見えていた」は別物なので、はみ出しは分けて出す */
+  renderTakes();
+  const er = edgeReport(smoothSeries.length?smoothSeries:rawSeries);
+  if(!er) set("kEdge","--","na");
+  else if(!er.bad) set("kEdge","なし","ok");
+  else set("kEdge", `${er.bad} / ${er.frames} コマ (${er.pct}%) — ${er.names.join(" ")}`, er.pct>=20?"warn":"");
   set("kFrameMs", (1000/fps/slowFactor()).toFixed(1)+"ms");
+  if(analyzeCost && analyzeCost.frames){
+    const c=analyzeCost, per=c.total/c.frames;
+    set("kCost", `${fmtLeft(c.total/1000)} (1コマ ${per.toFixed(0)}ms — `
+      + `コマ送り ${Math.round(c.seek/c.total*100)}% / 検出 ${Math.round(c.detect/c.total*100)}%)`);
+  }else set("kCost","--","na");
 }
+
+
+/* ================= 画面からはみ出した関節の検出 =================
+   モデルは画面の外に出た関節も推測で埋めて返す。visibility も高いままのことがある。
+   そのため「検出できたコマ 100%」が「全部見えていた」を意味しない。
+   実測(実写): 体が右端で切れている撮り方では 67コマ中34コマ(51%)で
+   関節が枠外にあったのに、表示は 67/67 = 100% だった。
+   ここで枠のきわを数えて、はみ出しを別に報告する。 */
+const EDGE_MARGIN = 0.02;          // 枠から2%以内は「きわ」として扱う
+const EDGE_JOINTS = {
+  0:"鼻", 11:"左肩", 12:"右肩", 13:"左肘", 14:"右肘", 15:"左手首", 16:"右手首",
+  23:"左腰", 24:"右腰", 25:"左膝", 26:"右膝", 27:"左足首", 28:"右足首",
+};
+function edgeReport(frames){
+  let n=0, bad=0; const per={};
+  for(const f of frames){
+    const lm = f && (f.lm || f);
+    if(!lm) continue;
+    n++;
+    let any=false;
+    for(const k in EDGE_JOINTS){
+      const q=lm[k]; if(!q) continue;
+      if(q.x<EDGE_MARGIN || q.x>1-EDGE_MARGIN || q.y<EDGE_MARGIN || q.y>1-EDGE_MARGIN){
+        any=true; per[EDGE_JOINTS[k]]=(per[EDGE_JOINTS[k]]||0)+1;
+      }
+    }
+    if(any) bad++;
+  }
+  if(!n) return null;
+  const names=Object.entries(per).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([k,v])=>`${k}(${v})`);
+  return { frames:n, bad, pct:Math.round(bad/n*100), names, per };
+}
+
+
+/* ================= ③ スイングの速さとスロー撮影の判定 =================
+   実写で分かったこと: 通常撮影とスロー撮影の2テイクを比べたら、どちらも
+   始動→インパクトが 400ms で同じだった。つまり書き出しの時点で
+   スローが失われていた。これは2本を見比べて初めて気づけるもので、
+   撮った本人には分からない。だからアプリが言う。 */
+function phaseFrames(t0, t1){
+  if(t0==null||t1==null) return null;
+  return Math.max(0, Math.round(Math.abs(t1-t0)*fps));
+}
+/* 戻り値 null = 判定材料なし */
+function tempoReport(tStart, tImpact, midLabel, tMid){
+  if(tStart==null||tImpact==null) return null;
+  const videoSec = Math.abs(tImpact-tStart);
+  const f = slowFactor();
+  const realMs = videoSec/f*1000;
+  const nAll = phaseFrames(tStart, tImpact);
+  const nMid = tMid!=null ? phaseFrames(tMid, tImpact) : null;
+  const msgs = [];
+  let level = "ok";
+  /* 動作の最後(接地→インパクト等)にコマがいくつ載っているかが本質 */
+  if(nMid!=null && nMid < 5){
+    level = "warn";
+    msgs.push(`<b>${midLabel}→インパクトが ${nMid} コマしかありません。</b>`
+      + `この区間の数値は事実上測れていません`);
+  }
+  if(f <= 1.01){
+    /* スロー補正なし。実時間がそのまま */
+    if(realMs < 700){
+      level = level==="warn" ? "warn" : "note";
+      msgs.push(`この動作は画面上 <b>${(videoSec).toFixed(2)}秒</b>（＝実時間 ${Math.round(realMs)}ms）です。`
+        + `<b>スローで撮ったつもりなら、効いていません。</b>`
+        + `240fps のスローが効いていれば画面上 <b>${(videoSec*8).toFixed(1)}秒</b>、`
+        + `120fps なら <b>${(videoSec*4).toFixed(1)}秒</b> になります`);
+    }
+  }else{
+    /* スロー補正あり。実時間が短すぎるなら設定が実際と合っていない */
+    if(realMs < 80){
+      level = "warn";
+      msgs.push(`撮影時のfpsを ${captureFps} に設定していますが、そうすると実時間が `
+        + `<b>${Math.round(realMs)}ms</b> になり、人の動作としては速すぎます。`
+        + `<b>設定が実際と合っていない可能性があります</b>`);
+    }
+  }
+  return { videoSec, realMs, nAll, nMid, level, msgs };
+}
+
+/* ================= ④ スイングの自動切り出し =================
+   実写は11秒に3本入っていた。1本ずつ見るのに毎回
+   〔リセット→開始→終了〕の3操作が要る。速さのピークから候補を出す。 */
+function findTakes(speed, times, opt){
+  const o = Object.assign({ minSep:1.0, before:1.3, after:0.9, ratio:0.45 }, opt||{});
+  const vals = speed.filter(v=>v!=null&&isFinite(v));
+  if(vals.length < 10) return [];
+  const peak = Math.max(...vals);
+  if(!(peak>0)) return [];
+  const th = peak*o.ratio;
+  const picks = [];
+  for(let i=1;i<speed.length-1;i++){
+    const v=speed[i];
+    if(v==null||v<th) continue;
+    if(!(v>=speed[i-1]&&v>=speed[i+1])) continue;
+    const t=times[i];
+    const last=picks[picks.length-1];
+    if(last && t-last.t < o.minSep){ if(v>last.v){ picks[picks.length-1]={t,v}; } continue; }
+    picks.push({t,v});
+  }
+  const dur = times[times.length-1]-times[0];
+  return picks.map((p,i)=>({
+    no:i+1, t:p.t, v:p.v,
+    start: Math.max(times[0], p.t-o.before),
+    end:   Math.min(times[times.length-1], p.t+o.after),
+  })).filter(x=>x.end-x.start>0.3);
+}
+
+/* スイング候補。速さのピークから拾い、押すとその範囲にトリミングする */
+let takes = [];
+function renderTakes(){
+  const row=$("takesRow"), note=$("takesNote"), btns=$("takesBtns");
+  if(!row) return;
+  takes = [];
+  const sg = (typeof ensureSignals==="function") ? ensureSignals() : null;
+  if(sg && sg.gripSpeed && smoothSeries.length){
+    takes = findTakes(sg.gripSpeed, smoothSeries.map(f=>f.t), {minSep:1.0, before:1.3, after:0.9});
+  }
+  if(takes.length < 2){ row.style.display="none"; return; }
+  row.style.display="block";
+  note.innerHTML = `この範囲に <b>${takes.length}本</b> のスイングがありそうです。`
+    + `押すとその1本だけにトリミングします(そのあと「この範囲を解析する」をもう一度)。`;
+  btns.innerHTML = takes.map(t=>
+    `<button class="mini-btn" data-take="${t.no}">${t.no}本目 <span style="opacity:.7">${t.t.toFixed(2)}s</span></button>`).join("");
+}
+$("takesBtns")?.addEventListener("click",(e)=>{
+  const b=e.target.closest("[data-take]"); if(!b) return;
+  const t=takes.find(x=>x.no===Number(b.dataset.take)); if(!t) return;
+  trim={ start:t.start, end:t.end };
+  updateTrimDisplay(); layout();
+  video.pause(); video.currentTime=t.start;
+  toast(`${t.no}本目に範囲を合わせました(${t.start.toFixed(2)}〜${t.end.toFixed(2)}s)。もう一度「この範囲を解析する」を押してください`);
+});
 
 /* ============ 設定 ============ */
 const PREF="battinglab.prefs.v1";
 function savePrefs(){
   try{ lsSet(PREF, JSON.stringify({
-    modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value, FS_ANK, FS_TOE })); }catch{}
+    modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value, FS_ANK, FS_TOE,
+    showBat, showBatPath, showBatFace, use3D, batInch,
+    showAngles, angleSets, crossJoint, guideHip, guideShoulder, guideBackVert, guideFrontVert,
+    onionOn, onionSpan })); }catch{}
 }
 (function applyPrefs(){
   let p={}; try{ p=JSON.parse(lsGet(PREF)||"{}"); }catch{}
@@ -1798,6 +2727,21 @@ function savePrefs(){
   if(typeof p.VIS_MIN==="number") VIS_MIN=clamp(p.VIS_MIN,0.1,0.8);
   if(typeof p.mirror==="boolean") mirror=p.mirror;
   if(typeof p.showRaw==="boolean") showRaw=p.showRaw;
+  if(typeof p.showBat==="boolean") showBat=p.showBat;
+  if(typeof p.showBatPath==="boolean") showBatPath=p.showBatPath;
+  if(typeof p.showBatFace==="boolean") showBatFace=p.showBatFace;
+  if(typeof p.use3D==="boolean") use3D=p.use3D;
+  if(typeof p.showAngles==="boolean") showAngles=p.showAngles;
+  if(p.angleSets&&typeof p.angleSets==="object") Object.assign(angleSets,p.angleSets);
+  if(typeof p.crossJoint==="string") crossJoint=p.crossJoint;
+  ["guideHip","guideShoulder","guideBackVert","guideFrontVert","onionOn"].forEach(k=>{
+    if(typeof p[k]==="boolean"){
+      if(k==="guideHip") guideHip=p[k]; else if(k==="guideShoulder") guideShoulder=p[k];
+      else if(k==="guideBackVert") guideBackVert=p[k]; else if(k==="guideFrontVert") guideFrontVert=p[k];
+      else onionOn=p[k];
+    }});
+  if(typeof p.onionSpan==="number") onionSpan=clamp(p.onionSpan,0.05,0.6);
+  if(typeof p.batInch==="number") batInch=Math.min(36,Math.max(26,p.batInch));
   if(typeof p.captureFps==="number") captureFps=p.captureFps;
   if(typeof p.FS_ANK==="number") FS_ANK=clamp(p.FS_ANK,0.05,0.40);
   if(typeof p.FS_TOE==="number") FS_TOE=clamp(p.FS_TOE,0.05,0.50);
@@ -1806,6 +2750,17 @@ function savePrefs(){
   $("visVal").textContent=VIS_MIN.toFixed(2);
   $("mirrorToggle").checked=mirror; video.classList.toggle("mirrored",mirror);
   $("rawToggle").checked=showRaw; $("captureFpsSel").value=String(captureFps||0);
+  $("batToggle").checked=showBat; $("batPathToggle").checked=showBatPath;
+  $("batFaceToggle").checked=showBatFace;
+  $("use3DToggle").checked=use3D;
+  $("angToggle").checked=showAngles;
+  document.querySelectorAll(".angset").forEach(el=>{ el.checked=!!angleSets[el.dataset.set]; });
+  $("crossSel").value=crossJoint;
+  $("gHip").checked=guideHip; $("gSh").checked=guideShoulder;
+  $("gBack").checked=guideBackVert; $("gFront").checked=guideFrontVert;
+  $("onionToggle").checked=onionOn;
+  $("onionSpan").value=String(onionSpan); $("onionVal").textContent=onionSpan.toFixed(2);
+  $("batInch").value=String(batInch); $("batInchVal").textContent=batInch+" インチ";
   $("fsAnk").value=String(FS_ANK); $("fsAnkVal").textContent=FS_ANK.toFixed(2);
   $("fsToe").value=String(FS_TOE); $("fsToeVal").textContent=FS_TOE.toFixed(2);
 })();
@@ -1819,6 +2774,42 @@ function recomputeAll(){
 $("mirrorToggle").addEventListener("change",e=>{ mirror=e.target.checked;
   video.classList.toggle("mirrored",mirror); savePrefs(); draw(); recomputeAll(); });
 $("rawToggle").addEventListener("change",e=>{ showRaw=e.target.checked; savePrefs(); draw(); });
+$("angToggle").addEventListener("change",e=>{ showAngles=e.target.checked; savePrefs(); draw(); });
+document.querySelectorAll(".angset").forEach(el=>el.addEventListener("change",()=>{
+  angleSets[el.dataset.set]=el.checked; savePrefs(); draw(); }));
+$("crossSel").addEventListener("change",e=>{ crossJoint=e.target.value; savePrefs(); draw(); });
+[["gHip","guideHip"],["gSh","guideShoulder"],["gBack","guideBackVert"],["gFront","guideFrontVert"]]
+  .forEach(([id,key])=>$(id).addEventListener("change",e=>{
+    if(key==="guideHip") guideHip=e.target.checked;
+    else if(key==="guideShoulder") guideShoulder=e.target.checked;
+    else if(key==="guideBackVert") guideBackVert=e.target.checked;
+    else guideFrontVert=e.target.checked;
+    savePrefs(); draw(); }));
+$("onionToggle").addEventListener("change",e=>{ onionOn=e.target.checked; savePrefs(); draw();
+  /* 残像は前のコマの骨格を使うので、事前解析が済んでいないと何も出ない */
+  if(onionOn && !smoothSeries.length) toast("残像は事前解析の済んだ範囲で出ます。「この範囲を解析する」を先に押してください"); });
+$("onionSpan").addEventListener("input",e=>{
+  onionSpan=parseFloat(e.target.value); $("onionVal").textContent=onionSpan.toFixed(2);
+  savePrefs(); draw(); });
+$("batToggle").addEventListener("change",e=>{ showBat=e.target.checked; savePrefs(); draw(); });
+$("batPathToggle").addEventListener("change",e=>{ showBatPath=e.target.checked; savePrefs(); draw(); });
+$("batFaceToggle").addEventListener("change",e=>{ showBatFace=e.target.checked; savePrefs(); draw(); });
+$("use3DToggle").addEventListener("change",e=>{ use3D=e.target.checked; savePrefs(); draw(); });
+$("btnBallPick").addEventListener("click",()=>{
+  if(!video.src){ toast("先に動画を読み込んでください"); return; }
+  if(ballMode){ ballMode=false; overlay.classList.remove("calib"); calibBanner(null);
+    $("btnBallPick").textContent="ボールの位置を指定"; return; }
+  ballMode=true; calibMode=0;
+  overlay.classList.add("calib");
+  calibBanner("画面のボールをタップ(インパクトのコマで)");
+  $("btnBallPick").textContent="指定をやめる";
+});
+$("btnBallClear").addEventListener("click",()=>{ ballPt=null; draw(); toast("ボールを消しました"); });
+$("batInch").addEventListener("input",e=>{
+  batInch=parseFloat(e.target.value);
+  $("batInchVal").textContent=batInch+" インチ";
+  savePrefs(); draw();
+});
 $("fsAnk").addEventListener("input",e=>{ FS_ANK=parseFloat(e.target.value);
   $("fsAnkVal").textContent=FS_ANK.toFixed(2); savePrefs(); });
 $("fsToe").addEventListener("input",e=>{ FS_TOE=parseFloat(e.target.value);
@@ -2147,6 +3138,13 @@ async function openThumbs(id){
     c2.save();
     if(mirror){ c2.translate(cv.width,0); c2.scale(-1,1); }
     try{ c2.drawImage(video,0,0,cv.width,cv.height); }catch(err){ console.warn("thumb draw failed",err); }
+    /* 骨格とバットも重ねる。小さい絵で「どのコマが接触か」を見分けるには
+       生の映像だけだと足りない(実写ではバットが2コマしか写らない) */
+    const tlm=smoothedAt(mt);
+    if(tlm){
+      drawSkeleton(c2,cv,tlm,COLOR_SKELETON,1.4,false);
+      if(showBat) drawBat(c2,cv,tlm,mt);
+    }
     c2.restore();
     it.t=mt; it.frame=Math.round(mt*fps);
     it.el.querySelector(".lb").textContent=(it.k===0?"候補 ":"")+"コマ "+it.frame;
@@ -2372,6 +3370,20 @@ function renderMetrics(){
   if(!eventsOk) warns.push("<b>始動・接地・インパクトのいずれかが未確定です。</b>確定するまで測定信頼度は最大 Fair に落としています(イベントがずれていれば数値も同じだけずれるため)。この状態では保存できません");
   if(fps<60) warns.push(`fps が ${fps.toFixed(0)} のため、タイミングの分解能は ±${resMs.toFixed(0)}ms です。<b>タイミング系の比較・判定は行わないでください</b>(スイングは始動からインパクトまで0.15〜0.2秒しかありません)`);
   if(!metrics.calibrated) warns.push("未較正です。同じ打者の中での比較には影響しませんが、cm の絶対値は数%ずれます");
+  const tr = tempoReport(events.commit?events.commit.t:null,
+                         events.impact?events.impact.t:null,
+                         "接地", events.fs?events.fs.t:null);
+  if(tr){
+    warns.push(`この動作は画面上 <b>${tr.videoSec.toFixed(2)}秒</b> / `
+      + `始動→インパクト <b>${tr.nAll}コマ</b>`
+      + (tr.nMid!=null?` / 接地→インパクト <b>${tr.nMid}コマ</b>`:"")
+      + (slowFactor()>1.01?` (実時間 ${Math.round(tr.realMs)}ms)`:""));
+    tr.msgs.forEach(msg=>warns.push(msg));
+  }
+  const erM = edgeReport(smoothSeries.length?smoothSeries:rawSeries);
+  if(erM && erM.pct>=10) warns.push(`<b>${erM.pct}% のコマで体が画面からはみ出しています</b>(${erM.names.join(" ")})。`
+    + `モデルは画面の外の関節も推測で埋めるため、<b>「検出できたコマ100%」は「全部見えていた」という意味ではありません</b>。`
+    + `はみ出した側を使う数値は当てになりません。撮り直すか、全身が入るように撮ってください`);
   const bad=Object.entries(label).filter(([,v])=>v==="Poor"||v==="Invalid").map(([k])=>k);
   if(bad.length) warns.push(`検出信頼度が低い項目があります(${bad.join(", ")})。Invalid の値は集計から除外してください`);
   warns.push("<b>グリップ速度の最大値は平滑化のぶんだけ低めに出ます</b>(合成データでの実測 −5%)。スイングの加速は50msの平滑化窓と同じくらい短いためです。絶対値ではなく<b>本人の過去のスイングとの差</b>で見てください");
@@ -3305,6 +4317,8 @@ async function refreshData(){
 
 /* 動作確認用のフック。内部の系列を読めるようにしておく(表示には影響しない) */
 window.__batlab = {
+  get crop(){ return crop; },
+  get lastLandmarks(){ return lastLandmarks; },
   get raw(){ return rawSeries; },
   get smooth(){ return smoothSeries; },
   get analysis(){ return analysis; },
@@ -3314,6 +4328,10 @@ window.__batlab = {
   get signals(){ return signals; },
   get fps(){ return fps; },
   detectEvents, renderMetrics, buildSignals, confirmEvent,
+  angle2, smoothedAt, get videoAR(){ return videoAR; },
+  batAxis, batAxisAt, batFaceDir, batFace3, batDir3At, swingNormal3, batDrawPoints,
+  get use3D(){ return use3D; }, set use3D(v){ use3D=v; },
+  get ballPt(){ return ballPt; }, set ballPt(v){ ballPt=v; },
   computeAlerts, statsOf, maturityOf, collectValues,
   get THR(){ return THR; },
   get swings(){ return batterSwings; },

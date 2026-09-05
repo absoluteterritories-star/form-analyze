@@ -2,7 +2,7 @@
   "name": "フォーム解析ラボ",
   "short_name": "フォーム解析",
   "description": "投球・打撃フォームをブラウザ内で解析します。動画は外部に送信されません。",
-  "start_url": "./formanalyzer.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",

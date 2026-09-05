@@ -3,7 +3,7 @@
    - HTML はネットワーク優先(更新をすぐ反映し、圏外ならキャッシュで動く)
    - 解析ライブラリ・モデル(数MB)はキャッシュ優先(URLにバージョンが入っているので古くならない)
 */
-const VERSION = "v13";
+const VERSION = "v24";
 const SHELL = "shell-" + VERSION;
 const ASSETS = "assets-" + VERSION;
 
@@ -59,8 +59,9 @@ self.addEventListener("fetch", (e)=>{
         c.put(req, res.clone()).catch(()=>{});
         return res;
       }catch{
-        return (await caches.match(req)) || (await caches.match("./formanalyzer.html"))
-            || (await caches.match("./index.html"))
+        // 未キャッシュのページを圏外で開いたときは入口に戻す(そこから説明書と各アプリに行ける)
+        return (await caches.match(req)) || (await caches.match("./index.html"))
+            || (await caches.match("./formanalyzer.html"))
             || new Response("オフラインです", {status:503, headers:{"Content-Type":"text/plain; charset=utf-8"}});
       }
     })());
