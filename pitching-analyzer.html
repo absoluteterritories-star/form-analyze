@@ -513,6 +513,14 @@
 
         <div class="panel">
           <h2>事前解析 <span class="tag" id="analyzeTag">未実行</span></h2>
+          <div class="opt-row">
+            <span class="lab">撮影の向き</span>
+            <select class="mini" id="viewMode">
+              <option value="side">横から(一塁側・三塁側)</option>
+              <option value="back">後ろから(投手の背中側)</option>
+              <option value="front">前から(捕手側)</option>
+            </select>
+          </div>
           <div class="toolbar" style="padding-top:12px;">
             <button id="btnAnalyze" class="primary">この範囲を解析する</button>
           </div>
@@ -537,6 +545,21 @@
             以降の角度・位置・速度はこの平滑化後の値から計算します(生の座標をそのまま微分すると
             検出のブレが増幅されるため)。<br>
             角度・位置・速度はこの平滑化後の値から計算します。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>発射角 <span class="tag" id="ballTag">印なし</span></h2>
+          <div class="toolbar">
+            <button id="btnBallMark" class="primary">ボールに印をつける</button>
+            <button id="btnBallClear">印を消す</button>
+          </div>
+          <div class="legend">
+            ボールは骨格からは分かりません。<b>リリース直後の数コマ</b>でボールの位置をタップすると、
+            その並びから<b>横から見た打ち出しの角度</b>を出します。<br>
+            <b>手順</b>: リリースのコマまで送る → 「ボールに印をつける」 →
+            ボールをタップ → <b>1コマ送ってまたタップ</b>(2点以上、3〜4点あると安定します)。<br>
+            <b>横から撮った動画</b>でだけ出ます。前後からではボールが手前に来るだけなので角度になりません。
           </div>
         </div>
 
@@ -870,6 +893,7 @@
               <label><input type="checkbox" id="gSh"> 肩</label>
               <label><input type="checkbox" id="gBack"> 軸脚</label>
               <label><input type="checkbox" id="gFront"> 踏み出し脚</label>
+              <label><input type="checkbox" id="gShin"> 軸足のスネ角</label>
             </span>
           </div>
           <div class="opt-row">
@@ -1046,6 +1070,12 @@ const toastEl=$("toast");
 /* ---- 状態 ---- */
 let poseLandmarker=null, modelKind="full", libFailed=false;
 let VIS_MIN=0.4, mirror=false, showRaw=false, captureFps=0;
+/* 撮影の向き。前後方向(ホーム向き)と左右方向のどちらが画面の横軸になるかが変わる。
+   横から  … 画面の横軸 = ホーム方向。エクステンション・スネ角・発射角が測れる
+   前後から … 画面の横軸 = 左右方向。リリースサイドが測れる
+   奥行きは1台のカメラでは測れないので、向きに合う指標だけを出す。 */
+let viewMode="side";
+const isSide=()=> viewMode==="side";
 /* 映像を消して骨格だけにする。見せながら説明するときの一時的な状態なので、
    設定には残さない(次に開いたとき映像が出ないと故障に見えるため) */
 let showVideo=true;
@@ -1673,6 +1703,7 @@ function drawSkeleton(c,cv,lm,color,width,dots){
 let showAngles=true, angleSets={elbow:true, knee:false, hip:false, shoulder:false};
 let crossJoint="";                       // "" = 表示しない
 let guideHip=false, guideShoulder=false, guideBackVert=false, guideFrontVert=false;
+let guideShin=false;
 let onionOn=false, onionSpan=0.20, onionCount=3;
 
 const COLOR_ANGLE="#f2b632", COLOR_GUIDE="rgba(242,182,50,.55)", COLOR_CROSS="rgba(72,201,216,.75)";
@@ -1788,6 +1819,7 @@ function drawOnion(c, cv, t){
    (基準点を合わせて身長ピクセル長で割る)を通すので、撮影距離が違っても比べられる。 */
 let refMode="off", refPickId=null;
 const REF_AVG_N=10, REF_NEAR_SEC=0.20;
+const COLOR_SHIN="#ff6b5a";
 const COLOR_REF="#e07ab0";
 function refAnchorKind(){ return $("cmpAnchor")?.value || "pelvis"; }
 /* いまのコマの基準点(等方座標) */
@@ -1876,6 +1908,7 @@ function draw(){
   ctx.restore();
   /* ここから下は鏡像の変形を掛けない(文字が裏返らないように) */
   const shown=sm||lastLandmarks;
+  drawShin(ctx,overlay,shown);
   drawGuides(ctx,overlay,shown);
   drawCross(ctx,overlay,shown);
   if(showAngles) drawAngles(ctx,overlay,shown);
@@ -1883,6 +1916,7 @@ function draw(){
   ctx.save();
   if(mirror){ ctx.translate(overlay.width,0); ctx.scale(-1,1); }
   // 較正で置いた点
+  drawBalls();
   if(calibPts.length){
     ctx.strokeStyle="#f2b632"; ctx.fillStyle="#f2b632"; ctx.lineWidth=2;
     if(calibPts.length===2){
@@ -1931,6 +1965,7 @@ function loadFile(file){
   $("transport").classList.add("show");
   $("quickBar").hidden=false;
   annots=[]; annotPend=[]; setAnnotTool("");
+  relBalls=[]; setBallMark(false);
   video.src=objectUrl; video.load();
   renderEvents(); loadDraft();
 }
@@ -2170,6 +2205,108 @@ $("btnTrimEnd").addEventListener("click",()=>{
 $("btnTrimReset").addEventListener("click",()=>{ trim={start:0,end:null}; updateTrimDisplay(); });
 
 /* ============ 較正(仕様書 §2-4) ============ */
+/* ---- 発射角: ボールの印 ---- */
+/* 軸足のスネと地面のなす角。参考資料と同じ見せかたで、
+   足首から膝への線と、足首を通る地面の線を引き、その間の角度を出す。
+   ここは鏡像の変形を掛けない場所なので、座標は pxOf で screen 側に直す
+   (数字が裏返らないようにするため、線も同じ場所で描く)。 */
+function drawShin(c,cv,lm){
+  if(!guideShin||!lm||!isSide()) return;
+  const dir=effectiveDir(); if(dir==null) return;
+  const pivot=throwArm();
+  const iAnk=idxOf("ankle",pivot), iKnee=(mpSide(pivot)==="R")?L.rKnee:L.lKnee;
+  if(visOf(lm,iAnk)<VIS_MIN||visOf(lm,iKnee)<VIS_MIN) return;
+  const A=pxOf(lm,iAnk,cv), K=pxOf(lm,iKnee,cv);
+  if(!A||!K) return;
+  const ang=shinAngleAt(lm, dir, iKnee, iAnk);
+  const sdir = mirror ? -dir : dir;          // 画面上でのホーム方向
+  const len=Math.hypot(K.x-A.x,K.y-A.y)||1;
+  c.save();
+  /* 地面(水平)の線 */
+  c.beginPath(); c.moveTo(A.x-sdir*len*0.35, A.y); c.lineTo(A.x+sdir*len*1.05, A.y);
+  c.strokeStyle="rgba(255,255,255,.55)"; c.lineWidth=2; c.setLineDash([7,5]); c.stroke();
+  c.setLineDash([]);
+  /* スネ */
+  c.beginPath(); c.moveTo(A.x,A.y); c.lineTo(K.x,K.y);
+  c.strokeStyle=COLOR_SHIN; c.lineWidth=5; c.lineCap="round"; c.stroke();
+  if(ang!=null){
+    const r=Math.min(len*0.55, cv.width*0.08);
+    const a0=(sdir>0)?0:Math.PI;
+    const a1=Math.atan2(K.y-A.y, K.x-A.x);
+    c.beginPath(); c.arc(A.x,A.y,r,Math.min(a0,a1),Math.max(a0,a1));
+    c.strokeStyle=COLOR_SHIN; c.lineWidth=2; c.stroke();
+    /* 数字 */
+    const t=`${ang.toFixed(0)}°`;
+    c.font=`700 ${Math.max(15,Math.round(cv.width*0.026))}px system-ui, sans-serif`;
+    const w=c.measureText(t).width, px=6, h=Math.round(cv.width*0.034);
+    let tx=A.x - sdir*(r+w+px*2+6) - (sdir>0?0:-(w+px*2));
+    tx = (sdir>0) ? A.x-r-w-px*2-6 : A.x+r+6;
+    let ty=A.y-h/2;
+    tx=clamp(tx,2,cv.width-w-px*2-2); ty=clamp(ty,2,cv.height-h-2);
+    c.fillStyle="rgba(0,0,0,.62)"; c.fillRect(tx,ty,w+px*2,h);
+    c.fillStyle=COLOR_SHIN; c.textBaseline="middle";
+    c.fillText(t, tx+px, ty+h/2);
+  }
+  c.restore();
+}
+/* ボールの印と、あてはめた直線。数字は反転しないよう restore のあとで描く */
+function drawBalls(){
+  if(!relBalls.length) return;
+  const c=ctx, W=overlay.width, Hh=overlay.height;
+  const e=events.rel;
+  c.save();
+  for(const p of relBalls){
+    const after = !e || p.t>=e.t-1e-6;
+    c.beginPath(); c.arc(p.x*W, p.y*Hh, 7, 0, Math.PI*2);
+    c.strokeStyle = after ? "#ffffff" : "#8a9a92";
+    c.lineWidth=2.5; c.stroke();
+    c.beginPath(); c.arc(p.x*W, p.y*Hh, 2, 0, Math.PI*2);
+    c.fillStyle=c.strokeStyle; c.fill();
+  }
+  const la=(typeof launchAngle==="function")?launchAngle():null;
+  if(la && e){
+    const pts=relBalls.filter(p=>p.t>=e.t-1e-6).sort((a,b)=>a.t-b.t);
+    const a=pts[0], b=pts[pts.length-1];
+    const dx=(b.x-a.x)*W, dy=(b.y-a.y)*Hh;
+    const n=Math.hypot(dx,dy);
+    if(n>1){
+      const k=Math.max(W,Hh);
+      c.beginPath();
+      c.moveTo(a.x*W-dx/n*k*0.05, a.y*Hh-dy/n*k*0.05);
+      c.lineTo(a.x*W+dx/n*k, a.y*Hh+dy/n*k);
+      c.strokeStyle="rgba(255,255,255,.75)"; c.lineWidth=2; c.setLineDash([8,6]); c.stroke();
+      c.setLineDash([]);
+    }
+  }
+  c.restore();
+}
+
+function renderBallTag(){
+  const e=events.rel;
+  const after=e?relBalls.filter(p=>p.t>=e.t-1e-6).length:0;
+  $("ballTag").textContent = relBalls.length
+    ? `${relBalls.length}点` + (e&&after<relBalls.length?`(リリース後 ${after}点)`:"")
+    : "印なし";
+  $("btnBallMark").textContent = ballMark ? "やめる" : "ボールに印をつける";
+  $("btnBallMark").classList.toggle("primary", !ballMark);
+}
+function setBallMark(on){
+  ballMark=on;
+  overlay.classList.toggle("calib", on);
+  calibBanner(on?"リリース後のコマでボールをタップ。1コマ送ってまた押す(2点以上)":null);
+  renderBallTag(); draw();
+}
+$("btnBallMark").addEventListener("click",()=>{
+  if(ballMark){ setBallMark(false); return; }
+  if(!video.src){ toast("先に動画を読み込んでください"); return; }
+  if(!isSide()){ toast("発射角は横から撮った動画で出ます"); return; }
+  if(!events.rel){ toast("先にリリースを確定してください"); return; }
+  calibMode=0; setAnnotTool(""); setBallMark(true);
+});
+$("btnBallClear").addEventListener("click",()=>{
+  relBalls=[]; setBallMark(false); saveDraft(); recomputeAll(); toast("ボールの印を消しました");
+});
+
 function calibBanner(msg){
   const b=$("calibBanner");
   if(msg){ b.textContent=msg; b.classList.add("show"); } else b.classList.remove("show");
@@ -2186,6 +2323,19 @@ $("btnCalib").addEventListener("click",()=>{
 });
 function calibCancel(){ calibMode=0; calibPts=[]; overlay.classList.remove("calib"); calibBanner(null); draw(); }
 overlay.addEventListener("pointerdown",(e)=>{
+  if(ballMark && !cropMode){
+    const rb=overlay.getBoundingClientRect();
+    let bx=(e.clientX-rb.left)/rb.width, by=(e.clientY-rb.top)/rb.height;
+    if(mirror) bx=1-bx;
+    const t=video.currentTime;
+    /* 同じコマを押し直したら置き換える(ずれたときに消さずに直せる) */
+    const i=relBalls.findIndex(p=>Math.abs(p.t-t)<0.5/fps);
+    const pt={t, x:clamp(bx,0,1), y:clamp(by,0,1)};
+    if(i>=0) relBalls[i]=pt; else relBalls.push(pt);
+    relBalls.sort((a,b)=>a.t-b.t);
+    renderBallTag(); saveDraft(); recomputeAll(); draw();
+    e.preventDefault(); return;
+  }
   if(annotTool && !cropMode && !calibMode){
     const ra=overlay.getBoundingClientRect();
     let ax=(e.clientX-ra.left)/ra.width, ay=(e.clientY-ra.top)/ra.height;
@@ -2489,7 +2639,8 @@ $("btnAnalyze").addEventListener("click",async()=>{
       }
     }
     renderAnalysis();
-    $("dirManualRow").style.display = (analysis.dirAmb && dirManual==null) ? "flex" : "none";
+    $("dirManualRow").style.display =
+      (isSide() && analysis.dirAmb && dirManual==null) ? "flex" : "none";
     renderMetrics();
     await seekTo(start);
     detectAndRender();
@@ -2725,9 +2876,9 @@ $("takesBtns")?.addEventListener("click",(e)=>{
 const PREF="pitchlab.prefs.v1";
 function savePrefs(){
   try{ lsSet(PREF, JSON.stringify({
-    modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value,
+    modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value, viewMode,
     showAngles, angleSets, crossJoint, guideHip, guideShoulder, guideBackVert, guideFrontVert,
-    refMode, refPickId,
+    refMode, refPickId, guideShin,
     onionOn, onionSpan })); }catch{}
 }
 (function applyPrefs(){
@@ -2735,6 +2886,7 @@ function savePrefs(){
   if(p.modelKind==="full"||p.modelKind==="lite"||p.modelKind==="heavy") modelKind=p.modelKind;
   if(typeof p.VIS_MIN==="number") VIS_MIN=clamp(p.VIS_MIN,0.1,0.8);
   if(typeof p.mirror==="boolean") mirror=p.mirror;
+  if(p.viewMode==="side"||p.viewMode==="back"||p.viewMode==="front") viewMode=p.viewMode;
   if(typeof p.showRaw==="boolean") showRaw=p.showRaw;
   if(typeof p.captureFps==="number") captureFps=p.captureFps;
   if(typeof p.showAngles==="boolean") showAngles=p.showAngles;
@@ -2746,12 +2898,14 @@ function savePrefs(){
   if(typeof p.guideShoulder==="boolean") guideShoulder=p.guideShoulder;
   if(typeof p.guideBackVert==="boolean") guideBackVert=p.guideBackVert;
   if(typeof p.guideFrontVert==="boolean") guideFrontVert=p.guideFrontVert;
+  if(typeof p.guideShin==="boolean") guideShin=p.guideShin;
   if(typeof p.onionOn==="boolean") onionOn=p.onionOn;
   if(typeof p.onionSpan==="number") onionSpan=clamp(p.onionSpan,0.05,0.6);
   if(p.speed) speedSel.value=p.speed;
   $("modelSel").value=modelKind; $("visMin").value=String(VIS_MIN);
   $("visVal").textContent=VIS_MIN.toFixed(2);
   $("mirrorToggle").checked=mirror; video.classList.toggle("mirrored",mirror);
+  $("viewMode").value=viewMode;
   $("rawToggle").checked=showRaw; $("captureFpsSel").value=String(captureFps||0);
   $("refMode").value=refMode;
   $("angToggle").checked=showAngles;
@@ -2759,6 +2913,7 @@ function savePrefs(){
   $("crossSel").value=crossJoint;
   $("gHip").checked=guideHip; $("gSh").checked=guideShoulder;
   $("gBack").checked=guideBackVert; $("gFront").checked=guideFrontVert;
+  $("gShin").checked=guideShin;
   $("onionToggle").checked=onionOn;
   $("onionSpan").value=String(onionSpan); $("onionVal").textContent=onionSpan.toFixed(2);
 })();
@@ -2777,6 +2932,14 @@ function recomputeAll(){
 $("mirrorToggle").addEventListener("change",e=>{ mirror=e.target.checked;
   video.classList.toggle("mirrored",mirror); savePrefs(); draw(); recomputeAll(); });
 $("rawToggle").addEventListener("change",e=>{ showRaw=e.target.checked; savePrefs(); draw(); });
+$("viewMode").addEventListener("change",e=>{
+  viewMode=e.target.value; savePrefs();
+  $("dirManualRow").style.display =
+    (isSide() && analysis && analysis.dirAmb && dirManual==null) ? "flex" : "none";
+  draw(); recomputeAll();
+  toast(isSide() ? "横からの動画として計算します"
+                 : "前後からの動画として計算します(前後方向は測れません)");
+});
 $("angToggle").addEventListener("change",e=>{ showAngles=e.target.checked; savePrefs(); draw(); });
 document.querySelectorAll(".angset").forEach(el=>el.addEventListener("change",()=>{
   angleSets[el.dataset.set]=el.checked; savePrefs(); draw(); }));
@@ -2785,6 +2948,8 @@ $("gHip").addEventListener("change",e=>{ guideHip=e.target.checked; savePrefs();
 $("gSh").addEventListener("change",e=>{ guideShoulder=e.target.checked; savePrefs(); draw(); });
 $("gBack").addEventListener("change",e=>{ guideBackVert=e.target.checked; savePrefs(); draw(); });
 $("gFront").addEventListener("change",e=>{ guideFrontVert=e.target.checked; savePrefs(); draw(); });
+$("gShin").addEventListener("change",e=>{ guideShin=e.target.checked; savePrefs(); draw();
+  if(guideShin && !isSide()) toast("スネ角は横から撮った動画で出ます"); });
 $("onionToggle").addEventListener("change",e=>{ onionOn=e.target.checked; savePrefs(); draw();
   /* 残像は前のコマの骨格を使うので、事前解析が済んでいないと何も出ない */
   if(onionOn && !smoothSeries.length) toast("残像は事前解析の済んだ範囲で出ます。「この範囲を解析する」を先に押してください"); });
@@ -2857,8 +3022,9 @@ function detectEvents(){
     toast("先に「この範囲を解析する」を実行してください"); return null;
   }
   const dir=effectiveDir();
-  if(dir==null){ $("dirManualRow").style.display="flex";
+  if(dir==null && isSide()){ $("dirManualRow").style.display="flex";
     toast("投球方向を選んでください"); return null; }
+  const D = dir==null ? 1 : dir;
   const S=smoothSeries, H=analysis.H_norm, N=S.length;
   const lm=(i)=>S[i]&&S[i].lm;
   const ok=(i,j)=>{ const p=lm(i)&&lm(i)[j]; return p&&(p.visibility==null||p.visibility>=VIS_MIN); };
@@ -2915,7 +3081,8 @@ function detectEvents(){
   let rel=-1, maxW=-1;
   for(let i=fp;i<N;i++){
     if(!ok(i,armW)||!ok(i,armS)) continue;
-    if(dir*(X(i,armW)-X(i,armS))<=0) continue;
+    /* 前後から撮ったときは前後方向が奥行きになるので、この絞り込みは使えない */
+    if(isSide() && D*(X(i,armW)-X(i,armS))<=0) continue;
     const v=spd(i,armW);
     if(v!=null&&v>maxW){ maxW=v; rel=i; }
   }
@@ -2933,7 +3100,7 @@ function detectEvents(){
     if(!sh||!hp) continue;
     const Ltorso=Math.hypot(sh.x-hp.x, sh.y-hp.y);
     if(Ltorso<1e-6) continue;
-    const back=dir*(X(i,armS)-X(i,armE))/Ltorso;
+    const back=D*(X(i,armS)-X(i,armE))/Ltorso;
     const high=(Y(i,armS)-Y(i,armE))/Ltorso;
     const sc=back+high;
     if(sc>best){ best=sc; arm=i; }
@@ -3043,13 +3210,15 @@ function confirmEvent(id,t,frame){
 /* ---- 作業中のイベントを一時保存(再読み込みで消えないように) ---- */
 const DRAFT="pitchlab.draft.v1";
 function saveDraft(){
-  try{ lsSet(DRAFT, JSON.stringify({ file:currentFileName, events, dirManual })); }catch{}
+  try{ lsSet(DRAFT, JSON.stringify({ file:currentFileName, events, dirManual, relBalls })); }catch{}
 }
 function loadDraft(){
   try{
     const d=JSON.parse(lsGet(DRAFT)||"null");
     if(d && d.file && d.file===currentFileName && d.events){
-      events=d.events; dirManual=(d.dirManual??null); renderEvents(); renderMetrics();
+      events=d.events; dirManual=(d.dirManual??null);
+      relBalls=Array.isArray(d.relBalls)?d.relBalls:[];
+      renderEvents(); renderBallTag(); renderMetrics();
       if(Object.keys(events).length) toast("前回のイベント指定を復元しました");
     }
   }catch{}
@@ -3074,8 +3243,12 @@ const METRIC_ROWS = [
   { k:"t_fp_arm",   label:"FP→Arm Peak",            unit:"ms",   dec:0, signed:true, timing:true },
   { k:"t_fp_rel",   label:"FP→リリース",             unit:"ms",   dec:0, timing:true },
   { k:"t_arm_rel",  label:"Arm Peak→リリース",       unit:"ms",   dec:0, timing:true },
-  { k:"rel_height", label:"リリース高さ(足首基準)",   unit:"身長比", dec:3, cm:"rel_height_cm" },
-  { k:"rel_ext",    label:"リリース前後位置(軸足基準)",unit:"身長比", dec:3, cm:"rel_ext_cm" },
+  { k:"rel_height", label:"リリース高 (RPZ)",         unit:"身長比", dec:3, cm:"rel_height_cm" },
+  { k:"rel_ext",    label:"エクステンション (RPEx)",  unit:"身長比", dec:3, cm:"rel_ext_cm", side:true },
+  { k:"rel_side",   label:"リリースサイド (RPX・腕側＋)", unit:"身長比", dec:3, cm:"rel_side_cm", signed:true, back:true },
+  { k:"launch_ang", label:"発射角(横から見た打ち出し)",unit:"°",    dec:1, signed:true, side:true },
+  { k:"shin_min",   label:"軸足スネ角(最小)",         unit:"°",    dec:0, side:true },
+  { k:"shin_fp",    label:"軸足スネ角(接地時)",       unit:"°",    dec:0, side:true },
 ];
 let metrics=null;
 
@@ -3091,9 +3264,83 @@ const P2=(lm,i)=> (lm&&lm[i]) ? { x:lm[i].x*videoAR, y:lm[i].y } : null;
 const visOf=(lm,i)=> (lm&&lm[i]&&lm[i].visibility!=null) ? lm[i].visibility : (lm&&lm[i]?1:0);
 const minVis=(...pairs)=> pairs.reduce((m,[lm,i])=>Math.min(m, visOf(lm,i)), 1);
 
+/* ============ リリース位置・軸足の角度 ============ */
+const gloveArm=()=> throwArm()==="R" ? "L" : "R";
+/* 腕側が画面のどちら向きか(+1=右)。前後から撮ったコマで、
+   投げる側の肩ともう一方の肩の並びから読む。カメラが前か後ろか、
+   映像が左右反転かを考えなくても、これなら実際の並びで決まる。 */
+function armDirImage(lm){
+  const a=P2(lm, idxOf("shoulder",throwArm())), g=P2(lm, idxOf("shoulder",gloveArm()));
+  if(!a||!g) return null;
+  const d=a.x-g.x;
+  return Math.abs(d)<1e-4 ? null : (d>0?1:-1);
+}
+/* 接地しているコマの地面の高さ。足首より下(かかと・つま先)まで見て、
+   いちばん下にある点を地面とする(y は下向き正)。 */
+function groundYAt(lm){
+  if(!lm) return null;
+  let g=-Infinity;
+  for(const i of [L.lAnkle,L.rAnkle,L.lHeel,L.rHeel,L.lFoot,L.rFoot]){
+    const p=lm[i]; if(!p) continue;
+    if(p.visibility!=null && p.visibility<VIS_MIN) continue;
+    g=Math.max(g,p.y);
+  }
+  return isFinite(g)?g:null;
+}
+/* 軸足のスネと地面のなす角。0°=ホーム側に寝ている / 90°=垂直 / 90°超=膝が後ろ。
+   参考にした資料と同じで、足首→膝を結んだ線を地面と比べる。 */
+function shinAngleAt(lm, dir, iKneeP, iAnkP){
+  const k=P2(lm,iKneeP), a=P2(lm,iAnkP);
+  if(!k||!a) return null;
+  if(visOf(lm,iKneeP)<VIS_MIN || visOf(lm,iAnkP)<VIS_MIN) return null;
+  const dx=dir*(k.x-a.x), dy=a.y-k.y;          // dy は上向きを正にする
+  if(Math.hypot(dx,dy)<1e-6) return null;
+  return Math.atan2(dy,dx)*180/Math.PI;
+}
+/* --- 発射角 --- */
+/* ボールは骨格からは分からないので、リリース後の数コマを指でタップして印をつける。
+   その並びに直線をあてはめ、傾きを角度にする。0.05秒の間に重力で落ちるのは1cm程度、
+   角度にして0.4°ほどなので、直線あてはめで足りる。 */
+let relBalls=[];          // [{t,x,y}] 動画の正規化座標
+let ballMark=false;
+function launchAngle(){
+  if(!isSide()) return null;
+  const dir=effectiveDir(); if(dir==null) return null;
+  const e=events.rel; if(!e) return null;
+  const pts=relBalls.filter(p=>p.t>=e.t-1e-6).sort((a,b)=>a.t-b.t);
+  if(pts.length<2) return null;
+  /* 等方座標。x は進行方向、y は上向きを正にする */
+  const xs=pts.map(p=>dir*p.x*videoAR), ys=pts.map(p=>-p.y);
+  const n=xs.length;
+  const mx=xs.reduce((a,b)=>a+b,0)/n, my=ys.reduce((a,b)=>a+b,0)/n;
+  let sxx=0, sxy=0;
+  for(let i=0;i<n;i++){ sxx+=(xs[i]-mx)**2; sxy+=(xs[i]-mx)*(ys[i]-my); }
+  if(sxx<1e-8) return null;                       // 進行方向にほとんど動いていない
+  const b=sxy/sxx;
+  let ss=0; for(let i=0;i<n;i++){ const r=ys[i]-(my+b*(xs[i]-mx)); ss+=r*r; }
+  /* 傾きの標準誤差 → 角度の ± に直す */
+  const seB = n>2 ? Math.sqrt(ss/(n-2)/sxx) : 0;
+  const deg = Math.atan(b)*180/Math.PI;
+  const seDeg = seB/(1+b*b)*180/Math.PI;
+  const span = Math.max(...xs)-Math.min(...xs);
+  /* 2点だけだと残差がかならず 0 になり、± が 0 と出てしまう。
+     指でつける印はどうしても数ピクセルずれるので、その分を ± の下限にする。
+     直線あてはめの傾きの誤差は 印のずれ ÷ √Σ(x-x̄)² なので、
+     点が少ないほど・間隔が狭いほど自動的に大きくなる。
+     拡大してから印をつけると 1px あたりの実寸が小さくなるので、± も小さくなる。 */
+  const ph = ($("paneA") && $("paneA").clientHeight) || 400;
+  const tapErr = 2*(crop?crop.h:1)/ph;               // 2px 相当(等方の正規化単位)
+  const floorB = tapErr/Math.sqrt(sxx);
+  const floorDeg = floorB/(1+b*b)*180/Math.PI;
+  return { deg, se:Math.max(seDeg, floorDeg), n, span };
+}
+
 function computeMetricsAll(){
   if(!analysis||!analysis.H_norm||!smoothSeries.length) return null;
-  const dir=effectiveDir(); if(dir==null) return null;
+  const dir=effectiveDir();
+  /* 前後から撮った動画では、ホーム方向は奥行きになるので向きは要らない */
+  if(dir==null && isSide()) return null;
+  const D = dir==null ? 1 : dir;
   const H=analysis.H_norm;
   const hcm=currentPitcher?currentPitcher.height_cm:null;
   const arm=throwArm(), stride=strideSideAnat(), pivot=arm; // 軸足は投球腕と同じ側
@@ -3102,6 +3349,7 @@ function computeMetricsAll(){
   const iAnkS=idxOf("ankle",stride), iAnkP=idxOf("ankle",pivot);
   const iToeP=IDX.foot[mpSide(pivot)];
   const iKneeS=(mpSide(stride)==="R")?L.rKnee:L.lKnee, iHipS=(mpSide(stride)==="R")?L.rHip:L.lHip;
+  const iKneeP=(mpSide(pivot)==="R")?L.rKnee:L.lKnee;
   const iSh=idxOf("shoulder",arm), iEl=idxOf("elbow",arm), iWr=idxOf("wrist",arm);
 
   /* B-1 ストライド長 */
@@ -3117,7 +3365,7 @@ function computeMetricsAll(){
   if(A.fp&&A.lift){
     const a=midOf(A.lift,L.lHip,L.rHip), b=midOf(A.fp,L.lHip,L.rHip);
     if(a&&b){
-      m.pelvis_disp=dir*(b.x-a.x)/H;
+      m.pelvis_disp=D*(b.x-a.x)/H;
       const dt=realSec(events.fp.t-events.lift.t);
       if(dt>0) m.pelvis_vel=m.pelvis_disp/dt;
       conf.pelvis=minVis([A.lift,L.lHip],[A.lift,L.rHip],[A.fp,L.lHip],[A.fp,L.rHip]);
@@ -3138,7 +3386,7 @@ function computeMetricsAll(){
   const trunkAt=(lm)=>{
     const sh=midOf(lm,L.lShoulder,L.rShoulder), hp=midOf(lm,L.lHip,L.rHip);
     if(!sh||!hp) return null;
-    return Math.atan2(dir*(sh.x-hp.x), (hp.y-sh.y))*180/Math.PI;
+    return Math.atan2(D*(sh.x-hp.x), (hp.y-sh.y))*180/Math.PI;
   };
   if(A.fp) m.trunk_fp=trunkAt(A.fp);
   if(A.rel) m.trunk_rel=trunkAt(A.rel);
@@ -3148,22 +3396,53 @@ function computeMetricsAll(){
   if(events.fp&&events.arm) m.t_fp_arm=round(realSec(events.arm.t-events.fp.t)*1000);
   if(events.fp&&events.rel) m.t_fp_rel=round(realSec(events.rel.t-events.fp.t)*1000);
   if(events.arm&&events.rel) m.t_arm_rel=round(realSec(events.rel.t-events.arm.t)*1000);
-  /* E-1 リリース高さ(足首基準) */
+  /* E-1 リリース高 (RPZ) — 接地している足の最下点を地面とする */
   if(A.rel&&A.fp){
-    const la=P2(A.fp,L.lAnkle), ra=P2(A.fp,L.rAnkle), wr=P2(A.rel,iWr);
-    if(la&&ra&&wr){
-      const base=Math.max(la.y,ra.y);           // y は下向き正 → max が地面に近い
+    const base=groundYAt(A.fp), wr=P2(A.rel,iWr);
+    if(base!=null&&wr){
       m.rel_height=(base-wr.y)/H;
       if(hcm) m.rel_height_cm=m.rel_height*hcm;
       conf.release=minVis([A.rel,iWr],[A.fp,L.lAnkle],[A.fp,L.rAnkle]);
     }
   }
-  /* E-2 リリース前後位置(軸足つま先基準) */
-  if(A.rel&&A.set){
+  /* E-2 エクステンション (RPEx) — 軸足つま先(=投球板)からホーム方向へ。横からのみ */
+  if(isSide()&&A.rel&&A.set){
     const toe=P2(A.set,iToeP)||P2(A.set,iAnkP), wr=P2(A.rel,iWr);
     if(toe&&wr){
-      m.rel_ext=dir*(wr.x-toe.x)/H;
+      m.rel_ext=D*(wr.x-toe.x)/H;
       if(hcm) m.rel_ext_cm=m.rel_ext*hcm;
+    }
+  }
+  /* E-3 リリースサイド (RPX) — 前後から撮ったときだけ。軸足つま先から腕側へ＋ */
+  if(!isSide()&&A.rel&&A.set){
+    const s2=armDirImage(A.set);
+    const base=P2(A.set,iToeP)||P2(A.set,iAnkP), wr=P2(A.rel,iWr);
+    if(s2&&base&&wr){
+      m.rel_side=s2*(wr.x-base.x)/H;
+      if(hcm) m.rel_side_cm=m.rel_side*hcm;
+      conf.relside=minVis([A.rel,iWr],[A.set,iToeP]);
+    }
+  }
+  /* E-4 発射角 — リリース後のボールの印から。横からのみ */
+  if(isSide()){
+    const la=launchAngle();
+    if(la){ m.launch_ang=la.deg; m.launch_se=la.se; m.launch_n=la.n; }
+  }
+  /* F 軸足のスネと地面のなす角。脚上げ〜接地の間でいちばん寝たところと、接地時 */
+  if(isSide()&&events.lift&&events.fp){
+    const t0=Math.min(events.lift.t,events.fp.t), t1=Math.max(events.lift.t,events.fp.t);
+    let best=null, bestT=null;
+    for(const f of smoothSeries){
+      if(f.t<t0-1e-6||f.t>t1+1e-6) continue;
+      const a=shinAngleAt(f.lm, D, iKneeP, iAnkP);
+      if(a==null) continue;
+      if(best==null||a<best){ best=a; bestT=f.t; }
+    }
+    if(best!=null){ m.shin_min=best; m.shin_min_t=bestT; }
+    if(A.fp){
+      const a=shinAngleAt(A.fp, D, iKneeP, iAnkP);
+      if(a!=null) m.shin_fp=a;
+      conf.shin=minVis([A.fp,iKneeP],[A.fp,iAnkP]);
     }
   }
   /* A-1 球速 */
@@ -3186,14 +3465,24 @@ function renderMetrics(){
   $("metricsTag").textContent=`${n}/${METRIC_ROWS.length} 項目`;
   const confOf=(k)=>({stride_ratio:conf.stride,pelvis_disp:conf.pelvis,pelvis_vel:conf.pelvis,
     knee_fp:conf.knee_fp,knee_rel:conf.knee_rel,knee_ext:conf.knee_fp,elbow_fp:conf.elbow,
-    rel_height:conf.release}[k]);
+    rel_height:conf.release,rel_side:conf.relside,shin_fp:conf.shin}[k]);
   list.innerHTML=METRIC_ROWS.map(r=>{
     const v=m[r.k];
     let txt="--", cls="na";
+    /* 撮影の向きに合わない指標は「--」ではなく、どう撮れば出るかを書く。
+       1台のカメラでは奥行きが測れないので、出せないものは出さない。 */
+    if(v==null && r.side && !isSide())
+      return `<span class="k">${r.label}</span><span class="v na">横からの動画で</span>`;
+    if(v==null && r.back && isSide())
+      return `<span class="k">${r.label}</span><span class="v na">前後からの動画で</span>`;
     if(v!=null&&isFinite(v)){
       const sign=(r.signed&&v>0)?"+":"";
       txt=sign+v.toFixed(r.dec)+" "+r.unit;
       if(r.cm&&m[r.cm]!=null) txt+=` (${m[r.cm].toFixed(1)}cm)`;
+      /* 発射角はあてはめのばらつきをそのまま ± として出す */
+      if(r.k==="launch_ang"&&m.launch_se!=null)
+        txt+=` ±${Math.max(0.1,m.launch_se).toFixed(1)}° (${m.launch_n}点)`;
+      if(r.k==="rel_side"&&m.rel_side!=null) txt+= m.rel_side>=0?" 腕側":" グラブ側";
       const c=confOf(r.k);
       cls = (c!=null&&c<0.5) ? "warn" : (c!=null&&c<0.7 ? "" : "ok");
       if(c!=null&&c<0.7) txt+=c<0.5?" ⚠低":" ⚠";
@@ -3260,7 +3549,8 @@ $("btnSavePitch").addEventListener("click",()=>withSaveLock("btnSavePitch",async
     timestamp:Date.now(),
     video_ref:currentFileName, fps, video_ar:videoAR,
     calib:{ k_nose:currentPitcher.k_nose||K_NOSE_DEFAULT, calibrated:!!currentPitcher.calibrated,
-            H_norm:analysis.H_norm, dir:metrics.dir, capture_fps:captureFps||null, slow_factor:slowFactor() },
+            H_norm:analysis.H_norm, dir:metrics.dir, view_mode:viewMode,
+            capture_fps:captureFps||null, slow_factor:slowFactor() },
     events:evOut, metrics:metrics.m, landmarks:lmOut,
     quality:{ conf:metrics.conf, vis:visSummary(lmOut), fps_warning:fps<50 },
     note:"",
@@ -3676,8 +3966,11 @@ const STAT_DEFS = [
   { k:"t_fp_arm",     label:"FP→Arm Peak",           unit:"ms",      dec:0, c:null,       cv:false, signed:true, timing:true },
   { k:"t_fp_rel",     label:"FP→リリース",            unit:"ms",      dec:0, c:null,       cv:true,  timing:true },
   { k:"t_arm_rel",    label:"Arm Peak→リリース",      unit:"ms",      dec:0, c:null,       cv:true,  timing:true },
-  { k:"rel_height",   label:"リリース高さ",            unit:"身長比",  dec:3, c:"release",  cv:true },
-  { k:"rel_ext",      label:"リリース前後位置",         unit:"身長比",  dec:3, c:"release",  cv:false, signed:true },
+  { k:"rel_height",   label:"リリース高 (RPZ)",        unit:"身長比",  dec:3, c:"release",  cv:true },
+  { k:"rel_ext",      label:"エクステンション (RPEx)", unit:"身長比",  dec:3, c:"release",  cv:false, signed:true },
+  { k:"rel_side",     label:"リリースサイド (RPX)",    unit:"身長比",  dec:3, c:"relside",  cv:false, signed:true },
+  { k:"launch_ang",   label:"発射角",                  unit:"°",      dec:1, c:null,       cv:false, signed:true },
+  { k:"shin_min",     label:"軸足スネ角(最小)",        unit:"°",      dec:0, c:"shin",     cv:false },
 ];
 let pitcherPitches=[];
 
@@ -3851,8 +4144,11 @@ const THR_DEFAULT = {
   knee_fp:       { l1:5,     l2:10,    mode:"abs", dir:"both", label:"FP時 前膝角度", unit:"°" },
   knee_ext:      { l1:-5,    l2:-10,   mode:"abs", dir:"down", label:"前膝の伸展量", unit:"°" },
   t_fp_rel:      { l1:10,    l2:20,    mode:"abs", dir:"up",   label:"FP→リリース時間", unit:"ms", timing:true },
-  rel_height:    { l1:0.015, l2:0.030, mode:"abs", dir:"both", label:"リリース高さ" },
-  rel_ext:       { l1:0.015, l2:0.030, mode:"abs", dir:"both", label:"リリース前後位置" },
+  rel_height:    { l1:0.015, l2:0.030, mode:"abs", dir:"both", label:"リリース高" },
+  rel_ext:       { l1:0.015, l2:0.030, mode:"abs", dir:"both", label:"エクステンション" },
+  rel_side:      { l1:0.015, l2:0.030, mode:"abs", dir:"both", label:"リリースサイド" },
+  launch_ang:    { l1:1.5,   l2:3.0,   mode:"abs", dir:"both", label:"発射角" },
+  shin_min:      { l1:3,     l2:6,     mode:"abs", dir:"both", label:"軸足スネ角(最小)" },
   rel_sd_ratio:  { l1:1.5,   l2:2.0,   mode:"ratio", dir:"up", label:"リリース位置のばらつき", unit:"倍", special:true },
 };
 let THR=JSON.parse(JSON.stringify(THR_DEFAULT));
@@ -4430,7 +4726,10 @@ const CSV_COLS=["date","session_id","pitch_no","pitcher_name","height_cm","throw
   "slow_factor","calibrated","speed_kmh","stride_ratio","stride_cm","pelvis_disp","pelvis_vel",
   "knee_fp","knee_rel","knee_ext","elbow_fp","trunk_fp","trunk_rel",
   "t_fp_arm_ms","t_fp_rel_ms","t_arm_rel_ms",
+  "view_mode",
   "rel_height_ratio","rel_height_cm","rel_ext_ratio","rel_ext_cm",
+  "rel_side_ratio","rel_side_cm","launch_ang_deg","launch_ang_se_deg","launch_ang_pts",
+  "shin_min_deg","shin_fp_deg",
   "conf_stride","conf_pelvis","conf_knee_fp","conf_elbow","conf_release",
   "vis_ankle_lead","vis_ankle_pivot","vis_toe_pivot","vis_wrist_throw","vis_elbow_throw","vis_hip_l","vis_hip_r",
   "event_fp_confirmed","event_arm_confirmed","event_rel_confirmed","fps_warning","note"];
@@ -4461,6 +4760,10 @@ function pitchToRow(p, pitcher){
     t_fp_arm_ms:m.t_fp_arm, t_fp_rel_ms:m.t_fp_rel, t_arm_rel_ms:m.t_arm_rel,
     rel_height_ratio:m.rel_height, rel_height_cm:m.rel_height_cm,
     rel_ext_ratio:m.rel_ext, rel_ext_cm:m.rel_ext_cm,
+    view_mode:viewMode,
+    rel_side_ratio:m.rel_side, rel_side_cm:m.rel_side_cm,
+    launch_ang_deg:m.launch_ang, launch_ang_se_deg:m.launch_se, launch_ang_pts:m.launch_n,
+    shin_min_deg:m.shin_min, shin_fp_deg:m.shin_fp,
     conf_stride:cf.stride, conf_pelvis:cf.pelvis, conf_knee_fp:cf.knee_fp,
     conf_elbow:cf.elbow, conf_release:cf.release,
     event_fp_confirmed:ev.fp?.confirmed, event_arm_confirmed:ev.arm?.confirmed,
@@ -4708,6 +5011,10 @@ buildQuickEvents(); syncQuick(); applyVideoVisibility();
 window.__pitchlab = {
   angle2, smoothedAt, get videoAR(){ return videoAR; },
   get annots(){ return annots; },
+  get relBalls(){ return relBalls; },
+  setRelBalls:(v)=>{ relBalls=Array.isArray(v)?v.slice():[]; renderBallTag(); recomputeAll(); draw(); },
+  launchAngle, shinAngleAt, groundYAt, armDirImage, confirmEvent,
+  get viewMode(){ return viewMode; }, CSV_COLS,
   setCropCentered, zoomBy, autoCropFromPose, paneToNorm, paneToFull,
   beginCropMode, endCropMode, applyCropBox, renderCropBox,
   get cropBoxRect(){ return cropBoxRect; }, set cropBoxRect(v){ cropBoxRect=v; renderCropBox(); },
