@@ -775,6 +775,28 @@
             <label class="switch"><input type="checkbox" id="rawToggle"><span class="slider-toggle"></span></label>
           </div>
           <div class="opt-row">
+            <span class="lab">手本を重ねる</span>
+            <select class="mini" id="refMode">
+              <option value="off">重ねない</option>
+              <option value="best">選んだ1本</option>
+              <option value="avg">直近10本の平均</option>
+            </select>
+          </div>
+          <div class="opt-row" id="refPickRow" style="display:none;">
+            <span class="lab">手本にする球</span>
+            <select class="mini" id="refPick" style="max-width:60%;"></select>
+          </div>
+          <div class="legend">
+            <b>「理論上正しいフォーム」の骨格データは存在しません。</b>教科書が示しているのは
+            順序と範囲であって、全員が目指す1本の形ではありません。だからここで重ねるのは
+            <b>本人の実データ</b>です。<br>
+            <b>選んだ1本</b>=手本にしたい球を1つ固定して常に重ねます。
+            <b>平均</b>=直近10本を平均した骨格で、1本ごとのブレが消えて「自分の標準形」が出ます。
+            2つを見比べると<b>良いときに何が違うか</b>が形で分かります。<br>
+            重ねる基準点は<b>比較</b>タブの設定に従います。腰の中心と身長比で合わせるので、
+            撮影距離や立ち位置が違っても比べられます。<b>確定したチェックポイントの前後だけ</b>出ます。
+          </div>
+          <div class="opt-row">
             <span class="lab">関節角度を数字で表示</span>
             <label class="switch"><input type="checkbox" id="angToggle" checked><span class="slider-toggle"></span></label>
           </div>
@@ -1627,6 +1649,90 @@ function drawOnion(c, cv, t){
   }
 }
 
+/* ================= 手本の骨格を重ねる =================
+   「理論上正しいフォーム」の骨格データは存在しない。文献が与えるのは
+   順序と範囲であって、唯一の関節角度の軌跡ではない。作れば私が描いた絵を
+   「標準」と称することになるので作らない。
+   代わりに本人の実データを手本にする。どちらも比較タブと同じ換算
+   (基準点を合わせて身長ピクセル長で割る)を通すので、撮影距離が違っても比べられる。 */
+let refMode="off", refPickId=null;
+const REF_AVG_N=10, REF_NEAR_SEC=0.20;
+const COLOR_REF="#e07ab0";
+function refAnchorKind(){ return $("cmpAnchor")?.value || "pelvis"; }
+/* いまのコマの基準点(等方座標) */
+function refAnchorOf(lm){
+  const kind=refAnchorKind();
+  const mid=(a,b)=>{ const A=lm&&lm[a], B=lm&&lm[b];
+    return (A&&B)?{x:(A.x+B.x)/2*videoAR, y:(A.y+B.y)/2}:null; };
+  return (kind==="pelvis" ? mid(L.lHip,L.rHip)
+        : kind==="shoulder" ? mid(L.lShoulder,L.rShoulder)
+        : mid(L.lAnkle,L.rAnkle)) || mid(L.lHip,L.rHip);
+}
+/* 手本の骨格(基準点を原点・身長比の単位) */
+function refPose(evId){
+  if(refMode==="off") return null;
+  const kind=refAnchorKind();
+  if(refMode==="best"){
+    const r=pitcherPitches.find(s=>String(s.id)===String(refPickId));
+    return r ? cmpPoints(r,evId,kind) : null;
+  }
+  const recs=pitcherPitches.slice(-REF_AVG_N);
+  const sum=new Array(33).fill(null), cnt=new Array(33).fill(0);
+  let used=0;
+  for(const r of recs){
+    const P=cmpPoints(r,evId,kind); if(!P) continue;
+    used++;
+    for(let i=0;i<33;i++){ const q=P[i]; if(!q||q.v<0.3) continue;
+      if(!sum[i]) sum[i]={x:0,y:0,v:0};
+      sum[i].x+=q.x; sum[i].y+=q.y; sum[i].v+=q.v; cnt[i]++; }
+  }
+  if(used<2) return null;                 // 1本では平均にならない
+  return sum.map((a,i)=> cnt[i]>=Math.max(2,Math.ceil(used*0.5))
+    ? {x:a.x/cnt[i], y:a.y/cnt[i], v:a.v/cnt[i]} : null);
+}
+/* いまの時刻にいちばん近い、確定済みのチェックポイント */
+function refEventNear(t){
+  let id=null, best=Infinity;
+  for(const e of EVENTS){
+    const ev=events[e.id]; if(!ev||!ev.confirmed) continue;
+    const d=Math.abs(realSec(ev.t-t)); if(d<best){ best=d; id=e.id; }
+  }
+  return (id && best<=REF_NEAR_SEC) ? id : null;
+}
+function drawRefGhost(c,cv,lm,t){
+  if(refMode==="off"||!lm||!analysis||!analysis.H_norm) return;
+  const evId=refEventNear(t); if(!evId) return;
+  const P=refPose(evId); if(!P) return;
+  const A=refAnchorOf(lm); if(!A) return;
+  const H=analysis.H_norm;
+  /* 手本を、いまのコマの基準点と身長比に載せ替える */
+  const g=P.map(q=> q ? { x:(A.x+q.x*H)/videoAR, y:A.y+q.y*H, visibility:q.v } : null);
+  c.save();
+  /* 手本は現在の骨格の「上」に破線で描く。下に描くと、形が近いときに
+     完全に隠れて見えなくなる(実際そうなった)。破線にしておけば重なっていても
+     どちらが手本か分かる。 */
+  c.globalAlpha=0.9;
+  c.setLineDash([7,5]);
+  drawSkeleton(c,cv,g,COLOR_REF,2.5,false);
+  c.setLineDash([]);
+  c.restore();
+}
+function renderRefPick(){
+  const sel=$("refPick"); if(!sel) return;
+  const list=[...pitcherPitches].reverse();
+  sel.innerHTML=list.map(r=>`<option value="${r.id}">${escapeHtml(cmpLabel(r))}</option>`).join("")
+    || `<option value="">記録がありません</option>`;
+  if(refPickId && list.some(r=>r.id===refPickId)) sel.value=refPickId;
+  else if(list.length){ refPickId=list[0].id; sel.value=refPickId; }
+  $("refPickRow").style.display = (refMode==="best") ? "" : "none";
+}
+$("refMode").addEventListener("change",e=>{
+  refMode=e.target.value; renderRefPick(); savePrefs(); draw();
+  if(refMode!=="off" && !pitcherPitches.length) toast("先にスイングを記録してください");
+  else if(refMode==="avg" && pitcherPitches.length<2) toast("平均には2本以上の記録が必要です");
+});
+$("refPick").addEventListener("change",e=>{ refPickId=e.target.value; savePrefs(); draw(); });
+
 function draw(){
   ctx.clearRect(0,0,overlay.width,overlay.height);
   ctx.save();
@@ -1635,6 +1741,7 @@ function draw(){
   drawOnion(ctx,overlay,video.currentTime);
   if(showRaw || !sm) drawSkeleton(ctx,overlay,lastLandmarks, sm?COLOR_RAW:COLOR_SKELETON, sm?2:3, !sm);
   if(sm) drawSkeleton(ctx,overlay,sm,COLOR_SKELETON,3,true);
+  drawRefGhost(ctx,overlay, sm||lastLandmarks, video.currentTime);
   ctx.restore();
   /* ここから下は鏡像の変形を掛けない(文字が裏返らないように) */
   const shown=sm||lastLandmarks;
@@ -2489,6 +2596,7 @@ function savePrefs(){
   try{ lsSet(PREF, JSON.stringify({
     modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value,
     showAngles, angleSets, crossJoint, guideHip, guideShoulder, guideBackVert, guideFrontVert,
+    refMode, refPickId,
     onionOn, onionSpan })); }catch{}
 }
 (function applyPrefs(){
@@ -2499,6 +2607,8 @@ function savePrefs(){
   if(typeof p.showRaw==="boolean") showRaw=p.showRaw;
   if(typeof p.captureFps==="number") captureFps=p.captureFps;
   if(typeof p.showAngles==="boolean") showAngles=p.showAngles;
+  if(p.refMode==="off"||p.refMode==="best"||p.refMode==="avg") refMode=p.refMode;
+  if(typeof p.refPickId==="string") refPickId=p.refPickId;
   if(p.angleSets&&typeof p.angleSets==="object") Object.assign(angleSets,p.angleSets);
   if(typeof p.crossJoint==="string") crossJoint=p.crossJoint;
   if(typeof p.guideHip==="boolean") guideHip=p.guideHip;
@@ -2512,6 +2622,7 @@ function savePrefs(){
   $("visVal").textContent=VIS_MIN.toFixed(2);
   $("mirrorToggle").checked=mirror; video.classList.toggle("mirrored",mirror);
   $("rawToggle").checked=showRaw; $("captureFpsSel").value=String(captureFps||0);
+  $("refMode").value=refMode;
   $("angToggle").checked=showAngles;
   document.querySelectorAll(".angset").forEach(el=>{ el.checked=!!angleSets[el.dataset.set]; });
   $("crossSel").value=crossJoint;
@@ -4284,6 +4395,7 @@ async function refreshData(){
   e.textContent=pitcherPitches.length?`${pitcherPitches.length} 球`:"--";
   e.className="v"+(pitcherPitches.length?"":" na");
   renderRepeat(); await renderBlocks(); await renderSummary(); await reloadCompare();
+  try{ renderRefPick(); }catch{}   // 一覧が入ったあとに作り直す
 }
 
 /* 動作確認用のフック。内部の系列を読めるようにしておく(表示には影響しない) */
@@ -4467,6 +4579,8 @@ window.__pitchlab = {
   get annots(){ return annots; },
   setCropCentered, zoomBy, autoCropFromPose, paneToNorm,
   subjectSize, edgeReport,
+  refPose, refAnchorOf, refEventNear, drawRefGhost,
+  get refMode(){ return refMode; }, get refPickId(){ return refPickId; },
   ptrCount:()=>ptrs.size,
   get mirror(){ return mirror; }, get calibPts(){ return calibPts; }, get busy(){ return busy; },
   get crop(){ return crop; },
