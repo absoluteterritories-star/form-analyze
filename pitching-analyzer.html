@@ -483,6 +483,7 @@
             <span class="k">投球方向</span><span class="v na" id="kDir">--</span>
             <span class="k">検出できたコマ</span><span class="v na" id="kDetected">--</span>
             <span class="k">画面からのはみ出し</span><span class="v na" id="kEdge">--</span>
+            <span class="k">選手の大きさ</span><span class="v na" id="kSubj">--</span>
             <span class="k">1コマの実時間</span><span class="v na" id="kFrameMs">--</span>
             <span class="k">解析にかかった時間</span><span class="v na" id="kCost">--</span>
           </div>
@@ -2276,7 +2277,7 @@ function renderAnalysis(){
   const set=(id,val,cls)=>{ const e=$(id); e.textContent=val; e.className="v"+(cls?" "+cls:""); };
   if(!analysis){
     $("analyzeTag").textContent="未実行";
-    ["kFrames","kWindow","kHnorm","kDir","kDetected","kEdge","kFrameMs","kCost"].forEach(id=>set(id,"--","na"));
+    ["kFrames","kWindow","kHnorm","kDir","kDetected","kEdge","kSubj","kFrameMs","kCost"].forEach(id=>set(id,"--","na"));
     const tr0=$("takesRow"); if(tr0) tr0.style.display="none";
     return;
   }
@@ -2299,6 +2300,9 @@ function renderAnalysis(){
   if(!er) set("kEdge","--","na");
   else if(!er.bad) set("kEdge","なし","ok");
   else set("kEdge", `${er.bad} / ${er.frames} コマ (${er.pct}%) — ${er.names.join(" ")}`, er.pct>=20?"warn":"");
+  const ss = subjectSize(smoothSeries.length?smoothSeries:rawSeries);
+  set("kSubj", ss?`画面の高さの ${ss.pct}%`:"--",
+      ss?(ss.h>=0.50?"ok":(ss.h>=0.35?"":"warn")):"na");
   set("kFrameMs", (1000/fps/slowFactor()).toFixed(1)+"ms");
   if(analyzeCost && analyzeCost.frames){
     const c=analyzeCost, per=c.total/c.frames;
@@ -2319,6 +2323,37 @@ const EDGE_JOINTS = {
   0:"鼻", 11:"左肩", 12:"右肩", 13:"左肘", 14:"右肘", 15:"左手首", 16:"右手首",
   23:"左腰", 24:"右腰", 25:"左膝", 26:"右膝", 27:"左足首", 28:"右足首",
 };
+/* ================= 選手が画面に占める大きさ =================
+   実写で分かったこと: プロの打撃映像(打者・捕手・審判が写っている)を通したら、
+   スイングの速い区間で骨格が打者から審判に飛び移った。
+   それでも「検出 99% / はみ出しなし」と出るので、数値だけ見ていても気づけない。
+   MediaPipe は1コマに1人しか返さず、それが同じ人である保証はない。
+
+   「1コマでの飛び」で検出できないか実測したが、できなかった。
+   別人へ移ったときの腰の飛び(胴体長の0.124倍)より、
+   選手ひとりだけの動画の速い区間の飛び(0.198倍)のほうが大きい。
+   隣り合って同じくらいの背丈の人へは、数コマかけて滑らかに移るためで、
+   しきい値では分けられない。だから「移った」とは言わない。
+
+   代わりに、確実に言えることだけ言う: 選手が小さく写っているほど、
+   他の人に移りやすく、検出も粗くなる。大きさは骨格から測れる。 */
+function subjectSize(frames){
+  if(!frames||!frames.length) return null;
+  let best=0, n=0;
+  for(const f of frames){
+    const lm=f&&(f.lm||f); if(!lm) continue;
+    let y0=1,y1=0,ok=0;
+    for(let i=0;i<=32;i++){
+      const q=lm[i]; if(!q) continue;
+      if(q.visibility!=null&&q.visibility<0.5) continue;
+      if(q.x<0.01||q.x>0.99||q.y<0.01||q.y>0.99) continue;
+      y0=Math.min(y0,q.y); y1=Math.max(y1,q.y); ok++;
+    }
+    if(ok>=12&&y1>y0){ best=Math.max(best,y1-y0); n++; }
+  }
+  return n ? { h:best, pct:Math.round(best*100) } : null;
+}
+
 function edgeReport(frames){
   let n=0, bad=0; const per={};
   for(const f of frames){
@@ -2941,6 +2976,13 @@ function renderMetrics(){
     + `モデルは画面の外の関節も推測で埋めるため、<b>「検出できたコマ100%」は「全部見えていた」という意味ではありません</b>。`
     + `はみ出した側を使う数値は当てになりません。撮り直すか、全身が入るように撮ってください`);
   const lowc=Object.entries(conf).filter(([,v])=>v<0.7).map(([k])=>k);
+  const ss2 = subjectSize(smoothSeries.length?smoothSeries:rawSeries);
+  /* しきい値は実測から: 打者・捕手・審判が写った映像で乗り移りが起きたとき 38%、
+     選手ひとりの映像で 65% だった。その間に置く。 */
+  if(ss2 && ss2.h<0.50) warns.push(`<b>選手が画面の高さの ${ss2.pct}% しか写っていません。</b>`
+    + `小さく写っているほど検出は粗くなり、<b>他の人が写り込んでいると、そちらに乗り移っても`
+    + `「検出できた」と出たまま気づけません</b>(実写で確認しました)。`
+    + `<b>拡大して選手だけを囲んでから解析し直してください。</b>`);
   if(lowc.length) warns.push(`検出信頼度が低い項目があります(${lowc.join(", ")})。⚠印の値は参考程度に`);
   $("metricsNote").innerHTML=warns.length?warns.map(w=>"・"+w).join("<br>"):
     "すべて平滑化後の骨格から、等方座標・身長比で算出しています。";
@@ -4424,6 +4466,7 @@ window.__pitchlab = {
   angle2, smoothedAt, get videoAR(){ return videoAR; },
   get annots(){ return annots; },
   setCropCentered, zoomBy, autoCropFromPose, paneToNorm,
+  subjectSize, edgeReport,
   ptrCount:()=>ptrs.size,
   get mirror(){ return mirror; }, get calibPts(){ return calibPts; }, get busy(){ return busy; },
   get crop(){ return crop; },
