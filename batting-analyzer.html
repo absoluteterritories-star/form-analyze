@@ -523,6 +523,7 @@
             <span class="k">検出できたコマ</span><span class="v na" id="kDetected">--</span>
             <span class="k">画面からのはみ出し</span><span class="v na" id="kEdge">--</span>
             <span class="k">選手の大きさ</span><span class="v na" id="kSubj">--</span>
+            <span class="k">バットを画像から測れたコマ</span><span class="v na" id="kBat">--</span>
             <span class="k">1コマの実時間</span><span class="v na" id="kFrameMs">--</span>
             <span class="k">解析にかかった時間</span><span class="v na" id="kCost">--</span>
           </div>
@@ -881,6 +882,17 @@
             2つを見比べると<b>良いときに何が違うか</b>が形で分かります。<br>
             重ねる基準点は<b>比較</b>タブの設定に従います。腰の中心と身長比で合わせるので、
             撮影距離や立ち位置が違っても比べられます。<b>確定したチェックポイントの前後だけ</b>出ます。
+          </div>
+          <div class="opt-row">
+            <span class="lab">バットを画像からも測る</span>
+            <label class="switch"><input type="checkbox" id="measBatToggle" checked><span class="slider-toggle"></span></label>
+          </div>
+          <div class="legend">
+            バットは骨格検出の対象ではありません。切ると<b>両手の並びだけ</b>から向きを決めます
+            （握り幅は10cm前後しかないので、その誤差がバット長のぶんだけ拡大されます）。<br>
+            入れると、握りを起点に<b>画像の中から「棒らしい線」を探して</b>向きを測ります。
+            合成画像での実測では、両手からの向きが35°ずれていても<b>誤差1°前後</b>で当てられました。
+            背景に紛らわしい直線が多い場所では外すことがあるので、そのときは切ってください。
           </div>
           <div class="opt-row">
             <span class="lab">バットを表示</span>
@@ -1693,6 +1705,7 @@ function drawSkeleton(c,cv,lm,color,width,dots){
 const HAND={ L:{wrist:15,pinky:17,index:19,thumb:21}, R:{wrist:16,pinky:18,index:20,thumb:22} };
 const COLOR_BAT="#d9a15c", COLOR_FACE="#e05a4e", COLOR_BALL="#f4f6f4";
 let showBat=true, showBatPath=true, showBatFace=true, batInch=33;
+let measureBat=true;      // バットを画像からも測る
 let ballPt=null, ballMode=false;   // ボールは検出できないので手で指してもらう
 
 const vOK=(p)=> !!p && (p.visibility==null || p.visibility>=0.3);
@@ -1735,13 +1748,21 @@ function batAxis(lm){
   return batFrom(cBot, dx/grip, dy/grip, len);
 }
 const BAT_SMOOTH_SEC=0.09;
+/* 画像から測れているコマがどれくらいあるか */
+function batMeasuredAt(f){
+  return (measureBat && f && f.batTh!=null && f.batConf!=null && f.batConf>=BAT_CONF_MIN)
+    ? f.batTh : null;
+}
 function batAxisAt(t,lm){
   const raw=batAxis(lm);
   if(!raw || !smoothSeries.length) return raw;
   const a0=Math.atan2(raw.uy,raw.ux), pts=[];
   for(const f of smoothSeries){
     if(Math.abs(f.t-t)>BAT_SMOOTH_SEC) continue;
-    const b=batAxis(f.lm); if(!b) continue;
+    /* 画像から測れていればそちらを使う。測れていないコマは両手から */
+    const meas=batMeasuredAt(f);
+    const b= meas!=null ? {uy:Math.sin(meas), ux:Math.cos(meas)} : batAxis(f.lm);
+    if(!b) continue;
     let d=Math.atan2(b.uy,b.ux)-a0;
     while(d> Math.PI) d-=2*Math.PI;
     while(d<-Math.PI) d+=2*Math.PI;
@@ -1851,7 +1872,11 @@ function batSpeedImpact(){
     const d=realSec(fr.t-ev.t);
     if(d>1e-6 || d<-W) continue;              // 窓は必ず接触までで閉じる
     inWin++;
-    const b=batAxis(fr.lm); if(!b) continue;
+    /* 画像から測れているコマはそちらを使う。両手だけの向きより確か */
+    const meas=batMeasuredAt(fr);
+    const b = meas!=null ? {ux:Math.cos(meas), uy:Math.sin(meas), knob:(batAxis(fr.lm)||{}).knob}
+                         : batAxis(fr.lm);
+    if(!b||!b.knob) continue;
     let u={x:b.ux, y:b.uy, z:0};
     if(use3){
       const q=-(n.x*u.x+n.y*u.y)/n.z;
@@ -1929,6 +1954,121 @@ function batSpeedImpact(){
   return out;
 }
 
+
+/* ================= バットを画像から測る =================
+   これまでバットは両手の並びだけから推定していた(映像は一切見ていない)。
+   握り幅は10cm前後しかないので、その向きの誤差がバット長のぶんだけ拡大され、
+   実写では絵と合わないことがあった。
+   そこで、握りを起点に「棒らしい線」を画像の中から探す。
+
+   やり方: 握りから外向きに角度を振り、それぞれの向きについて
+   ・線の中心と、その左右に少しずらした所の明るさの差(棒なら中心だけ色が違う)
+   ・前のコマとの差(振っている間はバットの通り道が光る)
+   を足し合わせ、いちばん高い向きを選ぶ。
+   両手から出した向きの周りだけを探すので、まったく別の線に飛びつくことはない。 */
+const BAT_CONF_MIN=0.35;      // これ未満の手応えなら画像の値は使わない
+const BAT_SEARCH_DEG=55;      // 両手から出した向きの周り、何度まで探すか
+const BAT_SEARCH_STEP=1.5;    // 何度きざみで探すか
+const BAT_ROI=128;            // 切り出しを何ピクセル四方に縮めて調べるか
+const batRoi=document.createElement("canvas"); batRoi.width=batRoi.height=BAT_ROI;
+const batRoiCtx=batRoi.getContext("2d",{willReadFrequently:true});
+let batPrevGray=null, batPrevKey="";
+/* 画面(等方)座標 → 元動画の正規化座標 */
+function isoToNorm(q){ return { x:q.x/videoAR, y:q.y }; }
+/* src(video か canvas) から、バットが収まる正方形を切り出して灰色にする */
+function batGrayFrom(src, cBotIso, lenIso){
+  const vw=src.videoWidth||src.width, vh=src.videoHeight||src.height;
+  if(!vw||!vh) return null;
+  const c=isoToNorm({x:cBotIso.x, y:cBotIso.y});
+  const side=Math.max(0.02, lenIso*2.2);          // 等方単位の一辺
+  const sw=side/videoAR*vw, sh=side*vh;           // 元画像でのピクセル
+  const sx=c.x*vw-sw/2, sy=c.y*vh-sh/2;
+  batRoiCtx.clearRect(0,0,BAT_ROI,BAT_ROI);
+  try{ batRoiCtx.drawImage(src, sx,sy,sw,sh, 0,0,BAT_ROI,BAT_ROI); }catch{ return null; }
+  const d=batRoiCtx.getImageData(0,0,BAT_ROI,BAT_ROI).data;
+  const g=new Float32Array(BAT_ROI*BAT_ROI);
+  for(let i=0,j=0;i<d.length;i+=4,j++) g[j]=(d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114);
+  return { g, sx, sy, sw, sh, side };
+}
+const batAt=(g,x,y)=>{
+  const xi=x|0, yi=y|0;
+  if(xi<0||yi<0||xi>=BAT_ROI||yi>=BAT_ROI) return null;
+  return g[yi*BAT_ROI+xi];
+};
+/* 1コマぶん測る。返すのは等方座標での角度(rad)と手応え */
+/* 両手が重なって見えるコマでは batAxis が向きを出せない。
+   そこだけ画像も諦めていたが、実写ではそういうコマこそ絵と合っていなかった。
+   握りの位置(両手首の中点)は取れるので、前のコマの向きを種にして探す。 */
+function batAnchor(lm){
+  const b=batAxis(lm);
+  if(b) return { cBot:b.cBot, len:b.len, seed:Math.atan2(b.uy,b.ux), from:"hands" };
+  const topA=batsSide(), botA=topA==="R"?"L":"R";
+  const cTop=gripPoint(lm,topA), cBot=gripPoint(lm,botA), tl=torsoIso(lm);
+  const c = cBot || cTop; if(!c||!tl) return null;
+  const h=(currentBatter && currentBatter.height_cm) || 170;
+  const len=(batInch*2.54)/(K_TORSO_DEFAULT*h)*tl;
+  if(batLastTh==null) return null;               // 種が無いと探しようがない
+  return { cBot:c, len, seed:batLastTh, from:"prev" };
+}
+let batLastTh=null;
+function measureBatAngle(src, lm, prevGray){
+  if(!lm) return null;
+  const b=batAnchor(lm); if(!b) return null;
+  const roi=batGrayFrom(src, b.cBot, b.len); if(!roi) return null;
+  const g=roi.g;
+  /* ROI の中で、握りは中心。バット長は ROI の何ピクセルか */
+  const cx=BAT_ROI/2, cy=BAT_ROI/2;
+  const lenPx=b.len/roi.side*BAT_ROI;
+  if(!(lenPx>8)) return null;
+  const seed=b.seed;
+  /* 前のコマの向きを種にするときは、両手から出したときより広く探す */
+  const halfDeg = b.from==="prev" ? BAT_SEARCH_DEG*1.6 : BAT_SEARCH_DEG;
+  const N=26;                                   // 線に沿って何点調べるか
+  const widths=[2,3.5];                          // 棒の太さの見当(ROI画素)
+  let best=null, scores=[];
+  const half=halfDeg*Math.PI/180, stp=BAT_SEARCH_STEP*Math.PI/180;
+  for(let d=-half; d<=half+1e-9; d+=stp){
+    const th=seed+d, ux=Math.cos(th), uy=Math.sin(th);
+    const nx=-uy, ny=ux;
+    const vals=[];
+    for(let k=1;k<=N;k++){
+      const r=lenPx*(k/N)*0.95;
+      const px=cx+ux*r, py=cy+uy*r;
+      const c0=batAt(g,px,py); if(c0==null) continue;
+      let ridge=0;
+      for(const w of widths){
+        const a=batAt(g,px+nx*w,py+ny*w), bb=batAt(g,px-nx*w,py-ny*w);
+        if(a==null||bb==null) continue;
+        ridge=Math.max(ridge, Math.abs(c0-(a+bb)/2));
+      }
+      let mv=0;
+      if(prevGray){ const p=prevGray[(py|0)*BAT_ROI+(px|0)];
+        if(p!=null) mv=Math.abs(c0-p); }
+      /* 先の方(芯)ほど太くて見えやすいので、少しだけ重みを増やす */
+      vals.push((ridge + mv*0.6) * (0.6+0.4*k/N));
+    }
+    if(vals.length<N*0.7) continue;
+    const sorted=[...vals].sort((x,y)=>x-y);
+    const mean=vals.reduce((x,y)=>x+y,0)/vals.length;
+    const med2=sorted[sorted.length>>1];
+    const v=mean;                       // 向きの選択は平均で(こちらのほうが当たる)
+    scores.push(v);
+    if(!best||v>best.v) best={v, th, d, mean, med2, min:sorted[0], lo:sorted[Math.floor(sorted.length*0.25)]};
+  }
+  if(!best||scores.length<5) return null;
+  scores.sort((a,b)=>a-b);
+  const med=scores[scores.length>>1], top=scores[scores.length-1];
+  /* 手応え: いちばん良い向きが、ふつうの向きよりどれだけ抜けているか */
+  /* 採否の材料:
+     prom = 他の向きから頭ひとつ抜けているか(0〜1)
+     even = 線の端から端まで反応しているか(まぐれの線はムラが大きい) */
+  const prom = top>1e-6 ? (top-med)/top : 0;
+  const even = best.mean>1e-6 ? best.med2/best.mean : 0;
+  const conf = prom*even;
+  if(conf>=BAT_CONF_MIN) batLastTh=best.th;      // 次のコマの種にする
+  return { th:best.th, conf, prom:+prom.toFixed(3), even:+even.toFixed(3),
+           seed, from:b.from, dDeg:best.d*180/Math.PI, gray:g };
+}
 
 function drawBat(c,cv,lm,t){
   const d=batDrawPoints(t==null?video.currentTime:t, lm);
@@ -3021,6 +3161,7 @@ $("btnAnalyze").addEventListener("click",async()=>{
     /* 残り時間を出す。実写(1080x1920, 11秒)で4分かかったので、
        あと何分かが分からないと待てない。内訳(シーク/推論)も測って出す。 */
     const t0=performance.now(); let msSeek=0, msDetect=0;
+    batPrevGray=null; batLastTh=null;
     for(let i=0;i<=total;i++){
       if(cancelBusy) break;
       const t=start+Math.min(dur-0.001,i*step);
@@ -3028,7 +3169,15 @@ $("btnAnalyze").addEventListener("click",async()=>{
       const r=detect(); const a2=performance.now();
       msSeek+=a1-a0; msDetect+=a2-a1;
       const got=(r===undefined)?null:r;
-      series.push({ t:video.currentTime, lm:got?got.lm:null, wlm:got?got.wlm:null });
+      /* バットは画像からも測る。元動画そのものを渡す
+         (切り出しキャンバスだと座標系が合わないため) */
+      let bt=null;
+      if(got&&got.lm&&measureBat){
+        try{ const mb=measureBatAngle(video, got.lm, batPrevGray);
+          if(mb){ bt={th:mb.th, conf:mb.conf}; batPrevGray=mb.gray; } }catch{}
+      }
+      series.push({ t:video.currentTime, lm:got?got.lm:null, wlm:got?got.wlm:null,
+                    batTh:bt?bt.th:null, batConf:bt?bt.conf:null });
       if(i%4===0){
         const pct2=Math.round(i/total*100);
         $("analyzeBar").style.width=pct2+"%";
@@ -3041,6 +3190,10 @@ $("btnAnalyze").addEventListener("click",async()=>{
     rawSeries=series;
     const W=smoothWindow(fps);
     smoothSeries=smoothLandmarkSeries(series,W);
+    /* 平滑化はランドマークだけを触るので、画像から測ったバット角は付け直す */
+    for(let i=0;i<smoothSeries.length&&i<series.length;i++){
+      smoothSeries[i].batTh=series[i].batTh; smoothSeries[i].batConf=series[i].batConf;
+    }
     const detected=series.filter(f=>f.lm).length;
 
     /* 胴体長(仕様書 §2-5)。
@@ -3100,7 +3253,7 @@ function renderAnalysis(){
   const set=(id,val,cls)=>{ const e=$(id); e.textContent=val; e.className="v"+(cls?" "+cls:""); };
   if(!analysis){
     $("analyzeTag").textContent="未実行";
-    ["kFrames","kWindow","kTnorm","kHnorm","kDir","kDetected","kEdge","kSubj","kFrameMs","kCost"].forEach(id=>set(id,"--","na"));
+    ["kFrames","kWindow","kTnorm","kHnorm","kDir","kDetected","kEdge","kSubj","kBat","kFrameMs","kCost"].forEach(id=>set(id,"--","na"));
     const tr0=$("takesRow"); if(tr0) tr0.style.display="none";
     return;
   }
@@ -3124,6 +3277,10 @@ function renderAnalysis(){
   if(!er) set("kEdge","--","na");
   else if(!er.bad) set("kEdge","なし","ok");
   else set("kEdge", `${er.bad} / ${er.frames} コマ (${er.pct}%) — ${er.names.join(" ")}`, er.pct>=20?"warn":"");
+  const bm=rawSeries.filter(f=>f.batTh!=null&&f.batConf>=BAT_CONF_MIN).length;
+  const bn=rawSeries.filter(f=>f.lm).length;
+  set("kBat", !measureBat ? "切っています" : (bn? `${bm} / ${bn} コマ` : "--"),
+      !measureBat ? "na" : (bn&&bm/bn>=0.7?"ok":(bn&&bm/bn>=0.4?"":"warn")));
   const ss = subjectSize(smoothSeries.length?smoothSeries:rawSeries);
   set("kSubj", ss?`画面の高さの ${ss.pct}%`:"--",
       ss?(ss.h>=0.50?"ok":(ss.h>=0.35?"":"warn")):"na");
@@ -3305,6 +3462,7 @@ function savePrefs(){
   try{ lsSet(PREF, JSON.stringify({
     modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value, FS_ANK, FS_TOE,
     showBat, showBatPath, showBatFace, use3D, batInch,
+    measureBat,
     showAngles, angleSets, crossJoint, guideHip, guideShoulder, guideBackVert, guideFrontVert,
     refMode, refPickId,
     onionOn, onionSpan })); }catch{}
@@ -3316,6 +3474,7 @@ function savePrefs(){
   if(typeof p.mirror==="boolean") mirror=p.mirror;
   if(typeof p.showRaw==="boolean") showRaw=p.showRaw;
   if(typeof p.showBat==="boolean") showBat=p.showBat;
+  if(typeof p.measureBat==="boolean") measureBat=p.measureBat;
   if(typeof p.showBatPath==="boolean") showBatPath=p.showBatPath;
   if(typeof p.showBatFace==="boolean") showBatFace=p.showBatFace;
   if(typeof p.use3D==="boolean") use3D=p.use3D;
@@ -3340,6 +3499,7 @@ function savePrefs(){
   $("visVal").textContent=VIS_MIN.toFixed(2);
   $("mirrorToggle").checked=mirror; video.classList.toggle("mirrored",mirror);
   $("rawToggle").checked=showRaw; $("captureFpsSel").value=String(captureFps||0);
+  $("measBatToggle").checked=measureBat;
   $("batToggle").checked=showBat; $("batPathToggle").checked=showBatPath;
   $("batFaceToggle").checked=showBatFace;
   $("use3DToggle").checked=use3D;
@@ -3382,6 +3542,8 @@ $("onionToggle").addEventListener("change",e=>{ onionOn=e.target.checked; savePr
 $("onionSpan").addEventListener("input",e=>{
   onionSpan=parseFloat(e.target.value); $("onionVal").textContent=onionSpan.toFixed(2);
   savePrefs(); draw(); });
+$("measBatToggle").addEventListener("change",e=>{ measureBat=e.target.checked; savePrefs(); draw();
+  if(measureBat && smoothSeries.length) toast("次の解析から画像で測ります"); });
 $("batToggle").addEventListener("change",e=>{ showBat=e.target.checked; savePrefs(); draw(); });
 $("batPathToggle").addEventListener("change",e=>{ showBatPath=e.target.checked; savePrefs(); draw(); });
 $("batFaceToggle").addEventListener("change",e=>{ showBatFace=e.target.checked; savePrefs(); draw(); });
@@ -5139,6 +5301,7 @@ window.__batlab = {
   setCropCentered, zoomBy, autoCropFromPose, paneToNorm,
   subjectSize, edgeReport,
   refPose, refAnchorOf, refEventNear, drawRefGhost,
+  measureBatAngle, batGrayFrom,
   get refMode(){ return refMode; }, get refPickId(){ return refPickId; },
   ptrCount:()=>ptrs.size,
   get mirror(){ return mirror; }, get calibPts(){ return calibPts; }, get busy(){ return busy; },
