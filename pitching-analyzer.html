@@ -873,11 +873,23 @@
           <h2>解析精度</h2>
           <div class="toolbar" style="padding-top:12px;">
             <select class="mini" id="modelSel" style="flex:1 1 auto;">
-              <option value="lite" selected>標準(軽い・速い)</option>
-              <option value="full">高精度(重い)</option>
+              <option value="lite">軽量(速いが荒い)</option>
+              <option value="full" selected>標準(既定)</option>
+              <option value="heavy">最高精度(とても重い)</option>
             </select>
           </div>
-          <div class="legend">動きの速い投球では「高精度」の方が手首の追従が安定します。</div>
+          <div class="legend">
+            <b>既定は「標準」です。</b>実写で検出のブレを測ったところ、
+            軽量はブレが大きく(選手が小さく写った映像で、平均19.0% → 標準15.8%)、
+            速さの差もわずかでした。<br>
+            <b>最高精度</b>は<b>選手が小さく写っている・画質が悪い動画でだけ</b>効きます。
+            同じ映像でブレの中央値が 10.8% → 5.7% に下がりました。
+            ただし<b>解析にかかる時間は標準の約3倍</b>(実測 1コマ 411ms → 1424ms)、
+            モデルの読み込みも約30MBあります
+            (最初の1回だけ。次からは端末に残ります)。<br>
+            選手が大きく写っている動画では<b>3つとも差がありません</b>でした。
+            まず<b>拡大して選手を大きく写すほうが先</b>です。
+          </div>
         </div>
       </div>
 
@@ -965,6 +977,7 @@ async function loadVisionLib(){
 const MODEL_URL = {
   lite:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
   full:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
+  heavy:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task",
 };
 
 /* ---- ランドマーク(仕様書 §3) ---- */
@@ -990,7 +1003,7 @@ const timeRead=$("timeRead"), durRead=$("durRead"), frameRead=$("frameRead"), fp
 const toastEl=$("toast");
 
 /* ---- 状態 ---- */
-let poseLandmarker=null, modelKind="lite", libFailed=false;
+let poseLandmarker=null, modelKind="full", libFailed=false;
 let VIS_MIN=0.4, mirror=false, showRaw=false, captureFps=0;
 /* 映像を消して骨格だけにする。見せながら説明するときの一時的な状態なので、
    設定には残さない(次に開いたとき映像が出ないと故障に見えるため) */
@@ -1102,7 +1115,7 @@ async function createLandmarker(kind){
 }
 async function initModel(kind){
   modelKind=kind;
-  setStatus("busy",`モデルを読み込み中…(${kind==="full"?"高精度":"標準"})`);
+  setStatus("busy",`モデルを読み込み中…(${kind==="heavy"?"最高精度・約30MB":kind==="full"?"標準":"軽量"})`);
   if(!(await loadVisionLib())){
     libFailed=true;
     setStatus("err","解析ライブラリを取得できませんでした。動画の再生とコマ送りはこのまま使えます");
@@ -2601,7 +2614,7 @@ function savePrefs(){
 }
 (function applyPrefs(){
   let p={}; try{ p=JSON.parse(lsGet(PREF)||"{}"); }catch{}
-  if(p.modelKind==="full"||p.modelKind==="lite") modelKind=p.modelKind;
+  if(p.modelKind==="full"||p.modelKind==="lite"||p.modelKind==="heavy") modelKind=p.modelKind;
   if(typeof p.VIS_MIN==="number") VIS_MIN=clamp(p.VIS_MIN,0.1,0.8);
   if(typeof p.mirror==="boolean") mirror=p.mirror;
   if(typeof p.showRaw==="boolean") showRaw=p.showRaw;
