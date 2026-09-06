@@ -67,38 +67,56 @@
   .pane{position:relative;flex:1 1 0;height:100%;min-width:0;overflow:hidden;}
   /* 拡大表示。映像と骨格を同じ入れ物ごと変形するので、位置がずれない */
   .cropwrap{position:absolute;inset:0;transform-origin:0 0;}
-  /* トリミングの枠。四隅と辺の点をつまんで大きさを変える。
-     枠の外は box-shadow で暗くして、どこが残るか一目で分かるようにする */
-  .crop-box{position:absolute;border:2px solid var(--amber);
-    box-shadow:0 0 0 9999px rgba(0,0,0,.5);z-index:5;cursor:move;touch-action:none;}
+  /* トリミングの枠。写真アプリの切り抜きと同じ形にする。
+     角は L字のかぎ、辺は短い棒。枠の外は暗くして、どこが残るか一目で分かるようにする。 */
+  .crop-box{position:absolute;box-shadow:0 0 0 9999px rgba(0,0,0,.45),
+    inset 0 0 0 1px rgba(255,255,255,.9);z-index:5;cursor:move;touch-action:none;}
   .crop-box[hidden]{display:none;}
-  /* 三分割の目安線。つまみより後ろに置かれる作りなので、
+  /* 三分割の目安線。つまみより後ろに描かれる作りなので、
      pointer-events を切らないと辺のつまみを覆って触れなくなる */
   .crop-box::before,.crop-box::after{content:"";position:absolute;pointer-events:none;}
-  .crop-box::before{left:33.33%;right:33.33%;top:0;bottom:0;border-left:1px solid rgba(242,182,50,.35);
-    border-right:1px solid rgba(242,182,50,.35);background:none;}
-  .crop-box::after{top:33.33%;bottom:33.33%;left:0;right:0;border-top:1px solid rgba(242,182,50,.35);
-    border-bottom:1px solid rgba(242,182,50,.35);background:none;}
-  .ch{position:absolute;width:14px;height:14px;background:var(--amber);
-    border:2px solid #1a1206;border-radius:3px;touch-action:none;}
+  .crop-box::before{left:33.33%;right:33.33%;top:0;bottom:0;
+    border-left:1px solid rgba(255,255,255,.38);border-right:1px solid rgba(255,255,255,.38);}
+  .crop-box::after{top:33.33%;bottom:33.33%;left:0;right:0;
+    border-top:1px solid rgba(255,255,255,.38);border-bottom:1px solid rgba(255,255,255,.38);}
+  /* かぎ・棒そのもの。明るい映像でも見えるように影を敷く */
+  .ch{position:absolute;touch-action:none;box-sizing:border-box;
+    filter:drop-shadow(0 0 2px rgba(0,0,0,.75));}
   /* 指でつまめるよう、見た目より広く当たり判定を取る。
      枠が小さいと当たり判定どうしが重なるので、枠の大きさに合わせて狭める。 */
   .ch::after{content:"";position:absolute;
-    left:calc(-1 * var(--pad,16px));top:calc(-1 * var(--pad,16px));
-    right:calc(-1 * var(--pad,16px));bottom:calc(-1 * var(--pad,16px));}
+    left:calc(-1 * var(--pad,14px));top:calc(-1 * var(--pad,14px));
+    right:calc(-1 * var(--pad,14px));bottom:calc(-1 * var(--pad,14px));}
   /* 重なったときは四隅を優先する。縦横いっぺんに変えられて役に立つため */
   .ch[data-h="nw"],.ch[data-h="ne"],.ch[data-h="sw"],.ch[data-h="se"]{z-index:2;}
-  .ch[data-h="nw"]{left:-1px;top:-1px;cursor:nwse-resize;}
-  .ch[data-h="n" ]{left:calc(50% - 7px);top:-1px;cursor:ns-resize;}
-  .ch[data-h="ne"]{right:-1px;top:-1px;cursor:nesw-resize;}
-  .ch[data-h="w" ]{left:-1px;top:calc(50% - 7px);cursor:ew-resize;}
-  .ch[data-h="e" ]{right:-1px;top:calc(50% - 7px);cursor:ew-resize;}
-  .ch[data-h="sw"]{left:-1px;bottom:-1px;cursor:nesw-resize;}
-  .ch[data-h="s" ]{left:calc(50% - 7px);bottom:-1px;cursor:ns-resize;}
-  .ch[data-h="se"]{right:-1px;bottom:-1px;cursor:nwse-resize;}
+  /* 角: 2辺だけ太線を引いて L字にする */
+  .ch[data-h="nw"],.ch[data-h="ne"],.ch[data-h="sw"],.ch[data-h="se"]{
+    width:var(--corner,22px);height:var(--corner,22px);}
+  .ch[data-h="nw"]{left:0;top:0;cursor:nwse-resize;
+    border-left:5px solid #fff;border-top:5px solid #fff;border-top-left-radius:5px;}
+  .ch[data-h="ne"]{right:0;top:0;cursor:nesw-resize;
+    border-right:5px solid #fff;border-top:5px solid #fff;border-top-right-radius:5px;}
+  .ch[data-h="sw"]{left:0;bottom:0;cursor:nesw-resize;
+    border-left:5px solid #fff;border-bottom:5px solid #fff;border-bottom-left-radius:5px;}
+  .ch[data-h="se"]{right:0;bottom:0;cursor:nwse-resize;
+    border-right:5px solid #fff;border-bottom:5px solid #fff;border-bottom-right-radius:5px;}
+  /* 辺: 短い棒 */
+  .ch[data-h="n" ],.ch[data-h="s" ]{left:50%;margin-left:calc(var(--bar,32px) / -2);
+    width:var(--bar,32px);height:5px;background:#fff;border-radius:3px;cursor:ns-resize;}
+  .ch[data-h="w" ],.ch[data-h="e" ]{top:50%;margin-top:calc(var(--bar,32px) / -2);
+    width:5px;height:var(--bar,32px);background:#fff;border-radius:3px;cursor:ew-resize;}
+  .ch[data-h="n" ]{top:0;} .ch[data-h="s" ]{bottom:0;}
+  .ch[data-h="w" ]{left:0;} .ch[data-h="e" ]{right:0;}
+  /* 縦横比のボタン列。写真アプリと同じで枠のすぐ下に出す */
+  .crop-ratio,.crop-actions{display:flex;gap:6px;align-items:center;justify-content:center;}
+  .crop-ratio button{font-family:inherit;font-size:12px;min-height:32px;padding:0 10px;
+    border-radius:16px;cursor:pointer;border:1px solid rgba(255,255,255,.22);
+    background:rgba(12,18,15,.92);color:var(--chalk-dim);}
+  .crop-ratio button.on{background:#fff;color:#12201b;border-color:#fff;font-weight:700;}
   /* 決定・やめるは枠のそばに出す。動画の下のボタン列は画面の外にあることが多く、
      枠を合わせてから確定するのに毎回スクロールが要るため。 */
-  .crop-bar{position:absolute;z-index:6;display:flex;gap:8px;touch-action:none;}
+  .crop-bar{display:flex;flex-direction:column;gap:8px;align-items:center;
+    padding:10px 8px 2px;}
   .crop-bar[hidden]{display:none;}
   .crop-bar button{font-family:inherit;font-size:12.5px;min-height:34px;padding:0 14px;
     border-radius:7px;cursor:pointer;border:1px solid var(--panel-line);
@@ -141,6 +159,21 @@
     background:var(--amber);cursor:pointer;box-shadow:0 0 0 3px rgba(242,182,50,.22);}
   .seek-trim{position:absolute;left:0;right:0;top:6px;height:5px;pointer-events:none;z-index:1;}
   .seek-trim i{position:absolute;top:0;height:5px;background:rgba(13,20,18,.72);border-radius:3px;}
+  /* 解析する時間の範囲。つまんで動かせるレール。
+     「そのコマまで送って『現在地点』を押す」しかないと、範囲を決めるだけで何度も往復する。 */
+  .trim-rail{position:relative;height:26px;margin:2px 0 0;touch-action:none;user-select:none;}
+  .trim-rail[hidden]{display:none;}
+  .trim-rail .bed{position:absolute;left:0;right:0;top:9px;height:8px;border-radius:4px;
+    background:var(--panel-line);}
+  .trim-rail .fill{position:absolute;top:9px;height:8px;background:rgba(242,182,50,.45);}
+  .tg{position:absolute;top:2px;width:12px;height:22px;border-radius:4px;background:var(--amber);
+    border:1px solid #1a1206;cursor:ew-resize;touch-action:none;}
+  .tg::after{content:"";position:absolute;left:-14px;right:-14px;top:-8px;bottom:-8px;}
+  .tg::before{content:"";position:absolute;left:5px;top:6px;width:2px;height:10px;
+    background:rgba(26,18,6,.55);border-radius:1px;}
+  .trim-lab{display:flex;gap:10px;font-family:'JetBrains Mono',monospace;font-size:10.5px;
+    color:var(--chalk-dim);margin:1px 0 4px;}
+  .trim-lab b{color:var(--chalk);font-weight:500;}
   .tline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
     font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--chalk-dim);margin:8px 0 10px;}
   .tline b{color:var(--chalk);font-weight:500;font-size:14px;}
@@ -357,14 +390,33 @@
             ><span class="ch" data-h="ne"></span><span class="ch" data-h="w"></span
             ><span class="ch" data-h="e"></span><span class="ch" data-h="sw"></span
             ><span class="ch" data-h="s"></span><span class="ch" data-h="se"></span></div>
-          <div class="crop-bar" id="cropBar" hidden><button class="primary" id="btnCropOk">この範囲にする</button><button id="btnCropNo">やめる</button></div>
         </div>
+      </div>
+
+      <div class="crop-bar" id="cropBar" hidden>
+        <div class="crop-ratio" id="cropRatio"
+          ><button data-r="free" class="on">自由</button
+          ><button data-r="orig">元の比</button
+          ><button data-r="1">1:1</button
+          ><button data-r="0.5625">縦</button
+          ><button data-r="1.7778">横</button
+        ></div>
+        <div class="crop-actions"
+          ><button class="primary" id="btnCropOk">この範囲にする</button
+          ><button id="btnCropNo">やめる</button
+        ></div>
       </div>
 
       <div class="transport" id="transport">
         <div class="seek-wrap">
           <div class="seek-trim" id="seekTrim"></div>
           <input type="range" class="seek" id="seek" min="0" max="1000" value="0" step="1" aria-label="再生位置">
+          <div class="trim-rail" id="trimRail" hidden>
+            <i class="bed"></i><i class="fill" id="trimFill"></i
+            ><span class="tg" data-t="start" id="trimGripA" title="解析の開始"></span
+            ><span class="tg" data-t="end" id="trimGripB" title="解析の終了"></span>
+          </div>
+          <div class="trim-lab" id="trimLab"></div>
         </div>
         <div class="tline">
           <b id="timeRead">0.000</b><span>/ <span id="durRead">0.000</span> s</span>
@@ -1449,26 +1501,20 @@ function renderCropBox(){
   el.style.top   =(oy+cropBoxRect.y*dh)+"px";
   el.style.width =(cropBoxRect.w*dw)+"px";
   el.style.height=(cropBoxRect.h*dh)+"px";
-  el.style.setProperty("--pad",
-    Math.round(clamp(Math.min(cropBoxRect.w*dw, cropBoxRect.h*dh)/3.5, 4, 16))+"px");
+  /* かぎ・棒・当たり判定の大きさは枠に合わせて縮める。
+     固定のままだと、小さい枠では角のかぎ同士が重なって つまめなくなる。 */
+  { const mn=Math.min(cropBoxRect.w*dw, cropBoxRect.h*dh);
+    el.style.setProperty("--corner", Math.round(clamp(mn*0.30, 10, 22))+"px");
+    el.style.setProperty("--bar",    Math.round(clamp(mn*0.42, 12, 32))+"px");
+    el.style.setProperty("--pad",    Math.round(clamp(mn/4,     4, 14))+"px"); }
   placeCropBar();
 }
-/* 決定・やめるの小さなボタンを枠のそばに置く。
-   枠の下 → 入らなければ枠の上 → どちらも入らなければペインの下端、の順。 */
+/* 決定・やめる・形のボタンは動画のすぐ下に出す。
+   枠に重ねると、つまみを隠すか、指の下に入って邪魔になる。
+   動画の下なら必ず見えていて、枠のどこも隠さない(写真アプリと同じ置き方)。 */
 function placeCropBar(){
   const bar=$("cropBar"); if(!bar) return;
-  if(!cropMode||!cropBoxRect||!cropGeom){ bar.hidden=true; return; }
-  bar.hidden=false;
-  const pane=$("paneA"), {ox,oy,dw,dh}=cropGeom;
-  const bx=ox+cropBoxRect.x*dw, by=oy+cropBoxRect.y*dh;
-  const bw=cropBoxRect.w*dw,   bh=cropBoxRect.h*dh;
-  const w=bar.offsetWidth, h=bar.offsetHeight, gap=8;
-  let top;
-  if(by+bh+gap+h <= pane.clientHeight) top = by+bh+gap;      // 枠の下
-  else if(by-gap-h >= 0)               top = by-gap-h;       // 枠の上
-  else                                 top = by+bh-h-24;     // 枠の中(下のつまみを避ける)
-  bar.style.top  = clamp(top, 0, Math.max(0, pane.clientHeight-h))+"px";
-  bar.style.left = clamp(bx+bw/2-w/2, 4, Math.max(4, pane.clientWidth-w-4))+"px";
+  bar.hidden = !(cropMode && cropBoxRect);
 }
 /* 画面の位置 → 全体座標。編集中は全体表示なので変形は掛かっていない */
 function paneToFull(clientX, clientY){
@@ -1487,7 +1533,9 @@ function beginCropMode(){
   $("btnCrop").textContent="この範囲にする";
   $("btnCrop").classList.add("primary");
   $("btnCropCancel").hidden=false;
-  try{ stage.scrollIntoView({block:"nearest", behavior:"instant"}); }catch{}
+  renderCropRatio();
+  try{ stage.scrollIntoView({block:"nearest", behavior:"instant"});
+        $("cropBar").scrollIntoView({block:"nearest", behavior:"instant"}); }catch{}
   toast("枠の点をつまんで大きさを、枠の中をなぞって位置を変えられます");
 }
 function endCropMode(){
@@ -1497,6 +1545,7 @@ function endCropMode(){
   $("btnCrop").textContent="🔍 拡大";
   $("btnCrop").classList.remove("primary");
   $("btnCropCancel").hidden=true;
+  renderCropRatio();
 }
 function applyCropBox(){
   const b=cropBoxRect;
@@ -1537,6 +1586,41 @@ $("btnCropAuto").addEventListener("click",()=>{
 $("btnZoomIn") .addEventListener("click",()=>zoomBy(1.25));
 $("btnZoomOut").addEventListener("click",()=>zoomBy(1/1.25));
 
+
+/* ---- 形(縦横比)を決める ----
+   正規化座標は x が幅・y が高さで別々に 0..1 化されているので、
+   画面上の比 R を出すには w/h = R/videoAR にする。
+   "free" は比を決めない、"orig" は動画と同じ比(= w===h)。 */
+let cropRatio="free";
+function ratioTarget(){
+  if(cropRatio==="free") return null;
+  if(cropRatio==="orig") return 1;                   // w/h = 1 が動画と同じ比
+  const R=parseFloat(cropRatio);
+  return isFinite(R)&&R>0 ? R/(videoAR||1) : null;
+}
+/* 枠を指定の比に合わせる。中心は変えず、はみ出すときは縮める */
+function fitBoxToRatio(b){
+  const k=ratioTarget();
+  if(!k||!b) return b;
+  const cx=b.x+b.w/2, cy=b.y+b.h/2;
+  /* いまの面積に近い大きさで比を満たす */
+  let h=Math.sqrt(b.w*b.h/k), w=h*k;
+  /* 画面からはみ出さないところまで縮める */
+  const s=Math.min(1, 1/w, 1/h);
+  w*=s; h*=s;
+  if(w<CROP_MIN_W){ w=CROP_MIN_W; h=w/k; }
+  if(h<CROP_MIN_W){ h=CROP_MIN_W; w=h*k; }
+  return { x:clamp(cx-w/2,0,1-w), y:clamp(cy-h/2,0,1-h), w, h };
+}
+function renderCropRatio(){
+  document.querySelectorAll("#cropRatio button").forEach(b=>
+    b.classList.toggle("on", b.dataset.r===cropRatio));
+}
+$("cropRatio").addEventListener("click",(e)=>{
+  const b=e.target.closest("button[data-r]"); if(!b) return;
+  cropRatio=b.dataset.r; renderCropRatio();
+  if(cropMode&&cropBoxRect){ cropBoxRect=fitBoxToRatio(cropBoxRect); renderCropBox(); }
+});
 /* ---- 枠のつまみ ---- */
 function startBoxDrag(e, kind){
   const at=paneToFull(e.clientX,e.clientY); if(!at) return;
@@ -1555,14 +1639,38 @@ function moveBoxDrag(e){
   const dx=at.x-boxDrag.at.x, dy=at.y-boxDrag.at.y, b=boxDrag.box, k=boxDrag.kind;
   if(k==="move"){
     cropBoxRect={ x:clamp(b.x+dx,0,1-b.w), y:clamp(b.y+dy,0,1-b.h), w:b.w, h:b.h };
-  }else{
-    let x0=b.x, y0=b.y, x1=b.x+b.w, y1=b.y+b.h;
-    if(k.includes("w")) x0=clamp(b.x+dx, 0, x1-CROP_MIN_W);
-    if(k.includes("e")) x1=clamp(b.x+b.w+dx, x0+CROP_MIN_W, 1);
-    if(k.includes("n")) y0=clamp(b.y+dy, 0, y1-CROP_MIN_W);
-    if(k.includes("s")) y1=clamp(b.y+b.h+dy, y0+CROP_MIN_W, 1);
-    cropBoxRect={ x:x0, y:y0, w:x1-x0, h:y1-y0 };
+    renderCropBox(); return;
   }
+  let x0=b.x, y0=b.y, x1=b.x+b.w, y1=b.y+b.h;
+  if(k.includes("w")) x0=clamp(b.x+dx, 0, x1-CROP_MIN_W);
+  if(k.includes("e")) x1=clamp(b.x+b.w+dx, x0+CROP_MIN_W, 1);
+  if(k.includes("n")) y0=clamp(b.y+dy, 0, y1-CROP_MIN_W);
+  if(k.includes("s")) y1=clamp(b.y+b.h+dy, y0+CROP_MIN_W, 1);
+  const ratio=ratioTarget();
+  if(ratio){
+    /* 形を決めているときは、つまんだ角(辺)の反対側を固定したまま比を保つ。
+       指を動かした量の大きいほうを主にして、もう一方を計算で合わせる。 */
+    const ax = k.includes("w") ? x1 : x0;     // 動かさない側の x
+    const ay = k.includes("n") ? y1 : y0;     // 動かさない側の y
+    let w=x1-x0, h=y1-y0;
+    const horiz=k==="w"||k==="e", vert=k==="n"||k==="s";
+    if(horiz)      h=w/ratio;                 // 左右の棒 → 幅を主にする
+    else if(vert)  w=h*ratio;                 // 上下の棒 → 高さを主にする
+    else if(w/ratio > h) h=w/ratio; else w=h*ratio;   // 角 → 大きいほうに合わせる
+    /* 画面の外へ出ないところまで縮める */
+    const room = k.includes("w") ? ax : 1-ax;
+    const roomY= k.includes("n") ? ay : 1-ay;
+    const s=Math.min(1, room/w||1, roomY/h||1);
+    w*=s; h*=s;
+    if(w<CROP_MIN_W){ w=CROP_MIN_W; h=w/ratio; }
+    if(h<CROP_MIN_W){ h=CROP_MIN_W; w=h*ratio; }
+    x0 = k.includes("w") ? ax-w : ax;  x1=x0+w;
+    y0 = k.includes("n") ? ay-h : ay;  y1=y0+h;
+    x0=clamp(x0,0,1-w); y0=clamp(y0,0,1-h);
+    cropBoxRect={ x:x0, y:y0, w, h };
+    renderCropBox(); return;
+  }
+  cropBoxRect={ x:x0, y:y0, w:x1-x0, h:y1-y0 };
   renderCropBox();
 }
 function endBoxDrag(e){ if(!boxDrag) return; boxDrag=null;
@@ -2970,13 +3078,76 @@ $("btnToTrim").addEventListener("click",()=>{ video.pause(); video.currentTime=t
 
 /* ============ トリミング ============ */
 const fmt=(t)=> (t==null||isNaN(t))?"--":t.toFixed(3)+"s";
+/* ---- 解析する時間の範囲を、レールをつまんで決める ----
+   つまんでいる間は動画もその位置へ送るので、どのコマで切れるかを見ながら決められる。 */
+let trimDrag=null;
+function trimRailUpdate(){
+  const rail=$("trimRail"); if(!rail) return;
+  const ok = !!video.src && !!video.duration && isFinite(video.duration);
+  rail.hidden=!ok; $("trimLab").textContent="";
+  if(!ok) return;
+  const D=video.duration, e=trim.end??D;
+  const pct=(t)=>clamp(t/D,0,1)*100;
+  const w=rail.clientWidth||1, gw=12;
+  $("trimFill").style.left=pct(trim.start)+"%";
+  $("trimFill").style.width=Math.max(0,pct(e)-pct(trim.start))+"%";
+  /* つまみは端でも欄内に収まるよう、幅のぶんだけ内側に寄せる */
+  const put=(el,t)=>{ el.style.left=(clamp(t/D,0,1)*(w-gw))+"px"; };
+  put($("trimGripA"), trim.start); put($("trimGripB"), e);
+  const len=Math.max(0,e-trim.start);
+  $("trimLab").innerHTML=`開始 <b>${fmt(trim.start)}</b>　終了 <b>${trim.end==null?"最後":fmt(e)}</b>`
+    +`　長さ <b>${len.toFixed(3)}s</b>`;
+}
+function trimTimeAt(clientX){
+  const rail=$("trimRail"), r=rail.getBoundingClientRect();
+  const w=r.width-12;
+  return clamp((clientX-r.left-6)/(w||1),0,1)*video.duration;
+}
+function trimGripDown(e){
+  if(!video.duration) return;
+  const g=e.target.closest(".tg"); if(!g) return;
+  trimDrag=g.dataset.t;
+  try{ g.setPointerCapture(e.pointerId); }catch{}
+  e.preventDefault(); e.stopPropagation();
+}
+function trimGripMove(e){
+  if(!trimDrag||!video.duration) return;
+  const D=video.duration, MIN=Math.max(0.05, 3/fps);
+  let t=trimTimeAt(e.clientX);
+  if(trimDrag==="start"){
+    const e2=trim.end??D;
+    trim.start=clamp(t, 0, Math.max(0, e2-MIN));
+    t=trim.start;
+  }else{
+    trim.end=clamp(t, trim.start+MIN, D);
+    if(trim.end>=D-1e-4) trim.end=null;
+    t=trim.end??D;
+  }
+  updateTrimDisplay();
+  /* 切れ目のコマを見せる。再生中は邪魔しない */
+  if(video.paused) video.currentTime=t;
+}
+function trimGripUp(e){
+  if(!trimDrag) return;
+  trimDrag=null;
+  try{ e.target.releasePointerCapture&&e.target.releasePointerCapture(e.pointerId); }catch{}
+  refreshReady&&refreshReady();
+}
+$("trimRail").addEventListener("pointerdown", trimGripDown);
+$("trimRail").addEventListener("pointermove", trimGripMove);
+$("trimRail").addEventListener("pointerup", trimGripUp);
+$("trimRail").addEventListener("pointercancel", trimGripUp);
+window.addEventListener("pointermove",(e)=>{ if(trimDrag) trimGripMove(e); });
+window.addEventListener("pointerup", trimGripUp);
+
 function updateTrimDisplay(){
   $("trimStartTime").textContent=fmt(trim.start);
   $("trimEndTime").textContent=trim.end==null?"動画の最後":fmt(trim.end);
-  if(!video.duration||isNaN(video.duration)){ $("seekTrim").innerHTML=""; return; }
+  if(!video.duration||isNaN(video.duration)){ $("seekTrim").innerHTML=""; trimRailUpdate(); return; }
   const pos=(t)=>clamp(t/video.duration,0,1)*100;
   const e=trim.end??video.duration;
   $("seekTrim").innerHTML=`<i style="left:0;width:${pos(trim.start)}%"></i><i style="left:${pos(e)}%;right:0"></i>`;
+  trimRailUpdate();
 }
 $("btnTrimStart").addEventListener("click",()=>{
   const t=video.currentTime;
@@ -5416,6 +5587,8 @@ window.__batlab = {
   detectEvents, renderMetrics, buildSignals, confirmEvent,
   angle2, smoothedAt, get videoAR(){ return videoAR; },
   get annots(){ return annots; },
+  get trim(){ return trim; }, trimRailUpdate,
+  get cropRatio(){ return cropRatio; }, fitBoxToRatio,
   setCropCentered, zoomBy, autoCropFromPose, paneToNorm, paneToFull,
   beginCropMode, endCropMode, applyCropBox, renderCropBox,
   get cropBoxRect(){ return cropBoxRect; }, set cropBoxRect(v){ cropBoxRect=v; renderCropBox(); },
