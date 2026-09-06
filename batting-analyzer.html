@@ -1280,8 +1280,8 @@ function paneToNorm(clientX, clientY){
 const cropState=()=> crop ? {x:crop.x+crop.w/2, y:crop.y+crop.h/2, s:crop.w} : {x:0.5, y:0.5, s:1};
 function setCropCentered(cx,cy,s){
   s=clamp(s, CROP_MIN, 1);
-  if(s>=0.999){ setCrop(null); return; }
-  setCrop({ x:clamp(cx-s/2,0,1-s), y:clamp(cy-s/2,0,1-s), w:s, h:s });
+  if(s>=0.999) return setCrop(null);
+  return setCrop({ x:clamp(cx-s/2,0,1-s), y:clamp(cy-s/2,0,1-s), w:s, h:s });
 }
 /* 注視点(fx,fy)を画面上の同じ場所に留めたまま寄る/引く */
 function zoomBy(f, fx, fy){
@@ -1309,11 +1309,15 @@ function endCropMode(){
   $("btnCrop").textContent="🔍 拡大";
 }
 function setCrop(c){
+  /* 解析中に切り出しを変えると、検出に渡す画が途中で入れ替わってしまう。
+     残りのコマだけ別の画で検出された系列ができるので、必ず断る。 */
+  if(busy){ toast("解析中は拡大を変えられません"); return false; }
   crop=c;
   $("btnCropReset").hidden=!crop;
   const z=$("zoomBar"); if(z) z.hidden=!crop;
   layout();
   if(!smoothSeries.length) detectAndRender(); else draw();
+  return true;
 }
 /* 骨格から選手の入る範囲を出して、そこに合わせる。
    画面外に出た点は MediaPipe が作り話をするので使わない。
@@ -1342,18 +1346,20 @@ function autoCropFromPose(){
 $("btnCrop").addEventListener("click",()=>{
   if(!video.src){ toast("先に動画を読み込んでください"); return; }
   if(cropMode){ endCropMode(); return; }
+  if(busy){ toast("解析中は拡大を変えられません"); return; }
   cropMode=true; calibMode=0; ballMode=false; setAnnotTool("");
   stage.classList.add("cropping");
   $("btnCrop").textContent="やめる";
   toast("拡大したい範囲を囲んでください(1回タップでもその場所に寄ります)");
 });
-$("btnCropReset").addEventListener("click",()=>{ endCropMode(); setCrop(null); toast("全体に戻しました"); });
+$("btnCropReset").addEventListener("click",()=>{
+  endCropMode(); if(setCrop(null)) toast("全体に戻しました"); });
 $("btnCropAuto").addEventListener("click",()=>{
   if(!video.src){ toast("先に動画を読み込んでください"); return; }
   endCropMode();
   const c=autoCropFromPose();
   if(!c){ toast("骨格が取れていません。先に解析するか、骨格の出ているコマで押してください"); return; }
-  setCropCentered(c.cx, c.cy, c.s);
+  if(!setCropCentered(c.cx, c.cy, c.s)) return;   // 断られたときは何も言わない
   toast(smoothSeries.length
     ? `選手に合わせました(全体の ${Math.round(c.s*100)}%)。解析をやり直すと検出が良くなります`
     : `選手に合わせました(全体の ${Math.round(c.s*100)}%)`);
@@ -1366,19 +1372,52 @@ $("btnZoomOut").addEventListener("click",()=>zoomBy(1/1.25));
    touch-action を切らないと、なぞってもページのほうが動いてしまう。 */
 const ptrs=new Map();
 let panFrom=null, pinchFrom=null;
+/* 指が離れたことを取りこぼすと(iOSでは着信やジェスチャ中断で起きる)、
+   離れたはずの指が残ったままになる。次に1本でなぞったとき2本指=つまむ扱いになり、
+   触っただけで倍率が飛ぶ。捕まえられている=まだ触っている、で毎回ふるいにかける。 */
+/* 指が離れたことを取りこぼすと(iOSでは着信やジェスチャ中断で起きる)、
+   離れたはずの指が残る。次に1本でなぞったとき2本指=つまむ扱いになり、
+   触っただけで倍率が飛ぶ。実際そうなることを確かめたうえで、二重に防いでいる。
+   ① 捕まえた指は「まだ捕まえているか」で生死が分かる
+   ② 捕まえられなかった指は分からないので、最後に動いてから 1.5 秒で切る
+   つまむときの2本目は1本目のすぐ後に着くので、これで困らない。
+   1本目を長く置いてから2本目を足した場合はつまみ始めが1回空振りするが、
+   勝手に倍率が飛ぶより、そちらのほうがましだと判断した。 */
+const PTR_STALE_MS=1500;
+function purgeDeadPointers(){
+  const now=performance.now();
+  for(const [id,q] of [...ptrs.entries()]){
+    let dead;
+    if(q.captured){
+      try{ dead=!$("paneA").hasPointerCapture(id); }catch{ dead=true; }
+    }else{
+      dead = (now-q.ts) > PTR_STALE_MS;
+    }
+    if(dead) ptrs.delete(id);
+  }
+  if(ptrs.size<2) pinchFrom=null;
+  if(ptrs.size===0) panFrom=null;
+}
 $("paneA").addEventListener("pointerdown",(e)=>{
   if(annotTool || calibMode || ballMode) return;
-  ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
-  try{ $("paneA").setPointerCapture(e.pointerId); }catch{}
+  /* タッチでは、どの指も触っていない状態から着いた1本目だけが isPrimary になる。
+     つまり isPrimary の pointerdown が来た時点で、それまで追いかけていた指は
+     もう触っていない。離れたことを取りこぼしていても、ここで確実に片付く。
+     これが一番あてになる手がかりなので最初に効かせる。 */
+  if(e.isPrimary){ ptrs.clear(); pinchFrom=null; panFrom=null; }
+  purgeDeadPointers();
+  let captured=false;
+  try{ $("paneA").setPointerCapture(e.pointerId); captured=$("paneA").hasPointerCapture(e.pointerId); }catch{}
+  ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY, captured, ts:performance.now()});
   if(cropMode){
     cropDrag={cx0:e.clientX, cy0:e.clientY, cx1:e.clientX, cy1:e.clientY,
               x0:e.clientX, y0:e.clientY, moved:false};
     $("cropBox").hidden=false; drawCropBox();
     e.preventDefault(); return;
   }
-  if(!crop) return;
-  if(ptrs.size===1){ const c=cropState(); panFrom={px:e.clientX, py:e.clientY, cx:c.x, cy:c.y, s:c.s}; }
-  else if(ptrs.size===2){ panFrom=null; pinchFrom={d:ptrDist(), c:cropState(), mid:ptrMidNorm()}; }
+  /* 2本指は全体表示からでも寄れる。1本指は拡大しているときだけ動かす */
+  if(ptrs.size===2){ panFrom=null; pinchFrom={d:ptrDist(), c:cropState(), mid:ptrMidNorm()}; }
+  else if(ptrs.size===1 && crop){ const c=cropState(); panFrom={px:e.clientX, py:e.clientY, cx:c.x, cy:c.y, s:c.s}; }
   e.preventDefault();
 });
 function ptrDist(){
@@ -1398,7 +1437,8 @@ function drawCropBox(){
   box.style.height=Math.abs(cropDrag.cy1-cropDrag.cy0)+"px";
 }
 $("paneA").addEventListener("pointermove",(e)=>{
-  if(ptrs.has(e.pointerId)) ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  const rec=ptrs.get(e.pointerId);
+  if(rec){ rec.x=e.clientX; rec.y=e.clientY; rec.ts=performance.now(); }
   if(cropMode&&cropDrag){
     cropDrag.cx1=e.clientX; cropDrag.cy1=e.clientY;
     if(Math.hypot(e.clientX-cropDrag.x0, e.clientY-cropDrag.y0)>6) cropDrag.moved=true;
@@ -1415,6 +1455,11 @@ $("paneA").addEventListener("pointermove",(e)=>{
     }
     return;
   }
+  /* つまんだあと片方の指だけ離すと、残った指で続けて動かせないままになる。
+     指が1本になった時点で動かす操作に引き継ぐ。 */
+  if(!panFrom && !pinchFrom && crop && ptrs.size===1 && ptrs.has(e.pointerId)){
+    const c=cropState(); panFrom={px:e.clientX, py:e.clientY, cx:c.x, cy:c.y, s:c.s};
+  }
   if(panFrom && crop && cropGeom && ptrs.size===1){
     const pane=$("paneA"), {ox,oy,dw,dh}=cropGeom;
     const sc=Math.min(pane.clientWidth/(crop.w*dw), pane.clientHeight/(crop.h*dh));
@@ -1422,12 +1467,23 @@ $("paneA").addEventListener("pointermove",(e)=>{
                     panFrom.cy-(e.clientY-panFrom.py)/(sc*dh), panFrom.s);
   }
 });
+/* pointerup / pointercancel / lostpointercapture のどれで来ても同じ後始末をする。
+   解放そのものが lostpointercapture を呼び返すので、入れ子にならないようにする。 */
+let ending=false;
 function endPointer(e){
-  ptrs.delete(e.pointerId);
-  try{ $("paneA").releasePointerCapture(e.pointerId); }catch{}
-  if(ptrs.size<2) pinchFrom=null;
-  if(ptrs.size===0) panFrom=null;
-  if(!cropMode||!cropDrag) return;
+  if(ending) return;
+  ending=true;
+  try{
+    ptrs.delete(e.pointerId);
+    try{ $("paneA").releasePointerCapture(e.pointerId); }catch{}
+    if(ptrs.size<2) pinchFrom=null;
+    if(ptrs.size===0) panFrom=null;
+    if(!cropMode||!cropDrag) return;
+    finishCropDrag();
+  } finally { ending=false; }
+}
+function finishCropDrag(){
+  if(!cropDrag) return;
   const moved=cropDrag.moved;
   const c=cropRectFromDrag();
   const tapAt=paneToNorm(cropDrag.cx1, cropDrag.cy1);
@@ -1436,20 +1492,27 @@ function endPointer(e){
     /* 1回タップ = その場所に寄る。囲むのが難しい場面のため */
     if(!tapAt){ return; }
     const cur=cropState();
-    setCropCentered(tapAt.x, tapAt.y, clamp(cur.s*0.6, CROP_MIN, 1));
+    if(!setCropCentered(tapAt.x, tapAt.y, clamp(cur.s*0.6, CROP_MIN, 1))) return;
     toast("タップした場所に寄りました。指で動かして位置を直せます");
     return;
   }
   if(!c || c.s<CROP_MIN*0.9){ toast("範囲が小さすぎます"); return; }
-  setCropCentered(c.cx, c.cy, c.s);
+  if(!setCropCentered(c.cx, c.cy, c.s)) return;
   toast(smoothSeries.length
     ? "拡大しました。事前解析をやり直すと検出が良くなります"
     : `拡大しました(全体の ${Math.round(c.s*100)}%)`);
 }
 $("paneA").addEventListener("pointerup", endPointer);
 $("paneA").addEventListener("pointercancel", endPointer);
+$("paneA").addEventListener("lostpointercapture", endPointer);
+/* 捕まえ損ねた指がペインの外で離された場合の保険 */
+window.addEventListener("pointerup", endPointer);
+window.addEventListener("pointercancel", endPointer);
 $("paneA").addEventListener("wheel",(e)=>{
-  if(!crop && !cropMode) return;
+  if(!video.src) return;
+  /* 全体表示のときにホイールを取ると、動画の上でページを送れなくなる。
+     すでに寄っているとき、または Ctrl/⌘ を押しているときだけ拡大に使う。 */
+  if(!crop && !cropMode && !(e.ctrlKey||e.metaKey)) return;
   if(annotTool||calibMode||ballMode) return;
   e.preventDefault();
   const at=paneToNorm(e.clientX, e.clientY);
@@ -4907,6 +4970,8 @@ window.__batlab = {
   angle2, smoothedAt, get videoAR(){ return videoAR; },
   get annots(){ return annots; },
   setCropCentered, zoomBy, autoCropFromPose, paneToNorm,
+  ptrCount:()=>ptrs.size,
+  get mirror(){ return mirror; }, get calibPts(){ return calibPts; }, get busy(){ return busy; },
   batSpeedImpact, fitSlope0, fitValue0, fitLinSlope, realFps,
   get BATSPD(){ return {avgSec:BATSPD_AVG_SEC, winSec:BATSPD_WIN_SEC, avgPts:BATSPD_AVG_PTS}; }, get batSpd(){ return batSpd; },
   batAxis, batAxisAt, batFaceDir, batFace3, batDir3At, swingNormal3, batDrawPoints,
