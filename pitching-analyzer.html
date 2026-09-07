@@ -299,8 +299,14 @@
   input[type=range].thin::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;
     border-radius:50%;background:var(--sky);cursor:pointer;}
   .bar{height:6px;background:var(--bg-1);border-radius:3px;overflow:hidden;margin:0 12px 12px;}
+  /* 時系列グラフの読み取り欄。kv の2列だと名前が縦に折れるので専用にする */
+  .jg-kv{padding:2px 12px 8px;display:flex;flex-direction:column;gap:5px;}
+  .jg-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12px;}
+  .jg-row .nm{font-weight:600;white-space:nowrap;}
+  .jg-row .now{font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--chalk);}
+  .jg-row .mm{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--chalk-dim);}
   .graph-wrap{padding:6px 12px 8px;}
-  #chain,#relScatter,#blockChart,#timeline,#cmpCanvas{width:100%;height:auto;display:block;border-radius:8px;background:var(--bg-1);
+  #chain,#relScatter,#blockChart,#timeline,#cmpCanvas,#jgraph{width:100%;height:auto;display:block;border-radius:8px;background:var(--bg-1);
     border:1px solid var(--panel-line);cursor:crosshair;touch-action:none;}
   .tblwrap{padding:6px 12px 4px;overflow-x:auto;}
   table.mtable{border-collapse:collapse;width:100%;font-family:'JetBrains Mono',monospace;font-size:11px;}
@@ -736,6 +742,24 @@
       </div>
 
       <!-- ===== 再現性(仕様書 §5-F / §8) ===== -->
+        <div class="panel">
+          <h2>時系列グラフ <span class="tag" id="jgTag">--</span></h2>
+          <div class="opt-row">
+            <span class="lab">見る量</span>
+            <select class="mini" id="jgSel"></select>
+          </div>
+          <div class="graph-wrap"><canvas id="jgraph" width="680" height="300"></canvas></div>
+          <div class="jg-kv" id="jgKv"></div>
+          <div class="toolbar"><button id="btnJgCsv">この推移をCSVで出す</button></div>
+          <div class="legend">
+            「この範囲を解析する」で作った<b>平滑化後の骨格</b>から描いています。
+            角度は指標タブと同じ計算なので、グラフの読みと数値表は一致します。<br>
+            <b>グラフをなぞるとその時刻へ動きます。</b>山や谷が実際にどのコマなのか、
+            必ず映像で確かめてください。<br>
+            縦線は<b>チェックポイント</b>です。実線が確定済み、点線が自動検出のままのものです。
+          </div>
+        </div>
+
       <div class="tabpage" id="tab-repeat">
         <div class="panel">
           <h2>ベースライン <span class="tag" id="maturityTag">--</span></h2>
@@ -1122,6 +1146,9 @@ const toastEl=$("toast");
 /* ---- 状態 ---- */
 let poseLandmarker=null, modelKind="full", libFailed=false;
 let VIS_MIN=0.4, mirror=false, showRaw=false, captureFps=0;
+/* 時系列グラフで見ている量。設定の読み込みより先に宣言しておく
+   (applyPrefs が先に走るので、あとで宣言すると初期化前アクセスで止まる) */
+let graphKey=null;
 /* 撮影の向き。前後方向(ホーム向き)と左右方向のどちらが画面の横軸になるかが変わる。
    横から  … 画面の横軸 = ホーム方向。エクステンション・スネ角・発射角が測れる
    前後から … 画面の横軸 = 左右方向。リリースサイドが測れる
@@ -2241,7 +2268,9 @@ speedSel.addEventListener("change",()=>{ video.playbackRate=parseFloat(speedSel.
 seek.addEventListener("input",()=>{ seeking=true; if(!video.paused) video.pause();
   video.currentTime=parseFloat(seek.value)/1000; updateTimeRead(); });
 video.addEventListener("timeupdate",()=>{ if(!seeking) seek.value=Math.floor(video.currentTime*1000); updateTimeRead(); });
+video.addEventListener("timeupdate",()=>{ if(isChainVisible()) drawGraph(); });
 let seekPending=false;
+video.addEventListener("seeked",()=>{ if(isChainVisible()) drawGraph(); });
 video.addEventListener("seeked",()=>{
   seeking=false;
   if(seekPending) return; seekPending=true;
@@ -3049,7 +3078,7 @@ function savePrefs(){
   try{ lsSet(PREF, JSON.stringify({
     modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value, viewMode,
     showAngles, angleSets, crossJoint, guideHip, guideShoulder, guideBackVert, guideFrontVert,
-    refMode, refPickId, guideShin,
+    refMode, refPickId, graphKey, guideShin,
     onionOn, onionSpan })); }catch{}
 }
 (function applyPrefs(){
@@ -3063,6 +3092,7 @@ function savePrefs(){
   if(typeof p.showAngles==="boolean") showAngles=p.showAngles;
   if(p.refMode==="off"||p.refMode==="best"||p.refMode==="avg") refMode=p.refMode;
   if(typeof p.refPickId==="string") refPickId=p.refPickId;
+  if(typeof p.graphKey==="string") graphKey=p.graphKey;
   if(p.angleSets&&typeof p.angleSets==="object") Object.assign(angleSets,p.angleSets);
   if(typeof p.crossJoint==="string") crossJoint=p.crossJoint;
   if(typeof p.guideHip==="boolean") guideHip=p.guideHip;
@@ -3096,6 +3126,7 @@ $("visMin").addEventListener("input",e=>{ VIS_MIN=parseFloat(e.target.value);
    タイミング指標が 8倍ずれたまま保存されていた。 */
 function recomputeAll(){
   renderMetrics();
+  renderGraphSel(); drawGraph();
   drawTimeline();
   if(isChainVisible()) drawChain(); else chain=null;
   refreshData();
@@ -3137,7 +3168,7 @@ document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
   document.querySelectorAll(".tabpage").forEach(x=>x.classList.remove("active"));
   t.classList.add("active"); $("tab-"+t.dataset.tab).classList.add("active");
-  if(t.dataset.tab==="chain") drawChain();
+  if(t.dataset.tab==="chain") { drawChain(); renderGraphSel(); drawGraph(); }
   if(t.dataset.tab==="repeat"||t.dataset.tab==="change") refreshData();
   if(t.dataset.tab==="compare") reloadCompare();
 }));
@@ -5179,6 +5210,248 @@ $("qDraw").addEventListener("click",()=>{
 
 buildQuickEvents(); syncQuick(); applyVideoVisibility();
 
+
+/* グラフ用の小さな道具 */
+const jgIdx=(part,anat)=>{
+  const s=mpSide(anat);
+  if(part==="elbow") return s==="R"?L.rElbow:L.lElbow;
+  if(part==="knee")  return s==="R"?L.rKnee :L.lKnee;
+  if(part==="hip")   return s==="R"?L.rHip  :L.lHip;
+  return idxOf(part,anat);
+};
+function jgAng(lm,a,b,c){
+  const A=P2(lm,a),B=P2(lm,b),C=P2(lm,c);
+  if(!A||!B||!C) return null;
+  if(visOf(lm,a)<VIS_MIN||visOf(lm,b)<VIS_MIN||visOf(lm,c)<VIS_MIN) return null;
+  return angle2(A,B,C);
+}
+/* 体のラインが水平から何度傾いているか。上下どちらに傾いても符号で分かる */
+function jgTilt(lm,a,b){
+  const A=P2(lm,a),B=P2(lm,b);
+  if(!A||!B) return null;
+  if(visOf(lm,a)<VIS_MIN||visOf(lm,b)<VIS_MIN) return null;
+  let dx=B.x-A.x, dy=B.y-A.y;
+  if(dx<0){ dx=-dx; dy=-dy; }
+  return Math.atan2(-dy,dx)*180/Math.PI;
+}
+/* 中心差分の速さ[身長/秒]。時間は実時間(スロー撮影の補正込み) */
+function jgSpeedAt(i, getPt){
+  const S=smoothSeries;
+  if(i<=0||i>=S.length-1||!analysis||!analysis.H_norm) return null;
+  const a=getPt(S[i-1].lm), b=getPt(S[i+1].lm);
+  if(!a||!b) return null;
+  const dt=realSec(S[i+1].t-S[i-1].t);
+  if(dt<=0) return null;
+  return Math.hypot(b.x-a.x, b.y-a.y)/analysis.H_norm/dt;
+}
+const jgSpeed=(i,idx)=>jgSpeedAt(i,(lm)=>P2(lm,idx));
+
+/* グラフに出せる量。側面から撮った動画を前提にしている。
+   奥行きの分からない量(回旋角など)は、まちがった数字になるので入れない。 */
+const GRAPH_ITEMS = [
+  { k:"elbow", label:"肘の角度", unit:"°", names:["投球腕","グラブ側"],
+    at:(f)=>{ const a=throwArm(), gv=gloveArm();
+      return [jgAng(f.lm, idxOf("shoulder",a), jgIdx("elbow",a), idxOf("wrist",a)),
+              jgAng(f.lm, idxOf("shoulder",gv), jgIdx("elbow",gv), idxOf("wrist",gv))]; } },
+  { k:"knee", label:"膝の角度", unit:"°", names:["踏み出し脚","軸脚"],
+    at:(f)=>{ const st=strideSideAnat(), pv=throwArm();
+      return [jgAng(f.lm, jgIdx("hip",st), jgIdx("knee",st), idxOf("ankle",st)),
+              jgAng(f.lm, jgIdx("hip",pv), jgIdx("knee",pv), idxOf("ankle",pv))]; } },
+  { k:"trunk", label:"体幹の前傾", unit:"°", names:["体幹"], zero:true,
+    at:(f)=>{ const d=effectiveDir(); if(d==null||!isSide()) return null;
+      const sh=midOf(f.lm,L.lShoulder,L.rShoulder), hp=midOf(f.lm,L.lHip,L.rHip);
+      if(!sh||!hp) return null;
+      return [Math.atan2(d*(sh.x-hp.x),(hp.y-sh.y))*180/Math.PI]; },
+    needs:()=>isSide()&&effectiveDir()!=null },
+  { k:"shin", label:"軸足スネと地面の角度", unit:"°", names:["軸足のスネ"],
+    at:(f)=>{ const d=effectiveDir(); if(d==null) return null;
+      const pv=throwArm();
+      return [shinAngleAt(f.lm, d, jgIdx("knee",pv), idxOf("ankle",pv))]; },
+    needs:()=>isSide()&&effectiveDir()!=null },
+  { k:"wristSpd", label:"手首の速さ(投球腕)", unit:"身長/秒", names:["手首"], zero:true,
+    at:(f,i)=>[jgSpeed(i, idxOf("wrist",throwArm()))] },
+  { k:"wristY", label:"手首の高さ(地面から)", unit:"身長比", names:["手首"], zero:true,
+    at:(f)=>{ const g=groundYAt(f.lm), w=P2(f.lm, idxOf("wrist",throwArm()));
+      return (g!=null&&w)?[(g-w.y)/analysis.H_norm]:null; } },
+  { k:"pelvisX", label:"骨盤中心の前後位置", unit:"身長比", names:["骨盤中心"], zero:true,
+    at:(f)=>{ const d=effectiveDir(); if(d==null||!isSide()) return null;
+      const h=midOf(f.lm,L.lHip,L.rHip), h0=midOf(smoothSeries[0].lm,L.lHip,L.rHip);
+      return (h&&h0)?[d*(h.x-h0.x)/analysis.H_norm]:null; },
+    needs:()=>isSide()&&effectiveDir()!=null },
+  { k:"lines", label:"肩・骨盤ラインの傾き", unit:"°", names:["肩ライン","骨盤ライン"], zero:true,
+    at:(f)=>[jgTilt(f.lm,L.lShoulder,L.rShoulder), jgTilt(f.lm,L.lHip,L.rHip)] },
+];
+
+/* ================= 関節の時系列グラフ =================
+   解析済みの平滑化した骨格から、選んだ量の推移を描く。
+   角度は指標と同じ angle2 で計算しているので、グラフの読みと数値表が食い違わない。
+   グラフをなぞるとその時刻へ動くので、「山や谷がどのコマか」を目で確かめられる。 */
+const JG_COLORS=["#5ad1c4","#f2b632","#9b7ede"];
+function jgItems(){ return GRAPH_ITEMS.filter(it=>!it.needs||it.needs()); }
+function jgItem(){ const a=jgItems(); return a.find(i=>i.k===graphKey)||a[0]||null; }
+/* 平滑化した並びから、選んだ量の系列を作る */
+function buildGraphSeries(){
+  if(!smoothSeries.length||!analysis||!analysis.H_norm) return null;
+  const it=jgItem(); if(!it) return null;
+  const lines=it.names.map((nm,i)=>({label:nm,color:JG_COLORS[i%JG_COLORS.length],pts:[]}));
+  for(let i=0;i<smoothSeries.length;i++){
+    const vs=it.at(smoothSeries[i], i);
+    if(!vs) continue;
+    for(let j=0;j<lines.length;j++){
+      const v=vs[j];
+      if(v!=null&&isFinite(v)) lines[j].pts.push({t:smoothSeries[i].t, v});
+    }
+  }
+  if(!lines.some(l=>l.pts.length>1)) return null;
+  return { key:it.k, label:it.label, unit:it.unit, zero:!!it.zero, lines };
+}
+function renderGraphSel(){
+  const sel=$("jgSel"); if(!sel) return;
+  const a=jgItems();
+  sel.innerHTML=a.map(i=>`<option value="${i.k}">${i.label}</option>`).join("");
+  if(!a.some(i=>i.k===graphKey)) graphKey=a.length?a[0].k:null;
+  if(graphKey) sel.value=graphKey;
+}
+function drawGraph(){
+  const cv=$("jgraph"); if(!cv) return;
+  const g=cv.getContext("2d"), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
+  const S=buildGraphSeries();
+  const kv=$("jgKv");
+  if(!S){
+    $("jgTag").textContent="--";
+    g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
+    /* 出せない理由を分けて書く。黙って空のグラフを出すと、
+       解析していないのか、この量が測れないのかが分からない。 */
+    const notYet = !smoothSeries.length || !analysis || !analysis.H_norm;
+    g.fillText(notYet ? "「この範囲を解析する」を先に実行してください"
+                      : "この動画ではこの量を出せません(関節が写っていないコマが多い など)", W/2, H/2);
+    if(kv) kv.innerHTML=""; return;
+  }
+  const PAD={l:52,r:14,t:14,b:42};
+  const pw=W-PAD.l-PAD.r, ph=H-PAD.t-PAD.b;
+  const t0=smoothSeries[0].t, t1=smoothSeries[smoothSeries.length-1].t;
+  const span=Math.max(1e-6, t1-t0);
+  let lo=Infinity, hi=-Infinity;
+  for(const l of S.lines) for(const p of l.pts){ lo=Math.min(lo,p.v); hi=Math.max(hi,p.v); }
+  if(S.zero){ lo=Math.min(lo,0); hi=Math.max(hi,0); }
+  if(!isFinite(lo)||!isFinite(hi)) return;
+  if(hi-lo<1e-6){ hi=lo+1; }
+  const pad=(hi-lo)*0.08; lo-=pad; hi+=pad;
+  const X=(t)=>PAD.l+(t-t0)/span*pw;
+  const Y=(v)=>PAD.t+(1-(v-lo)/(hi-lo))*ph;
+  /* 目盛り */
+  g.strokeStyle="#22302a"; g.lineWidth=1;
+  g.fillStyle="#5f6f68"; g.font="10px monospace"; g.textAlign="right"; g.textBaseline="middle";
+  const step=jgNiceStep(hi-lo);
+  for(let v=Math.ceil(lo/step)*step; v<=hi; v+=step){
+    const y=Math.round(Y(v))+0.5;
+    g.beginPath(); g.moveTo(PAD.l,y); g.lineTo(W-PAD.r,y); g.stroke();
+    g.fillText(jgFmt(v,step), PAD.l-6, y);
+  }
+  if(S.zero&&lo<0&&hi>0){
+    const y=Math.round(Y(0))+0.5;
+    g.strokeStyle="#3a4a43"; g.lineWidth=1.5;
+    g.beginPath(); g.moveTo(PAD.l,y); g.lineTo(W-PAD.r,y); g.stroke();
+  }
+  /* 確定したチェックポイントの縦線。
+     近いイベントが並ぶとラベルが重なって読めなくなるので、
+     ぶつかるものは1段下げる。 */
+  g.textAlign="center"; g.textBaseline="alphabetic"; g.font="10px sans-serif";
+  const rows=[-Infinity,-Infinity];
+  for(const ev of EVENTS){
+    const e=events[ev.id]; if(!e) continue;
+    if(e.t<t0-1e-6||e.t>t1+1e-6) continue;
+    const x=Math.round(X(e.t))+0.5;
+    g.strokeStyle=e.confirmed?"rgba(242,182,50,.75)":"rgba(143,163,154,.42)";
+    g.lineWidth=1.5; g.setLineDash(e.confirmed?[]:[4,4]);
+    g.beginPath(); g.moveTo(x,PAD.t); g.lineTo(x,PAD.t+ph); g.stroke();
+    g.setLineDash([]);
+    g.fillStyle=e.confirmed?"#f2b632":"#5f6f68";
+    const lab=ev.short||ev.label;
+    const w=g.measureText(lab).width;
+    const cx=clamp(x, PAD.l+w/2, W-PAD.r-w/2);
+    const row = (cx-w/2 >= rows[0]+3) ? 0 : ((cx-w/2 >= rows[1]+3) ? 1 : 0);
+    rows[row]=cx+w/2;
+    g.fillText(lab, cx, PAD.t+ph+12+row*11);
+  }
+  /* 折れ線 */
+  for(const l of S.lines){
+    if(l.pts.length<2) continue;
+    g.strokeStyle=l.color; g.lineWidth=2; g.lineJoin="round"; g.beginPath();
+    l.pts.forEach((p,i)=> i?g.lineTo(X(p.t),Y(p.v)):g.moveTo(X(p.t),Y(p.v)));
+    g.stroke();
+  }
+  /* いま見ているコマ */
+  const tc=video.currentTime;
+  if(tc>=t0-1e-6&&tc<=t1+1e-6){
+    const x=Math.round(X(tc))+0.5;
+    g.strokeStyle="#e9ede9"; g.lineWidth=1.5;
+    g.beginPath(); g.moveTo(x,PAD.t); g.lineTo(x,PAD.t+ph); g.stroke();
+    for(const l of S.lines){
+      const p=jgNearest(l.pts,tc); if(!p) continue;
+      g.fillStyle=l.color; g.beginPath(); g.arc(X(p.t),Y(p.v),4,0,Math.PI*2); g.fill();
+    }
+  }
+  /* 時間の目盛り */
+  g.fillStyle="#5f6f68"; g.font="10px monospace"; g.textAlign="left";
+  g.fillText(t0.toFixed(2)+"s", PAD.l, H-6);
+  g.textAlign="right"; g.fillText(t1.toFixed(2)+"s", W-PAD.r, H-6);
+  /* 読み取り */
+  $("jgTag").textContent=`${S.label}（${S.unit}）`;
+  if(kv){
+    kv.innerHTML=S.lines.filter(l=>l.pts.length).map(l=>{
+      const p=jgNearest(l.pts,tc);
+      let mn=Infinity,mx=-Infinity,tmn=null,tmx=null;
+      for(const q of l.pts){ if(q.v<mn){mn=q.v;tmn=q.t;} if(q.v>mx){mx=q.v;tmx=q.t;} }
+      const d=S.unit==="°"?1:(S.unit==="身長比"?3:2);
+      return `<div class="jg-row"><span class="nm" style="color:${l.color};">${l.label}</span>`
+        +`<span class="now">${p?p.v.toFixed(d):"--"} ${S.unit}</span>`
+        +`<span class="mm">最小 ${mn.toFixed(d)} (${tmn.toFixed(2)}s) ／ `
+        +`最大 ${mx.toFixed(d)} (${tmx.toFixed(2)}s)</span></div>`;
+    }).join("");
+  }
+}
+function jgNiceStep(range){
+  const raw=range/5, e=Math.pow(10,Math.floor(Math.log10(raw))), m=raw/e;
+  return (m<1.5?1:m<3?2:m<7?5:10)*e;
+}
+function jgFmt(v,step){ const d=step>=1?0:(step>=0.1?1:(step>=0.01?2:3)); return v.toFixed(d); }
+function jgNearest(pts,t){
+  if(!pts.length) return null;
+  let best=pts[0], bd=Math.abs(pts[0].t-t);
+  for(const p of pts){ const d=Math.abs(p.t-t); if(d<bd){bd=d;best=p;} }
+  return best;
+}
+/* グラフをなぞるとその時刻へ動く */
+let jgDrag=false;
+function jgSeek(e){
+  if(!smoothSeries.length) return;
+  const cv=$("jgraph"), r=cv.getBoundingClientRect();
+  const px=(e.clientX-r.left)/r.width*cv.width;
+  const PADl=52, PADr=14;
+  const frac=clamp((px-PADl)/(cv.width-PADl-PADr),0,1);
+  const t0=smoothSeries[0].t, t1=smoothSeries[smoothSeries.length-1].t;
+  video.pause(); video.currentTime=t0+frac*(t1-t0);
+}
+$("jgraph").addEventListener("pointerdown",(e)=>{ jgDrag=true;
+  try{ $("jgraph").setPointerCapture(e.pointerId); }catch{}
+  jgSeek(e); e.preventDefault(); });
+$("jgraph").addEventListener("pointermove",(e)=>{ if(jgDrag) jgSeek(e); });
+$("jgraph").addEventListener("pointerup",()=>{ jgDrag=false; });
+$("jgraph").addEventListener("pointercancel",()=>{ jgDrag=false; });
+$("jgSel").addEventListener("change",(e)=>{ graphKey=e.target.value; savePrefs(); drawGraph(); });
+$("btnJgCsv").addEventListener("click",()=>{
+  const S=buildGraphSeries();
+  if(!S){ toast("先に「この範囲を解析する」を実行してください"); return; }
+  const ts=[...new Set(S.lines.flatMap(l=>l.pts.map(p=>p.t)))].sort((a,b)=>a-b);
+  const head=["time_s","frame",...S.lines.map(l=>`${S.key}_${l.label}`)];
+  const rows=ts.map(t=>[t.toFixed(4), Math.round(t*fps),
+    ...S.lines.map(l=>{ const p=l.pts.find(q=>Math.abs(q.t-t)<1e-9); return p?(+p.v.toFixed(4)):""; })].join(","));
+  download(`graph_${S.key}_${new Date().toISOString().slice(0,10)}.csv`,
+    "﻿"+head.join(",")+"\r\n"+rows.join("\r\n")+"\r\n","text/csv;charset=utf-8");
+});
+
 window.__pitchlab = {
   angle2, smoothedAt, get videoAR(){ return videoAR; },
   get annots(){ return annots; },
@@ -5188,6 +5461,10 @@ window.__pitchlab = {
   get viewMode(){ return viewMode; }, CSV_COLS,
   get trim(){ return trim; }, trimRailUpdate,
   get cropRatio(){ return cropRatio; }, fitBoxToRatio,
+  get smoothSeries(){ return smoothSeries; },
+  buildGraphSeries, drawGraph, renderGraphSel,
+  get graphKey(){ return graphKey; },
+  setGraphKey:(k)=>{ graphKey=k; renderGraphSel(); drawGraph(); },
   setCropCentered, zoomBy, autoCropFromPose, paneToNorm, paneToFull,
   beginCropMode, endCropMode, applyCropBox, renderCropBox,
   get cropBoxRect(){ return cropBoxRect; }, set cropBoxRect(v){ cropBoxRect=v; renderCropBox(); },
