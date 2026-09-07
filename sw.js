@@ -3,7 +3,7 @@
    - HTML はネットワーク優先(更新をすぐ反映し、圏外ならキャッシュで動く)
    - 解析ライブラリ・モデル(数MB)はキャッシュ優先(URLにバージョンが入っているので古くならない)
 */
-const VERSION = "v37";
+const VERSION = "v38";
 const SHELL = "shell-" + VERSION;
 const ASSETS = "assets-" + VERSION;
 

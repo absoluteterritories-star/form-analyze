@@ -585,7 +585,7 @@
           <div class="bar"><i id="analyzeBar"></i></div>
           <div class="kv">
             <span class="k">解析フレーム数</span><span class="v na" id="kFrames">--</span>
-            <span class="k">平滑化の窓</span><span class="v na" id="kWindow">--</span>
+            <span class="k">平滑化の窓（可変）</span><span class="v na" id="kWindow">--</span>
             <span class="k">身長ピクセル長 H_norm</span><span class="v na" id="kHnorm">--</span>
             <span class="k">投球方向</span><span class="v na" id="kDir">--</span>
             <span class="k">検出できたコマ</span><span class="v na" id="kDetected">--</span>
@@ -602,7 +602,9 @@
             範囲全体を1コマずつ解析し、<b>平滑化した骨格</b>を作ります。
             以降の角度・位置・速度はこの平滑化後の値から計算します(生の座標をそのまま微分すると
             検出のブレが増幅されるため)。<br>
-            角度・位置・速度はこの平滑化後の値から計算します。
+            平滑化は<b>窓の中で放物線をあてはめる</b>やり方で、窓の幅はコマごとに変えます。
+            <b>止まっているところは広く</b>(ブレがよく消える)、
+            <b>形が急に変わるところは狭く</b>(山や谷が削れない)なります。
           </div>
         </div>
 
@@ -1750,22 +1752,98 @@ function smoothWindow(f){
   if(n%2===0) n+=1;
   return Math.max(3,n);
 }
-function smoothLandmarkSeries(series, W){
-  const half=(W-1)/2;
-  return series.map((f,i)=>{
-    if(!f.lm) return {t:f.t, lm:null};
-    const out=new Array(33).fill(null);
-    for(let j=0;j<33;j++){
-      let sx=0,sy=0,sv=0,n=0;
-      for(let k=Math.max(0,i-half);k<=Math.min(series.length-1,i+half);k++){
-        const p=series[k].lm && series[k].lm[j];
-        if(!p) continue;
-        sx+=p.x; sy+=p.y; sv+=(p.visibility==null?1:p.visibility); n++;
-      }
-      if(n) out[j]={x:sx/n,y:sy/n,visibility:sv/n};
+/* ============ 平滑化 ============ */
+/* 窓の中で放物線をあてはめて、中央のコマの値を採る(Savitzky-Golay 2次)。
+   ・平ら / まっすぐ / 放物線はそのまま返すので、山や谷の高さが削れない
+   ・窓の幅はコマごとに変える。「放物線がまだ合っているか」で決める。
+     あてはめの残差が雑音の大きさに収まるうちは窓を広げ、
+     形についていけなくなったところで止める。
+     止まっている場所では広く(雑音がよく消え)、
+     形が急に変わる場所では狭く(山や谷が削れない)なる。
+
+   速さで窓を決める案も試したが、「速いが滑らかな山」と「速くて鋭い山」を
+   区別できないため、広い山で最大値が 8% ほど過大に出た。残差で決めると区別できる。
+
+   単純な移動平均から替えた理由(合成データでの実測。30/60/120/240fps):
+     速さのピークの削れ         -36/-13/-14/-12%  →  -16/-5/-2/-2%
+     ゆっくり動く区間の膝角度のばらつき 0.38/0.53/0.43/0.24° → 0.31/0.33/0.25/0.15°
+     範囲の先頭コマの偏り(構えを置く場所) 0.7/0.3/1.0/1.7(1/1000) → すべて 0
+     急降下のすぐ後の平らな谷の踏み外し   どちらも 0 */
+const SG_TOL=3.0;                    // 残差が雑音の何倍まで許されるか
+const SG_MIN_MS=40, SG_MAX_MS=250;   // 窓の下限・上限
+/* 雑音の大きさ。2階差分の中央絶対値から見積もる(外れ値に強い) */
+function sgNoise(a, ok, n){
+  const d=[];
+  for(let i=1;i<n-1;i++){
+    if(!ok[i-1]||!ok[i]||!ok[i+1]) continue;
+    d.push(Math.abs(a[i+1]-2*a[i]+a[i-1]));
+  }
+  if(!d.length) return 0;
+  d.sort((x,y)=>x-y);
+  return d[d.length>>1]/0.6745/Math.sqrt(6);
+}
+function smoothLandmarkSeries(series, W, opts){
+  const n=series.length;
+  const fpsLocal=(opts&&opts.fps)||30, AR=(opts&&opts.AR)||1;
+  const hMin=Math.max(1, Math.round(SG_MIN_MS/1000*fpsLocal/2));
+  const hMax=Math.max(hMin, Math.round(SG_MAX_MS/1000*fpsLocal/2));
+  const out=series.map(f=>({t:f.t, lm:f.lm?new Array(33).fill(null):null}));
+  const X=new Float64Array(n), Y=new Float64Array(n), V=new Float64Array(n);
+  const ok=new Uint8Array(n);
+  for(let j=0;j<33;j++){
+    for(let i=0;i<n;i++){
+      const p=series[i].lm && series[i].lm[j];
+      ok[i]=p?1:0;
+      /* x は等方に直してから扱う(残差を x と y で足し合わせるため) */
+      if(p){ X[i]=p.x*AR; Y[i]=p.y; V[i]=(p.visibility==null?1:p.visibility); }
     }
-    return {t:f.t, lm:out};
-  });
+    const tol=SG_TOL*Math.max(sgNoise(X,ok,n), sgNoise(Y,ok,n));
+    for(let i=0;i<n;i++){
+      if(!ok[i]) continue;
+      let S0=0,S1=0,S2=0,S3=0,S4=0;
+      let A0=0,A1=0,A2=0,QA=0, B0=0,B1=0,B2=0,QB=0, SV=0;
+      const add=(k)=>{
+        if(k<0||k>=n||!ok[k]) return;
+        const x=k-i, x2=x*x;
+        S0+=1; S1+=x; S2+=x2; S3+=x2*x; S4+=x2*x2;
+        A0+=X[k]; A1+=x*X[k]; A2+=x2*X[k]; QA+=X[k]*X[k];
+        B0+=Y[k]; B1+=x*Y[k]; B2+=x2*Y[k]; QB+=Y[k]*Y[k];
+        SV+=V[k];
+      };
+      for(let k=i-hMin;k<=i+hMin;k++) add(k);
+      /* 正規方程式を解いて (定数項, 1次, 2次) を得る。定数項が中央の値 */
+      const solve=()=>{
+        const D = S0*(S2*S4-S3*S3) - S1*(S1*S4-S3*S2) + S2*(S1*S3-S2*S2);
+        if(S0<3||Math.abs(D)<1e-18) return null;
+        const c3=(P0,P1,P2)=>{
+          const c = P0*(S2*S4-S3*S3) - S1*(P1*S4-S3*P2) + S2*(P1*S3-S2*P2);
+          const b = S0*(P1*S4-S3*P2) - P0*(S1*S4-S3*S2) + S2*(S1*P2-P1*S2);
+          const a = S0*(S2*P2-P1*S3) - S1*(S1*P2-P1*S2) + P0*(S1*S3-S2*S2);
+          return [c/D,b/D,a/D];
+        };
+        return { x:c3(A0,A1,A2), y:c3(B0,B1,B2) };
+      };
+      /* 残差の二乗和は Σy² − (c·T0 + b·T1 + a·T2) で出せる(あてはめ直さなくてよい) */
+      const rms=(s)=>{
+        if(!s||S0<5) return 0;
+        const ra=QA-(s.x[0]*A0+s.x[1]*A1+s.x[2]*A2);
+        const rb=QB-(s.y[0]*B0+s.y[1]*B1+s.y[2]*B2);
+        return Math.sqrt(Math.max(0,ra+rb)/(2*Math.max(1,S0-3)));
+      };
+      let best=solve(), bestV=SV, bestN=S0;
+      for(let h=hMin+1;h<=hMax;h++){
+        add(i-h); add(i+h);
+        const s=solve();
+        if(!s) break;
+        if(rms(s) > tol + 1e-12) break;      // これ以上広げると形についていけない
+        best=s; bestV=SV; bestN=S0;
+      }
+      const ox = best ? best.x[0]/AR : X[i]/AR;
+      const oy = best ? best.y[0]     : Y[i];
+      out[i].lm[j]={ x:ox, y:oy, visibility:bestN?bestV/bestN:V[i] };
+    }
+  }
+  return out;
 }
 /* 指定時刻に最も近い平滑化フレーム */
 function smoothedAt(t){
@@ -2799,7 +2877,7 @@ $("btnAnalyze").addEventListener("click",async()=>{
     analyzeCost={ total:performance.now()-t0, seek:msSeek, detect:msDetect, frames:series.length };
     rawSeries=series;
     const W=smoothWindow(fps);
-    smoothSeries=smoothLandmarkSeries(series,W);
+    smoothSeries=smoothLandmarkSeries(series,W,{fps, AR:videoAR});
     const detected=series.filter(f=>f.lm).length;
     /* 身長ピクセル長。
        「範囲の先頭フレーム」から取ると、トリミング開始が既に脚上げに入っていた場合に
@@ -2875,7 +2953,8 @@ function renderAnalysis(){
   set("kFrames", analysis.truncated
     ? `${analysis.total} コマ (先頭 ${analysis.coveredSec.toFixed(1)}s / 指定 ${analysis.requestedSec.toFixed(1)}s)`
     : `${analysis.total} コマ`, analysis.truncated?"warn":"");
-  set("kWindow", `${analysis.window} コマ (約${Math.round(analysis.window/fps*1000)}ms)`);
+  /* 窓はコマごとに変わるので、範囲で見せる */
+  set("kWindow", `${SG_MIN_MS}〜${SG_MAX_MS}ms（動きに合わせて自動）`);
   set("kHnorm", analysis.H_norm?analysis.H_norm.toFixed(4)+(analysis.calibrated?"":" (未較正)"):"--",
       analysis.H_norm?(analysis.calibrated?"ok":""):"na");
   set("kDir", analysis.dirAmb?"判定不能":(analysis.dir==null?"--":(analysis.dir>0?"画面の右":"画面の左")),
@@ -5462,6 +5541,7 @@ window.__pitchlab = {
   get trim(){ return trim; }, trimRailUpdate,
   get cropRatio(){ return cropRatio; }, fitBoxToRatio,
   get smoothSeries(){ return smoothSeries; },
+  smoothLandmarkSeries,
   buildGraphSeries, drawGraph, renderGraphSel,
   get graphKey(){ return graphKey; },
   setGraphKey:(k)=>{ graphKey=k; renderGraphSel(); drawGraph(); },
