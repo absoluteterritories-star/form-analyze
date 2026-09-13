@@ -107,6 +107,11 @@
     width:5px;height:var(--bar,32px);background:#fff;border-radius:3px;cursor:ew-resize;}
   .ch[data-h="n" ]{top:0;} .ch[data-h="s" ]{bottom:0;}
   .ch[data-h="w" ]{left:0;} .ch[data-h="e" ]{right:0;}
+  /* 小さい枠では辺の棒を出さない。角のほうが手前に描かれるので、
+     狭いところに両方あると棒が角に覆われ、見えているのにつまめなくなる。
+     形を固定しているぶん、棒でできることは角でも同じようにできる。 */
+  .crop-box.tiny .ch[data-h="n"],.crop-box.tiny .ch[data-h="s"],
+  .crop-box.tiny .ch[data-h="w"],.crop-box.tiny .ch[data-h="e"]{display:none;}
   /* 縦横比のボタン列。写真アプリと同じで枠のすぐ下に出す */
   .crop-ratio,.crop-actions{display:flex;gap:6px;align-items:center;justify-content:center;}
   .crop-ratio button{font-family:inherit;font-size:12px;min-height:32px;padding:0 10px;
@@ -401,8 +406,8 @@
 
       <div class="crop-bar" id="cropBar" hidden>
         <div class="crop-ratio" id="cropRatio"
-          ><button data-r="free" class="on">自由</button
-          ><button data-r="orig">元の比</button
+          ><button data-r="free">自由</button
+          ><button data-r="orig" class="on">元の比</button
           ><button data-r="1">1:1</button
           ><button data-r="0.5625">縦</button
           ><button data-r="1.7778">横</button
@@ -1534,9 +1539,19 @@ function renderCropBox(){
   /* かぎ・棒・当たり判定の大きさは枠に合わせて縮める。
      固定のままだと、小さい枠では角のかぎ同士が重なって つまめなくなる。 */
   { const mn=Math.min(cropBoxRect.w*dw, cropBoxRect.h*dh);
-    el.style.setProperty("--corner", Math.round(clamp(mn*0.30, 10, 22))+"px");
-    el.style.setProperty("--bar",    Math.round(clamp(mn*0.42, 12, 32))+"px");
-    el.style.setProperty("--pad",    Math.round(clamp(mn/4,     4, 14))+"px"); }
+    const corner=Math.round(clamp(mn*0.30, 10, 22));
+    const bar   =Math.round(clamp(mn*0.42, 12, 32));
+    /* 角は端から corner+pad、辺の棒は中央から bar/2+pad を占める。
+       この2つが出会うと、手前に描かれる角が棒を覆って つまめなくなる。
+       出会わないところまでしか余白を広げず、それでも足りない枠では
+       棒を消して角だけ残す(.tiny)。 */
+    let pad=Math.min(mn/4, (mn/2 - corner - bar/2)/2);
+    const tiny=pad<4;
+    if(tiny) pad=Math.min(mn/4, mn/2-corner);
+    el.classList.toggle("tiny", tiny);
+    el.style.setProperty("--corner", corner+"px");
+    el.style.setProperty("--bar",    bar+"px");
+    el.style.setProperty("--pad",    Math.round(clamp(pad, 0, 14))+"px"); }
   placeCropBar();
 }
 /* 決定・やめる・形のボタンは動画のすぐ下に出す。
@@ -1621,7 +1636,9 @@ $("btnZoomOut").addEventListener("click",()=>zoomBy(1/1.25));
    正規化座標は x が幅・y が高さで別々に 0..1 化されているので、
    画面上の比 R を出すには w/h = R/videoAR にする。
    "free" は比を決めない、"orig" は動画と同じ比(= w===h)。 */
-let cropRatio="free";
+/* 既定は「元の比」。頂点をつまんだときに枠の形が変わらないほうが、
+   写真アプリと同じで合わせやすい。形を変えたいときは「自由」を選ぶ。 */
+let cropRatio="orig";
 function ratioTarget(){
   if(cropRatio==="free") return null;
   if(cropRatio==="orig") return 1;                   // w/h = 1 が動画と同じ比
@@ -2106,27 +2123,80 @@ function batMeasuredAt(f){
   return (measureBat && f && f.batTh!=null && f.batConf!=null && f.batConf>=BAT_CONF_MIN)
     ? f.batTh : null;
 }
-function batAxisAt(t,lm){
-  const raw=batAxis(lm);
-  if(!raw || !smoothSeries.length) return raw;
-  const a0=Math.atan2(raw.uy,raw.ux), pts=[];
-  for(const f of smoothSeries){
-    if(Math.abs(f.t-t)>BAT_SMOOTH_SEC) continue;
-    /* 画像から測れていればそちらを使う。測れていないコマは両手から */
-    const meas=batMeasuredAt(f);
-    const b= meas!=null ? {uy:Math.sin(meas), ux:Math.cos(meas)} : batAxis(f.lm);
-    if(!b) continue;
-    let d=Math.atan2(b.uy,b.ux)-a0;
-    while(d> Math.PI) d-=2*Math.PI;
-    while(d<-Math.PI) d+=2*Math.PI;
-    pts.push([f.t, a0+d]);
-  }
-  if(pts.length<3) return raw;
+/* 片手しか見えないコマ・両手が重なって見えるコマでも、
+   握りの位置とバット長は出せる。決まらないのは向きだけ。
+   実写2本では、描けずに消えていたコマの 20/28・13/13 がこれで土台を作れる。 */
+function batBase(lm){
+  if(!lm) return null;
+  const topA=batsSide(), botA=topA==="R"?"L":"R";
+  const cTop=gripPoint(lm,topA), cBot=gripPoint(lm,botA), tl=torsoIso(lm);
+  const c=cBot||cTop; if(!c||!tl) return null;
+  const h=(currentBatter && currentBatter.height_cm) || 170;
+  return { cBot:c, len:(batInch*2.54)/(K_TORSO_DEFAULT*h)*tl };
+}
+/* 画像から測った向きは、1コマだけ大きく外すことがある。
+   あてはめる前に、中央から離れた点を落とす。
+   実写2本で調べたところ、効いているのはしきい値(25〜70°で差が出ない)ではなく
+   「3コマまでなら絞ってよい」のほう。その場で一致している数コマに寄せる働きをする。
+   これで大半のコマは滑らかになるが、まれに1コマだけ大きく振れるようになる
+   (コマごとの暴れ: 9割 16.2°→2.5°、最大 33.5°→66.4°)。
+   ほとんどのコマが安定するほうを採る。 */
+const BAT_OUTLIER=40*Math.PI/180;
+function batDropOutliers(pts){
+  if(pts.length<4) return pts;
+  const s=pts.map(q=>q[1]).sort((a,b)=>a-b), med=s[s.length>>1];
+  const keep=pts.filter(q=>Math.abs(q[1]-med)<=BAT_OUTLIER);
+  return keep.length>=3 ? keep : pts;
+}
+/* 窓の中の点に直線をあてはめて、時刻 t での向きを出す。
+   窓は t を中心に集めるので、ここは常に内挿になる。 */
+function batFitAngle(pts, t){
   const n=pts.length;
   let mt=0,ma=0; for(const[ft,a]of pts){mt+=ft;ma+=a;} mt/=n; ma/=n;
   let num=0,den=0; for(const[ft,a]of pts){num+=(ft-mt)*(a-ma); den+=(ft-mt)*(ft-mt);}
-  const ang=ma+(den>1e-9?num/den:0)*(t-mt);
-  return batFrom(raw.cBot, Math.cos(ang), Math.sin(ang), raw.len);
+  return ma+(den>1e-9?num/den:0)*(t-mt);
+}
+function batAxisAt(t,lm){
+  const raw=batAxis(lm);
+  /* 両手から向きが出なくても、握りの位置が取れれば向きだけ隣から借りて描ける。
+     ここで諦めると、実写でいちばん見たい接触前後だけバットが消える。 */
+  const base=raw||batBase(lm);
+  if(!base) return null;
+  if(!smoothSeries.length) return raw;
+  const mk=(ang)=>batFrom(base.cBot, Math.cos(ang), Math.sin(ang), base.len);
+  /* 窓の中からは、ひとつの出どころだけを集める。
+     画像から測った向きと両手だけの向きは、実写で中央 14〜26° 離れている。
+     ひとつの窓に混ぜて合わせると、混ざり具合がコマごとに変わるぶんだけ
+     向きが引っ張られ、絵と合わないうえコマごとに暴れる(実測 20.9°→8.2°)。 */
+  const collect=(pick)=>{
+    const pts=[]; let near=null, nearDt=Infinity;
+    for(const f of smoothSeries){
+      const dt=Math.abs(f.t-t);
+      if(dt>BAT_SMOOTH_SEC) continue;
+      const a=pick(f); if(a==null) continue;
+      if(dt<nearDt){ nearDt=dt; near=a; }
+      pts.push([f.t,a]);
+    }
+    if(near==null) return null;
+    /* いちばん近いコマを基準に、±180°をまたぐ折り返しをそろえる */
+    for(const q of pts){ let d=q[1]-near;
+      while(d> Math.PI) d-=2*Math.PI;
+      while(d<-Math.PI) d+=2*Math.PI;
+      q[1]=near+d; }
+    return { pts, near };
+  };
+  /* ① 画像から測れたコマだけで合わせる */
+  const m=collect(batMeasuredAt);
+  if(m){
+    const pts=batDropOutliers(m.pts);
+    if(pts.length>=3) return mk(batFitAngle(pts,t));
+    if(!raw) return mk(m.near);          // 両手から出せないコマは、これしか手がない
+  }
+  /* ② 画像が足りないときは、両手だけで合わせる(混ぜない) */
+  const hb=collect(f=>{ const q=batAxis(f.lm); return q?Math.atan2(q.uy,q.ux):null; });
+  if(hb && hb.pts.length>=3) return mk(batFitAngle(hb.pts,t));
+  if(raw) return raw;
+  return hb ? mk(hb.near) : null;
 }
 const isoToPx=(q,cv)=>({ x:(q.x/(videoAR||1))*cv.width, y:q.y*cv.height });
 /* 3D が使えるときは、奥行きに応じて画面上の長さを縮める。
@@ -2355,13 +2425,9 @@ const batAt=(g,x,y)=>{
 function batAnchor(lm){
   const b=batAxis(lm);
   if(b) return { cBot:b.cBot, len:b.len, seed:Math.atan2(b.uy,b.ux), from:"hands" };
-  const topA=batsSide(), botA=topA==="R"?"L":"R";
-  const cTop=gripPoint(lm,topA), cBot=gripPoint(lm,botA), tl=torsoIso(lm);
-  const c = cBot || cTop; if(!c||!tl) return null;
-  const h=(currentBatter && currentBatter.height_cm) || 170;
-  const len=(batInch*2.54)/(K_TORSO_DEFAULT*h)*tl;
-  if(batLastTh==null) return null;               // 種が無いと探しようがない
-  return { cBot:c, len, seed:batLastTh, from:"prev" };
+  const base=batBase(lm);
+  if(!base || batLastTh==null) return null;      // 種が無いと探しようがない
+  return { cBot:base.cBot, len:base.len, seed:batLastTh, from:"prev" };
 }
 let batLastTh=null;
 function measureBatAngle(src, lm, prevGray){
@@ -3071,9 +3137,24 @@ function showFps(measured){
 }
 
 /* ============ コマ送り(投球版と同じ実装) ============ */
+/* コマを送ると、まず video.currentTime だけが先に進み、絵が新しいコマに
+   変わるのは少しあとになる。その間だけ「表示しているコマの時刻」と
+   「動画の位置」がずれるが、これは追いつく途中の見かけの差でしかない。
+   これを出してしまうと「位置」のチップが押すたびに一瞬出て消え、
+   狭い画面では時刻の行が折り返して、その下がまるごと跳ねる。
+   新しいコマが届くまでは知らせを差し替えない、という印。 */
+let mediaTimePending=false, mediaPendTimer=null;
+function markMediaPending(){
+  mediaTimePending=true;
+  clearTimeout(mediaPendTimer);
+  /* 同じ時刻へ送ったときなど seeked が来ないことがある。
+     印が残ったままだと「位置」が固まるので、必ず解ける保険を置く。 */
+  mediaPendTimer=setTimeout(()=>{ mediaTimePending=false; updateTimeRead(); }, 400);
+}
+function clearMediaPending(){ mediaTimePending=false; clearTimeout(mediaPendTimer); mediaPendTimer=null; }
 function captureMediaTime(){
   const finish=()=>{ sameFrameFlag=(prevFrameForCompare!=null&&frameIndexNow===prevFrameForCompare);
-    prevFrameForCompare=null; updateTimeRead(); };
+    prevFrameForCompare=null; clearMediaPending(); updateTimeRead(); };
   const fallback=()=>{ mediaTimeNow=video.currentTime; frameIndexNow=Math.round(mediaTimeNow*fps);
     stepAnchor=mediaTimeNow; finish(); };
   if(!("requestVideoFrameCallback" in HTMLVideoElement.prototype)){ fallback(); return; }
@@ -3088,6 +3169,7 @@ function captureMediaTime(){
 const shownTime=()=> (mediaTimeNow!=null?mediaTimeNow:video.currentTime);
 function seekForStep(t){
   prevFrameForCompare=frameIndexNow;
+  markMediaPending();
   video.currentTime=clamp(t,0,Math.max(0,video.duration-0.0001));
   updateTimeRead();
 }
@@ -3151,6 +3233,7 @@ btnPlay.addEventListener("click",()=>{
 });
 speedSel.addEventListener("change",()=>{ video.playbackRate=parseFloat(speedSel.value); savePrefs(); });
 seek.addEventListener("input",()=>{ seeking=true; if(!video.paused) video.pause();
+  markMediaPending();
   video.currentTime=parseFloat(seek.value)/1000; updateTimeRead(); });
 video.addEventListener("timeupdate",()=>{ if(!seeking) seek.value=Math.floor(video.currentTime*1000); updateTimeRead(); });
 video.addEventListener("timeupdate",()=>{ if(isTimingVisible()) drawGraph(); });
@@ -3182,9 +3265,12 @@ function updateTimeRead(){
   const f=slowFactor();
   $("realRead").style.display=f>1?"inline-block":"none";
   if(f>1) $("realRead").textContent="実 "+realSec(shown).toFixed(3)+"s";
-  const gap=Math.abs(video.currentTime-shown);
-  $("posRead").style.display=gap>0.0005?"inline-block":"none";
-  if(gap>0.0005) $("posRead").textContent="位置 "+video.currentTime.toFixed(3);
+  /* 追いつく途中の差は出さない(出すとコマ送りのたびにチラつき、行が跳ねる) */
+  if(!mediaTimePending){
+    const gap=Math.abs(video.currentTime-shown);
+    $("posRead").style.display=gap>0.0005?"inline-block":"none";
+    if(gap>0.0005) $("posRead").textContent="位置 "+video.currentTime.toFixed(3);
+  }
   $("sameChip").style.display=sameFrameFlag?"inline-block":"none";
   const tEnd=trim.end??d;
   $("outOfTrim").style.display=(video.currentTime<trim.start-0.001||video.currentTime>tEnd+0.001)?"inline-block":"none";
