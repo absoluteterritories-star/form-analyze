@@ -616,15 +616,21 @@
         <div class="panel">
           <h2>発射角 <span class="tag" id="ballTag">印なし</span></h2>
           <div class="toolbar">
-            <button id="btnBallMark" class="primary">ボールに印をつける</button>
+            <button id="btnBallAuto" class="primary">自動でさがす</button>
+            <button id="btnBallMark">ボールに印をつける</button>
             <button id="btnBallClear">印を消す</button>
           </div>
           <div class="legend">
-            ボールは骨格からは分かりません。<b>リリース直後の数コマ</b>でボールの位置をタップすると、
-            その並びから<b>横から見た打ち出しの角度</b>を出します。<br>
-            <b>手順</b>: リリースのコマまで送る → 「ボールに印をつける」 →
-            ボールをタップ → <b>1コマ送ってまたタップ</b>(2点以上、3〜4点あると安定します)。<br>
+            ボールは骨格からは分かりません。<b>リリース直後の数コマ</b>でのボールの位置から、
+            <b>横から見た打ち出しの角度</b>を出します。<br>
+            <b>「自動でさがす」</b>を押すと、リリース直後のコマだけを見て、
+            前後のコマと違う小さな点のうち<b>まっすぐ等間隔に並ぶもの</b>をボールとして拾います。
+            見つかった点は印として出るので、<b>ずれていたらタップで直してください</b>
+            (自動はあくまで候補です)。<br>
+            <b>手でつける</b>ときは「ボールに印をつける」→ ボールをタップ →
+            <b>1コマ送ってまたタップ</b>(2点以上、3〜4点あると安定します)。<br>
             <b>横から撮った動画</b>でだけ出ます。前後からではボールが手前に来るだけなので角度になりません。
+            自動でさがすには<b>選手の身長</b>が要ります(球の大きさの見当に使います)。
           </div>
         </div>
 
@@ -2620,6 +2626,206 @@ $("btnBallMark").addEventListener("click",()=>{
 });
 $("btnBallClear").addEventListener("click",()=>{
   relBalls=[]; setBallMark(false); saveDraft(); recomputeAll(); toast("ボールの印を消しました");
+});
+
+/* ================= ボールを自動でさがす =================
+   骨格からボールは分からないので、映像そのものから拾う。
+   ねらいを「リリース直後の数コマ」に絞れるのが効く。どこに何があるか
+   ほとんど分かっているので、一般の物体検出より確実にできる。
+
+   前後のコマの両方と違うところ = そのコマに居るもの、で当たりをつける
+   (片側だけの差だと、動く物の「居た跡」も一緒に光ってしまう)。
+   体や背景も差に出るので、次の3つでふるいにかける。
+     ・大きさ … 球は身長比で決まる大きさにしかならない
+     ・場所  … リリースの手から、投げる向きの扇の中だけ
+     ・並び  … 3コマ以上が等間隔で一直線に並ぶ(球は数十msなら直線)
+   見つからなければ黙って何もしない。手でつける従来の手順がそのまま残る。 */
+const BALL_FRAMES=8;          // リリースから何コマ先まで見るか
+/* 扇の広さ。平地からの送球は打ち出しが急なので、45°だと本物が外れる
+   (実写で、手首から見て66°上に出ていた)。広げるぶんは並びの検査で補う。 */
+const BALL_CONE_DEG=75;
+const ballCv=document.createElement("canvas");
+const ballCx=ballCv.getContext("2d",{willReadFrequently:true});
+
+/* 1コマぶんを灰色で取り込む */
+function ballGrab(w,h){
+  ballCx.drawImage(video,0,0,w,h);
+  const d=ballCx.getImageData(0,0,w,h).data, g=new Float32Array(w*h);
+  for(let i=0,j=0;i<d.length;i+=4,j++) g[j]=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+  return g;
+}
+/* しきい値を超えた塊を拾う(4近傍のぬりつぶし)。塊ごとに重心・面積・外接枠を返す */
+function ballBlobs(mask,w,h,minA,maxA){
+  const seen=new Uint8Array(w*h), out=[], stack=new Int32Array(w*h);
+  for(let s=0;s<w*h;s++){
+    if(seen[s]||!mask[s]) continue;
+    let sp=0; stack[sp++]=s; seen[s]=1;
+    let n=0,sx=0,sy=0,x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;
+    while(sp>0){
+      const p=stack[--sp], px=p%w, py=(p/w)|0;
+      n++; sx+=px; sy+=py;
+      if(px<x0)x0=px; if(px>x1)x1=px; if(py<y0)y0=py; if(py>y1)y1=py;
+      if(n>maxA*6) break;                       // 体など大きな塊は追いかけない
+      const nb=[p-1,p+1,p-w,p+w];
+      for(let k=0;k<4;k++){
+        const q=nb[k];
+        if(q<0||q>=w*h) continue;
+        if(k<2 && ((q%w)-(p%w))!==(k===0?-1:1)) continue;   // 行をまたがない
+        if(seen[q]||!mask[q]) continue;
+        seen[q]=1; stack[sp++]=q;
+      }
+    }
+    if(n<minA||n>maxA) continue;
+    const bw=x1-x0+1, bh=y1-y0+1;
+    /* 尾を引くと細長くなるので、まるを前提にした厳しい制限は掛けられない */
+    if(Math.max(bw,bh)/Math.max(1,Math.min(bw,bh))>8) continue;
+    /* 画面の端にかかっている塊は、見えている分だけで重心が出るので位置が偏る。
+       実写で、出ていく途中の球がこれで並びから外れた。使わない。 */
+    if(x0<=0||y0<=0||x1>=w-1||y1>=h-1) continue;
+    out.push({x:sx/n, y:sy/n, n});
+  }
+  return out;
+}
+async function findBallsAuto(){
+  if(!video.src) return {ok:false, why:"先に動画を読み込んでください"};
+  if(!isSide())  return {ok:false, why:"発射角は横から撮った動画で出ます"};
+  const e=events.rel; if(!e) return {ok:false, why:"先にリリースを確定してください"};
+  const dir=effectiveDir(); if(dir==null) return {ok:false, why:"投球方向を選んでください"};
+  if(!analysis||!analysis.H_norm) return {ok:false, why:"先に「この範囲を解析する」を実行してください"};
+  const hcm=currentPitcher?currentPitcher.height_cm:null;
+  if(!hcm) return {ok:false, why:"選手の身長が要ります(球の大きさの見当に使います)"};
+
+  /* 球の見かけの大きさ。身長ピクセル長から比で出す(球は 7.4cm) */
+  const ballNorm=(7.4/hcm)*analysis.H_norm;             // 画面の高さに対する比
+  const vw=video.videoWidth, vh=video.videoHeight;
+  if(!vw||!vh) return {ok:false, why:"動画を読み取れません"};
+  /* 球が 5px 程度に写る大きさで調べる(小さすぎると塊にならない) */
+  let h=Math.round(5/Math.max(1e-6,ballNorm));
+  h=Math.max(180, Math.min(540, h));
+  const w=Math.max(120, Math.round(h*vw/vh));
+  ballCv.width=w; ballCv.height=h;
+  /* 球は「まる」では写らない。速いので尾を引いて棒になる。
+     実写(30fps・1080x1920・身長が画面の21%)で実測したところ、
+     球そのものは17pxなのに、写っていた塊は 45x21〜70x38px だった。
+     まるの大きさで上限を決めると、本物の球のほうが弾かれる。
+     そこで「直径 × (直径＋尾の長さ)」で見積もり、尾は画面の高さの
+     1/4まで伸びうるものとして上限を取る。細長さの許容も広げる。 */
+  const dPx=ballNorm*h, rPx=dPx/2;
+  const minA=Math.max(3, Math.PI*rPx*rPx*0.12);
+  const maxA=Math.max(40, dPx*(dPx+h*0.25));
+
+  /* リリースの手の位置(全体の正規化座標) */
+  const lmRel=smoothedAt(e.t);
+  const iw=idxOf("wrist",throwArm());
+  const wr=lmRel&&lmRel[iw] ? {x:lmRel[iw].x, y:lmRel[iw].y} : null;
+  if(!wr) return {ok:false, why:"リリースのコマで手首が取れていません"};
+
+  /* リリースから数コマぶん取り込む */
+  const t0=video.currentTime, frames=[], times=[];
+  const step=1/fps, dur=video.duration;
+  for(let i=0;i<=BALL_FRAMES;i++){
+    const t=e.t+i*step;
+    if(t>dur-1e-3) break;
+    await seekTo(t);
+    times.push(video.currentTime);
+    frames.push(ballGrab(w,h));
+  }
+  await seekTo(t0);
+  if(frames.length<4) return {ok:false, why:"リリース後のコマが足りません"};
+
+  /* 前後の両方と違うところ = そのコマに居るもの */
+  const cand=[];
+  for(let i=1;i<frames.length-1;i++){
+    const a=frames[i-1], b=frames[i], c=frames[i+1];
+    const m=new Uint8Array(w*h);
+    let lo=1e9, hi=0; const dv=new Float32Array(w*h);
+    for(let p=0;p<w*h;p++){
+      const d=Math.min(Math.abs(b[p]-a[p]), Math.abs(b[p]-c[p]));
+      dv[p]=d; if(d<lo)lo=d; if(d>hi)hi=d;
+    }
+    /* しきい値は、そのコマの散らばりから決める(明るさが違う映像でも同じに効く) */
+    let s=0,s2=0; for(let p=0;p<w*h;p++){ s+=dv[p]; s2+=dv[p]*dv[p]; }
+    const mean=s/(w*h), sd=Math.sqrt(Math.max(0,s2/(w*h)-mean*mean));
+    const th=Math.max(12, mean+3.5*sd);
+    for(let p=0;p<w*h;p++) m[p]=dv[p]>=th?1:0;
+    const bs=ballBlobs(m,w,h,minA,maxA);
+    /* リリースの手から、投げる向きの扇の中だけ残す */
+    const ox=wr.x*w, oy=wr.y*h, cone=Math.cos(BALL_CONE_DEG*Math.PI/180);
+    const keep=bs.filter(q=>{
+      const dx=q.x-ox, dy=q.y-oy, L=Math.hypot(dx,dy);
+      if(L<rPx) return false;                       // 手そのもの
+      if(L>h*1.2) return false;                     // 離れすぎ
+      return (dx*dir)/L >= cone;                    // 投げる向きの扇
+    });
+    cand.push({i, t:times[i], list:keep});
+  }
+  const nCand=cand.reduce((a,q)=>a+q.list.length,0);
+  if(nCand<3) return {ok:false, why:"ボールらしい点が見つかりませんでした"};
+
+  /* 等間隔で一直線に並ぶ組を探す。2点で速さを仮定し、他のコマが乗るか数える。
+     大きさと扇をゆるめたぶん、ここが本物とじゃま物を分ける要になる。
+     許容は「1コマで進む距離」に比例させる。尾を引くと重心が尾の長さぶん
+     ぶれるので、速い球ほど広く見ないと本物を落としてしまう。
+
+     いちばん効くのは速さ。投げた球は体のどの部分よりも速い。
+     実写で偽物をつかんだとき、体の一部は 9px/コマ、球は 36px/コマ だった。
+     「投げた球なら最低これだけは進む」を身長比と fps から出してふるう。
+     また、球は続けて写るので、コマを飛ばした並びは採らない
+     (偽物は3コマ飛びで「等間隔」を満たしていた)。 */
+  const minKmh=50;
+  const mPerFrame=(minKmh/3.6)/fps;                        // 1コマで進む距離(m)
+  const minSpeed=mPerFrame/(hcm/100)*analysis.H_norm*h;    // 作業画素に直す
+  let best=null;
+  for(let a=0;a<cand.length;a++) for(const pa of cand[a].list){
+    for(let b=a+1;b<cand.length;b++) for(const pb of cand[b].list){
+      const db=cand[b].i-cand[a].i;
+      if(db>2) continue;                            // コマを飛ばした並びは採らない
+      const vx=(pb.x-pa.x)/db, vy=(pb.y-pa.y)/db;
+      const sp=Math.hypot(vx,vy);
+      if(sp<Math.max(dPx, minSpeed)) continue;      // 球にしては遅すぎる
+      if((vx*dir)<=0) continue;                     // 投げる向きへ進んでいない
+      const tol=Math.max(4, sp*0.15);
+      const hit=[];
+      for(const fr of cand){
+        const k=fr.i-cand[a].i;
+        const ex=pa.x+vx*k, ey=pa.y+vy*k;
+        let bq=null, bd=tol;
+        for(const q of fr.list){ const d=Math.hypot(q.x-ex,q.y-ey); if(d<bd){bd=d;bq=q;} }
+        if(bq) hit.push({t:fr.t, i:fr.i, x:bq.x/w, y:bq.y/h, d:bd});
+      }
+      if(hit.length<2) continue;
+      /* 続けて写っているところだけを残す(間が空いた並びは別のものを拾っている) */
+      hit.sort((q,r)=>q.i-r.i);
+      let run=[hit[0]], bestRun=run;
+      for(let k=1;k<hit.length;k++){
+        if(hit[k].i-hit[k-1].i<=2) run.push(hit[k]);
+        else { if(run.length>bestRun.length) bestRun=run; run=[hit[k]]; }
+      }
+      if(run.length>bestRun.length) bestRun=run;
+      if(bestRun.length<2) continue;
+      const err=bestRun.reduce((s2,q)=>s2+q.d,0)/bestRun.length;
+      const sc=bestRun.length - err/tol;
+      if(!best||sc>best.sc) best={sc, hit:bestRun, err, tol};
+    }
+  }
+  if(!best) return {ok:false, why:"ボールらしい並びが見つかりませんでした"};
+  return {ok:true, pts:best.hit.map(q=>({t:q.t, x:q.x, y:q.y})),
+          err:best.err, tol:best.tol, few:best.hit.length<3};
+}
+$("btnBallAuto").addEventListener("click", async ()=>{
+  if(busy){ toast("解析中はできません"); return; }
+  const b=$("btnBallAuto"), old=b.textContent;
+  b.disabled=true; b.textContent="さがしています…";
+  try{
+    const r=await findBallsAuto();
+    if(!r.ok){ toast(r.why); return; }
+    relBalls=r.pts.slice(); relBalls.sort((a,b2)=>a.t-b2.t);
+    setBallMark(false); renderBallTag(); saveDraft(); recomputeAll(); draw();
+    toast(r.few
+      ? `${r.pts.length}点しか拾えませんでした。± が大きく出ます。印を足すと安定します`
+      : `${r.pts.length}点みつけました。ずれていたらタップで直してください`);
+  }catch(err){ console.warn(err); toast("うまくさがせませんでした"); }
+  finally{ b.disabled=false; b.textContent=old; }
 });
 
 function calibBanner(msg){
@@ -5573,7 +5779,7 @@ window.__pitchlab = {
   get annots(){ return annots; },
   get relBalls(){ return relBalls; },
   setRelBalls:(v)=>{ relBalls=Array.isArray(v)?v.slice():[]; renderBallTag(); recomputeAll(); draw(); },
-  launchAngle, shinAngleAt, groundYAt, armDirImage, confirmEvent,
+  launchAngle, shinAngleAt, groundYAt, armDirImage, confirmEvent, findBallsAuto,
   get viewMode(){ return viewMode; }, CSV_COLS,
   get trim(){ return trim; }, trimRailUpdate,
   get cropRatio(){ return cropRatio; }, fitBoxToRatio,
