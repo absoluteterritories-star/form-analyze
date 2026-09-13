@@ -2640,9 +2640,16 @@ $("btnBallClear").addEventListener("click",()=>{
      ・場所  … リリースの手から、投げる向きの扇の中だけ
      ・並び  … 3コマ以上が等間隔で一直線に並ぶ(球は数十msなら直線)
    見つからなければ黙って何もしない。手でつける従来の手順がそのまま残る。 */
-const BALL_FRAMES=8;          // リリースから何コマ先まで見るか
-/* 扇の広さ。平地からの送球は打ち出しが急なので、45°だと本物が外れる
-   (実写で、手首から見て66°上に出ていた)。広げるぶんは並びの検査で補う。 */
+/* リリースの確定コマと、球が手から離れるコマは数コマずれる(説明書にも明記)。
+   実写で測ると、検出されたリリースは 10.300 だったのに、球が手から離れて
+   見分けられるのは 10.567 と 8コマ後だった。窓が狭いとここで空振りする。
+   手前にも少し取るのは、逆にリリースが遅めに出た場合の保険。 */
+/* リリースより前は見ない。発射角はリリース以降の点だけで出す決まりなので、
+   前のコマで拾っても捨てられ、点数が足りなくなる。
+   実写で問題になったのはリリースが早めに出る側なので、後ろを広く取る。 */
+const BALL_BEFORE=0;
+const BALL_FRAMES=16;         // リリースから何コマ先まで見るか
+/* 扇の広さ。平地からの送球は打ち出しが急なので狭いと本物が外れる */
 const BALL_CONE_DEG=75;
 const ballCv=document.createElement("canvas");
 const ballCx=ballCv.getContext("2d",{willReadFrequently:true});
@@ -2720,11 +2727,12 @@ async function findBallsAuto(){
   const wr=lmRel&&lmRel[iw] ? {x:lmRel[iw].x, y:lmRel[iw].y} : null;
   if(!wr) return {ok:false, why:"リリースのコマで手首が取れていません"};
 
-  /* リリースから数コマぶん取り込む */
+  /* リリースの前後を取り込む(確定コマと球が離れるコマはずれるため) */
   const t0=video.currentTime, frames=[], times=[];
   const step=1/fps, dur=video.duration;
-  for(let i=0;i<=BALL_FRAMES;i++){
+  for(let i=-BALL_BEFORE;i<=BALL_FRAMES;i++){
     const t=e.t+i*step;
+    if(t<0) continue;
     if(t>dur-1e-3) break;
     await seekTo(t);
     times.push(video.currentTime);
@@ -2749,8 +2757,14 @@ async function findBallsAuto(){
     const th=Math.max(12, mean+3.5*sd);
     for(let p=0;p<w*h;p++) m[p]=dv[p]>=th?1:0;
     const bs=ballBlobs(m,w,h,minA,maxA);
-    /* リリースの手から、投げる向きの扇の中だけ残す */
-    const ox=wr.x*w, oy=wr.y*h, cone=Math.cos(BALL_CONE_DEG*Math.PI/180);
+    /* 投げる向きの扇の中だけ残す。
+       基準はリリースのコマの手首ではなく「そのコマの手首」にする。
+       リリースの確定コマは数コマずれるので、固定の手首を基準にすると
+       本物が扇から外れる(実測で、球が手首のほぼ真上 87° に出ていた)。
+       離したあとの球は、どのコマでも手より前に居るので、これで足りる。 */
+    const lmi=smoothedAt(times[i]);
+    const wi=(lmi&&lmi[iw])?lmi[iw]:wr;
+    const ox=wi.x*w, oy=wi.y*h, cone=Math.cos(BALL_CONE_DEG*Math.PI/180);
     const keep=bs.filter(q=>{
       const dx=q.x-ox, dy=q.y-oy, L=Math.hypot(dx,dy);
       if(L<rPx) return false;                       // 手そのもの
@@ -2784,6 +2798,12 @@ async function findBallsAuto(){
       const sp=Math.hypot(vx,vy);
       if(sp<Math.max(dPx, minSpeed)) continue;      // 球にしては遅すぎる
       if((vx*dir)<=0) continue;                     // 投げる向きへ進んでいない
+      /* 打ち出しの角度そのもので切る。投げた球が水平から45°以上ずれることはない。
+         位置の扇では体を外せない(体は手のすぐそばにある)。実際、体の輪郭が
+         肩→腰→膝と等間隔・一直線に並び、下向き67°の「並び」として拾われた。
+         向きで切ればこれは落ちる。 */
+      const upDeg=Math.atan2(-vy, vx*dir)*180/Math.PI;
+      if(Math.abs(upDeg)>45) continue;
       const tol=Math.max(4, sp*0.15);
       const hit=[];
       for(const fr of cand){
@@ -2802,15 +2822,46 @@ async function findBallsAuto(){
         else { if(run.length>bestRun.length) bestRun=run; run=[hit[k]]; }
       }
       if(run.length>bestRun.length) bestRun=run;
-      if(bestRun.length<2) continue;
+      /* 2点は必ず直線に乗るので、並びの検査にならない。3点以上を要る。 */
+      if(bestRun.length<3) continue;
+      /* 体から出ていることを確かめる。
+         体の輪郭は、肩→腰→膝 のように等間隔で一直線に並ぶことがあり、
+         速さも向きも球と紛らわしい。実際それを拾って下向き67°を出した。
+         離れた球は体の枠の外に居るので、そこで分ける。 */
+      let outside=0;
+      for(const q of bestRun){
+        const lmj=smoothedAt(q.t); if(!lmj){ outside++; continue; }
+        let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9, n2=0;
+        for(let j=0;j<=32;j++){ const pt=lmj[j];
+          if(!pt || (pt.visibility!=null && pt.visibility<0.5)) continue;
+          x0=Math.min(x0,pt.x); x1=Math.max(x1,pt.x);
+          y0=Math.min(y0,pt.y); y1=Math.max(y1,pt.y); n2++; }
+        if(n2<8){ outside++; continue; }
+        const mx=(x1-x0)*0.12, my=(y1-y0)*0.06;     // 少しだけ余裕を持たせる
+        const qx=q.x, qy=q.y;
+        if(qx<x0-mx||qx>x1+mx||qy<y0-my||qy>y1+my) outside++;
+      }
+      if(outside<2) continue;                       // 体の中だけの並びは球ではない
+      /* 候補の塊は毎コマ数百個ある。その中から「等間隔で一直線」を満たす組を
+         見つけること自体は偶然でも起きる(実写で、頭と空の模様を4点つないで
+         30°という値を出した)。そこで、球であるための当たり前の条件を足す。
+           ・リリースから間もないこと(球はすぐ写り始める)
+           ・始まりが投げる手の近くであること(球は手から出る)
+         これを満たさない並びは、どれだけきれいに並んでいても球ではない。 */
+      const first=bestRun[0];
+      if(first.i>10) continue;                      // リリースから遠すぎる
+      const lm0=smoothedAt(first.t);
+      if(!lm0||!lm0[iw]) continue;
+      const d0=Math.hypot(first.x*w-lm0[iw].x*w, first.y*h-lm0[iw].y*h);
+      if(d0>h*0.22) continue;                       // 手から出ていない
       const err=bestRun.reduce((s2,q)=>s2+q.d,0)/bestRun.length;
-      const sc=bestRun.length - err/tol;
-      if(!best||sc>best.sc) best={sc, hit:bestRun, err, tol};
+      const sc=bestRun.length - err/tol + outside*0.5;
+      if(!best||sc>best.sc) best={sc, hit:bestRun, err, tol, outside};
     }
   }
   if(!best) return {ok:false, why:"ボールらしい並びが見つかりませんでした"};
   return {ok:true, pts:best.hit.map(q=>({t:q.t, x:q.x, y:q.y})),
-          err:best.err, tol:best.tol, few:best.hit.length<3};
+          err:best.err, tol:best.tol, few:false};
 }
 $("btnBallAuto").addEventListener("click", async ()=>{
   if(busy){ toast("解析中はできません"); return; }
