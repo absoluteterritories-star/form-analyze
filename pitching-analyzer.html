@@ -2194,7 +2194,7 @@ function loadFile(file){
   objectUrl=URL.createObjectURL(file);
   lastLandmarks=null; lastWorld=null;
   rawSeries=[]; smoothSeries=[]; analysis=null; renderAnalysis();
-  fps=30; fpsLocked=false; fpsMeasured=false; fpsSamples.length=0; noteFrameTime.last=null;
+  fps=30; fpsLocked=false; fpsMeasured=false; fpsProbed=false; fpsSamples.length=0; noteFrameTime.last=null;
   mediaTimeNow=null; frameIndexNow=null; stepAnchor=null;
   trim={start:0,end:null};
   $("dropUI").style.display="none"; $("paneA").style.display="block";
@@ -2275,6 +2275,62 @@ function noteFrameTime(mt){
     if(near) f=near;
     fps=f; if(fpsSamples.length>=20) fpsLocked=true;
     fpsMeasured=true; showFps(true); updateTimeRead();
+  }
+}
+/* ============ fps を「ゆっくり再生」で測る ============
+   再生中の requestVideoFrameCallback は、画面に出したコマごとにしか呼ばれない。
+   画面の書き換えは毎秒60回程度なので、240fps の動画を等速で再生しても
+   1コマずつは出てこず、間隔から求めた fps は頭打ちになる
+   (実測: iPhone の 240fps スロー動画を等速再生 → 76.9fps)。
+   再生を 1/4 の速さにすると、画面の書き換え1回につき動画のコマがちょうど1つ
+   進むので、間隔がそのままコマの長さになる(実測: 250fps → 240 に丸まる)。
+   30fps の動画でも同じ手順で 30 と出るので、場合分けはいらない。
+
+   これを測り損ねると、解析の刻み(1/fps)が 30 のままになり、
+   240fps で撮った動画の 7/8 のコマが黙って捨てられる。
+   スロー撮影の意味がなくなるので、解析の前に必ず測る。 */
+let fpsProbed=false, fpsProbing=false;
+const FPS_PROBE_RATE=0.25, FPS_PROBE_MAX_MS=3000, FPS_PROBE_WANT=20;
+async function probeFps(){
+  if(fpsProbed || !video.duration || !isFinite(video.duration)) return;
+  if(!("requestVideoFrameCallback" in HTMLVideoElement.prototype)){ fpsProbed=true; return; }
+  const wasTime=video.currentTime, wasRate=video.playbackRate, wasMuted=video.muted;
+  const dur=video.duration;
+  try{
+    fpsProbing=true; stopLoop();
+    video.muted=true; video.playbackRate=FPS_PROBE_RATE;
+    /* 動画の終わりにかからない位置から測る */
+    await seekTo(Math.min(Math.max(0, dur*0.35), Math.max(0, dur-0.5)));
+    const ds=[]; let last=null;
+    await video.play().catch(()=>{});
+    await new Promise(res=>{
+      const tm=setTimeout(res, FPS_PROBE_MAX_MS);
+      const step=(_n,meta)=>{
+        if(last!=null){ const d=meta.mediaTime-last; if(d>0.0002 && d<0.5) ds.push(d); }
+        last=meta.mediaTime;
+        if(ds.length>=FPS_PROBE_WANT || video.paused || video.ended){ clearTimeout(tm); res(); return; }
+        video.requestVideoFrameCallback(step);
+      };
+      video.requestVideoFrameCallback(step);
+    });
+    video.pause();
+    if(ds.length>=5){
+      /* iPhone のスロー撮影は 240fps でも時々コマを落としており、
+         間隔は 4.167ms を中心に 8.333ms(2コマぶん)が混ざる(実測)。
+         中央値だと実行のたび 240/200/120 とぶれるので、下から2割の値を使う。
+         コマ落ちは間隔を伸ばすだけで縮めないので、短い側が本来の1コマ。 */
+      const s=[...ds].sort((a,b)=>a-b);
+      let f=1/s[Math.floor(s.length*0.2)];
+      let near=null, bestD=Infinity;
+      for(const c of COMMON_FPS){ const d=Math.abs(c-f)/c; if(d<0.06 && d<bestD){ bestD=d; near=c; } }
+      if(near) f=near;
+      /* 測れたら、そのあとの等速再生で上書きされないように締める */
+      fps=f; fpsLocked=true; fpsMeasured=true; showFps(true); updateTimeRead();
+    }
+  }catch{}finally{
+    fpsProbing=false; fpsProbed=true;
+    video.playbackRate=wasRate; video.muted=wasMuted;
+    try{ await seekTo(wasTime); }catch{}
   }
 }
 function showFps(measured){
@@ -2370,8 +2426,11 @@ function startLoop(){
 }
 function stopLoop(){ if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=null;}
   if(vfcHandle&&video.cancelVideoFrameCallback){video.cancelVideoFrameCallback(vfcHandle);vfcHandle=null;} }
-video.addEventListener("play",()=>{ btnPlay.textContent="❚❚ 停止"; startLoop(); });
-video.addEventListener("pause",()=>{ btnPlay.textContent="▶ 再生"; stopLoop(); detectAndRender(); });
+/* fps を測っている間は、いつもの再生処理を動かさない。
+   解析前は1コマごとに姿勢検出をかけるため(detectAndRender)、
+   2.5秒のあいだに数コマしか進まず、コマの間隔が測れなくなる。 */
+video.addEventListener("play",()=>{ if(fpsProbing) return; btnPlay.textContent="❚❚ 停止"; startLoop(); });
+video.addEventListener("pause",()=>{ if(fpsProbing) return; btnPlay.textContent="▶ 再生"; stopLoop(); detectAndRender(); });
 video.addEventListener("ended",()=>{ btnPlay.textContent="▶ 再生"; stopLoop(); });
 btnPlay.addEventListener("click",()=>{
   if(!video.src) return;
@@ -3136,6 +3195,9 @@ $("btnAnalyze").addEventListener("click",async()=>{
   video.pause();
   busy=true; cancelBusy=false;
   $("btnAnalyze").textContent="中止"; $("btnAnalyze").disabled=false;
+  /* 刻みは 1/fps なので、fps を測り損ねていると 240fps の動画でも
+     30fps ぶんしか読まない。解析に入る前にここで測る。 */
+  if(!fpsProbed){ setStatus("busy","コマの間隔を測っています…"); await probeFps(); }
   const start=clamp(trim.start,0,video.duration);
   const end=trim.end!=null?Math.min(video.duration,trim.end):video.duration;
   const dur=Math.max(0.1,end-start);
