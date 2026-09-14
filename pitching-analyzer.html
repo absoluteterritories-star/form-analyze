@@ -53,6 +53,8 @@
   @keyframes pulse{50%{opacity:.35;}}
 
   .layout{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:18px;align-items:start;}
+  /* 横向き専用の入れ物。ふだんは空なので、段組みを崩さないよう消しておく */
+  #landControls{display:none;}
   @media (max-width:980px){ .layout{grid-template-columns:1fr;} }
   @media (min-width:981px){
     .stage-card{position:sticky;top:12px;}
@@ -349,6 +351,96 @@
   @media (pointer: coarse){
     select.mini,.ghost,.mini-btn,.tab,.toolbar select.mini,.toolbar button,.rowitem button{min-height:44px;}
   }
+  /* ============ iPhone を横にして使うときの画面割り ============
+     横向きでは高さが 390px 前後しかない。縦積みのままだと映像が画面の外に出て、
+     グラフを見ている間はバットが見えない。イベント(構え・始動…)のボタンも
+     画面の下にあってスクロールが要る。
+     そこで横向きのときだけ「左=映像と操作 / 右=グラフ・比較」の二画面にし、
+     ページ全体はスクロールさせない。左右それぞれの中だけでスクロールする。
+     イベントのボタンは目盛りのすぐ下に出し、映像を見ながら押せるようにする。 */
+  @media (orientation:landscape) and (max-height:620px){
+    html,body{height:100%;overflow:hidden;}
+    body{min-height:0;}
+    .wrap{height:100vh;height:100dvh;max-width:none;display:flex;flex-direction:column;
+      padding:calc(2px + env(safe-area-inset-top)) calc(6px + env(safe-area-inset-right))
+              calc(2px + env(safe-area-inset-bottom)) calc(6px + env(safe-area-inset-left));}
+    /* 見出しは1行に畳む。解析の進み具合だけ残す */
+    header{padding:2px;margin:0 0 4px;gap:8px;flex-wrap:nowrap;}
+    header .eyebrow{display:none;}
+    h1{font-size:13px;white-space:nowrap;}
+    .status-line{font-size:10px;padding:2px 8px;}
+
+    /* 左の幅は動画の縦横比から決める(--land-left は syncLandscape が入れる)。
+       縦動画を横向きの画面で見ると、幅を決め打ちすると左右が黒帯で埋まり、
+       映像そのものが小さくなる。高さをすべて使い、幅はそれに合わせる。 */
+    .layout{flex:1 1 auto;min-height:0;display:grid;gap:8px 8px;align-items:stretch;
+      grid-template-columns:var(--land-left,240px) minmax(0,1fr);
+      grid-template-rows:auto minmax(0,1fr);
+      grid-template-areas:"stage controls" "stage side";}
+    .stage-card{grid-area:stage;}
+    /* 操作が縦に伸びると下のグラフが潰れるので、高さに上限を置き、
+       あふれる分はこの中だけでスクロールさせる。
+       目盛り・イベント・コマ送り・主要ボタンの4段(約152px)は必ず入る。 */
+    #landControls{grid-area:controls;display:block;max-height:44vh;overflow-y:auto;
+      -webkit-overflow-scrolling:touch;}
+    .sidebar{grid-area:side;}
+    .stage-card{height:100%;min-height:0;display:flex;flex-direction:column;position:static;}
+    .stage{flex:1 1 auto;min-height:110px;aspect-ratio:auto;max-height:none;}
+    /* 操作は下半分に収め、足りなければこの中だけスクロールする */
+    .transport{flex:0 1 auto;min-height:0;overflow-y:auto;padding:6px 8px 8px;
+      -webkit-overflow-scrolling:touch;}
+    .transport.show{display:flex;flex-direction:column;}
+    /* クイックバーは「イベントのボタン」と「操作のボタン」がひとつの箱に
+       入っている。横向きでは前者だけを上に出したいので、箱をほどいて
+       中身を直接 .transport の子として並べ替える。 */
+    .quickbar:not([hidden]){display:contents;}
+    /* 目盛りまわりは3段(再生位置・範囲のレール・範囲の文字)で 54px 使う。
+       横向きではその分そのまま映像が縮むので、詰めて 38px にする。 */
+    .seek-wrap{order:1;padding:2px 0 0;}
+    .trim-rail{height:20px;margin:0;}
+    .tg{top:0;height:18px;}
+    .trim-lab{font-size:9.5px;margin:0;}
+    /* 時刻・コマ・fps は、コマ送りしながら必ず見るので目盛りのすぐ下に置く */
+    .tline{order:2;font-size:10.5px;gap:6px;margin-bottom:2px;}
+    .quick-evs{order:3;margin:5px 0 6px;padding-bottom:0;}
+    .steps:not(.fine-row){order:4;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;margin-bottom:6px;}
+    .quick-acts{order:5;}
+    .steps.fine-row{order:6;margin-bottom:4px;}
+    .quick-draw{order:7;}
+    .transport-row{order:8;gap:6px;}
+    /* 0.01秒きざみは細かい詰めに使うもの。狭い横向きでは出さない
+       (コマ送り ◀| |▶ は残す) */
+    .steps .tbtn.fine[data-step="0.01"],.steps .tbtn.fine[data-step="-0.01"]{display:none;}
+    .tbtn{min-height:36px;font-size:11.5px;}
+    .quick-acts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;}
+    .qbtn{min-height:36px;padding:6px 8px;font-size:11.5px;}
+    .quick-evs .qbtn{width:auto;}
+    .transport-row .ghost{min-height:34px;font-size:11px;padding:0 9px;}
+    select.mini{min-height:34px;}
+
+    .sidebar{height:100%;min-height:0;max-height:none;overflow-y:auto;position:static;
+      padding-right:2px;-webkit-overflow-scrolling:touch;}
+    /* 右側に移した操作。映像のすぐ横に来るので、見ながら押せる */
+    #landControls .transport{border-top:none;border:1px solid var(--panel-line);
+      border-radius:10px;background:var(--panel);margin-bottom:8px;overflow:visible;max-height:none;}
+    #landControls .steps:not(.fine-row){grid-template-columns:repeat(7,minmax(0,1fr));}
+    #landControls .steps .tbtn.fine[data-step="0.01"],
+    #landControls .steps .tbtn.fine[data-step="-0.01"]{display:block;}
+    #landControls .quick-acts{grid-template-columns:repeat(4,minmax(0,1fr));}
+    /* タブは右側の上に貼り付けておく。スクロールしても切り替えられるように。
+       折り返すと3行=120px を使ってしまうので、1行にして横に流す。 */
+    .tabs{position:sticky;top:0;z-index:3;background:var(--bg-0);margin:0 0 8px;
+      flex-wrap:nowrap;overflow-x:auto;gap:4px;padding-bottom:4px;
+      -webkit-overflow-scrolling:touch;}
+    .tabs::-webkit-scrollbar{height:4px;}
+    .tabs::-webkit-scrollbar-thumb{background:var(--panel-line);border-radius:2px;}
+    .tab{flex:0 0 auto;min-height:34px;font-size:12px;padding:0 10px;white-space:nowrap;}
+    .panel{margin-bottom:8px;}
+    /* 横向きでも指で押せる大きさは保つ */
+    @media (pointer:coarse){
+      select.mini,.ghost,.mini-btn,.tab,.toolbar select.mini,.toolbar button,.rowitem button{min-height:36px;}
+    }
+  }
   input[type=file]{display:none;}
 </style>
 </head>
@@ -473,6 +565,10 @@
       </div>
       <input type="file" id="fileInput" accept="video/*">
     </div>
+
+    <!-- 横向きのときだけ、動画の下にある操作一式をここへ移す(下の syncLandscape)。
+         右上に固定して、下のグラフをスクロールしても操作が流れないようにする -->
+    <div id="landControls"></div>
 
     <div class="sidebar">
       <div class="tabs" role="tablist">
@@ -1049,6 +1145,18 @@
 
       <!-- ===== 使い方 ===== -->
       <div class="tabpage" id="tab-help">
+        <div class="panel">
+          <h2>iPhone は横向きで使えます</h2>
+          <div class="legend">
+            <b>本体を横にすると、左に映像・右に操作とグラフの二画面</b>になります。
+            映像は画面の高さいっぱいに出るので、縦向きより<b>3倍以上大きく</b>見えます
+            (縦動画の実測: 105×187 → 199×358)。<br>
+            イベントのボタン(<b>1 構え / 2 始動 / 3 接地 / 4 インパクト / 5 フォロー</b>)と
+            コマ送りは<b>映像のすぐ右に貼り付いたまま</b>なので、
+            動きを見ながらそのコマで押せます。下のグラフをスクロールしても流れません。<br>
+            縦向きに戻すと、これまでどおり映像の下に操作が並びます。
+          </div>
+        </div>
         <div class="panel">
           <h2>説明書</h2>
           <div class="legend">
@@ -2209,7 +2317,7 @@ video.addEventListener("loadedmetadata",()=>{
   if(video.videoWidth&&video.videoHeight) videoAR=video.videoWidth/video.videoHeight;
   seek.max=Math.max(1,Math.floor(video.duration*1000));
   video.playbackRate=parseFloat(speedSel.value);
-  updateTrimDisplay(); layout(); showFps(false); updateTimeRead();
+  updateTrimDisplay(); syncLandscape(); layout(); showFps(false); updateTimeRead();
   setStatus("ok","解析できます — トリミングしてから「この範囲を解析する」");
   refreshReady();
 });
@@ -2333,6 +2441,39 @@ async function probeFps(){
     try{ await seekTo(wasTime); }catch{}
   }
 }
+/* ============ iPhone を横にしたときの置き換え ============
+   縦向き: 動画の下に操作。横向き: 左=映像だけ / 右=操作とグラフ。
+   横向きで縦動画を見ると、左の幅を決め打ちすると左右が黒帯で埋まり、
+   映像そのものが小さくなる(実測 288x187 の枠に 105x187 しか映らない)。
+   映像に画面の高さをすべて使わせ、幅は動画の縦横比から決める。
+   操作(目盛り・コマ送り・イベントのボタン)は右へ移すので、
+   映像を見ながらそのまま押せる。 */
+const landMQ = window.matchMedia("(orientation:landscape) and (max-height:620px)");
+let landNow=null;
+function syncLandscape(){
+  const land = landMQ.matches;
+  const tr=$("transport"), host=$("landControls"), card=document.querySelector(".stage-card");
+  if(!tr||!host||!card) return;
+  if(land !== landNow){
+    landNow = land;
+    if(land) host.appendChild(tr);
+    else card.insertBefore(tr, $("fileInput"));   // もとの位置(動画のすぐ下)へ戻す
+  }
+  if(!land){ document.documentElement.style.removeProperty("--land-left"); return; }
+  /* 左の幅 = 映像の高さ x 動画の縦横比。操作は右にあるので細くてよいが、
+     動画が読み込まれる前や横長の動画でも破綻しないように幅を挟む。 */
+  const h=card.clientHeight || 0;
+  const ar=(videoAR>0?videoAR:0.5625);
+  const w=Math.round(h*ar);
+  const lo=Math.round(innerWidth*0.14), hi=Math.round(innerWidth*0.62);
+  document.documentElement.style.setProperty("--land-left",
+    Math.max(lo, Math.min(hi, w||lo))+"px");
+}
+syncLandscape();
+if(landMQ.addEventListener) landMQ.addEventListener("change", syncLandscape);
+else if(landMQ.addListener) landMQ.addListener(syncLandscape);
+addEventListener("resize", syncLandscape);
+addEventListener("orientationchange", ()=>setTimeout(syncLandscape,120));
 function showFps(measured){
   const f=slowFactor(), ms=1000/fps/f;
   fpsRead.textContent=(measured?"fps ":"fps ~")+fps.toFixed(fps%1?2:0)+(f>1?` ×${f.toFixed(0)}`:"")
