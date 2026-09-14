@@ -2168,6 +2168,28 @@ function batFitAngle(pts, t){
   let num=0,den=0; for(const[ft,a]of pts){num+=(ft-mt)*(a-ma); den+=(ft-mt)*(ft-mt);}
   return ma+(den>1e-9?num/den:0)*(t-mt);
 }
+/* あてはめた直線から、窓の中の点がどれだけ離れているか(残り具合)。
+   窓の中の測定どうしが食い違っているほど大きくなる。 */
+function batFitRms(pts){
+  const n=pts.length;
+  let mt=0,ma=0; for(const[ft,a]of pts){mt+=ft;ma+=a;} mt/=n; ma/=n;
+  let num=0,den=0; for(const[ft,a]of pts){num+=(ft-mt)*(a-ma); den+=(ft-mt)*(ft-mt);}
+  const sl=den>1e-9?num/den:0;
+  let ss=0; for(const[ft,a]of pts){ const e=a-(ma+sl*(ft-mt)); ss+=e*e; }
+  return Math.sqrt(ss/n);
+}
+/* 残りがこれより大きい窓は「向きが決まっていない」とみなして描かない。
+   実写(素振り・30fps・91コマ)で、アプリが描いた向きと
+   そのコマ自身の画像測定とのずれを、残りの大小で分けて調べた:
+     残り 0.4〜7.7° の 23 コマ … ずれは最大 9.5°(ほぼ全部 4°以下)
+     残り 19.1〜37.8° の 5 コマ … ずれは 13.1 / 27.0 / 27.1 / 32.2 / 42.6°
+   両者は 7.7° と 19.1° の間できれいに分かれたので、その真ん中で切る。
+   外れていた 4 コマがすべて消え、失うのは合っていた 1 コマ(ずれ13.1°)だけ。
+   以前に外した「1コマで回りすぎたら描かない」と似て見えるが別物で、
+   あちらは窓の中に1コマでも飛びがあれば窓ごと捨てるため、
+   速いが素直に回っている区間(1コマ28°でも残りは7.5°)まで消していた。
+   こちらは測定どうしが食い違っているかだけを見るので、速さでは落ちない。 */
+const BAT_FIT_RMS_MAX=12*Math.PI/180;
 function batAxisAt(t,lm){
   const raw=batAxis(lm);
   /* 両手から向きが出なくても、握りの位置が取れれば向きだけ隣から借りて描ける。
@@ -2209,7 +2231,8 @@ function batAxisAt(t,lm){
   const m=collect(batMeasuredAt);
   if(m){
     const pts=batDropOutliers(m.pts);
-    if(pts.length>=3) return mk(batFitAngle(pts,t));
+    if(pts.length>=3)
+      return batFitRms(pts)>BAT_FIT_RMS_MAX ? null : mk(batFitAngle(pts,t));
     /* そのコマ自身が測れているなら、それを使う */
     const own=batMeasuredAt(smoothSeries.find(f=>Math.abs(f.t-t)<1e-9));
     if(own!=null) return mk(own);
