@@ -407,17 +407,22 @@
     /* 左の幅は動画の縦横比から決める(--land-left は syncLandscape が入れる)。
        縦動画を横向きの画面で見ると、幅を決め打ちすると左右が黒帯で埋まり、
        映像そのものが小さくなる。高さをすべて使い、幅はそれに合わせる。 */
-    .layout{flex:1 1 auto;min-height:0;display:grid;gap:8px 8px;align-items:stretch;
-      grid-template-columns:var(--land-left,240px) minmax(0,1fr);
-      grid-template-rows:auto minmax(0,1fr);
-      grid-template-areas:"stage controls" "stage side";}
-    .stage-card{grid-area:stage;}
-    /* 操作が縦に伸びると下のグラフが潰れるので、高さに上限を置き、
-       あふれる分はこの中だけでスクロールさせる。
-       目盛り・イベント・コマ送り・主要ボタンの4段(約152px)は必ず入る。 */
-    #landControls{grid-area:controls;display:block;max-height:44vh;overflow-y:auto;
-      -webkit-overflow-scrolling:touch;}
-    .sidebar{grid-area:side;}
+    .layout{flex:1 1 auto;min-height:0;display:grid;gap:8px;align-items:stretch;
+      grid-template-columns:var(--land-left,240px) minmax(0,1fr);}
+    /* 操作は右側の上に貼り付ける。高さで切り取らないので、画面が小さくても
+       「別の動画」「拡大」などが枠の外に出て押せなくなることがない
+       (切り取っていたときは実測で最大6つ押せなくなっていた)。
+       解析タブに同じものがあるボタンは、ここでは出さない。 */
+    #landControls{display:block;position:sticky;top:0;z-index:4;background:var(--bg-0);padding-bottom:6px;}
+    #landControls #qAnalyze,#landControls #qDetect,#landControls #qSave{display:none;}
+    #landControls .steps.fine-row{display:none;}
+    #landControls .transport-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));
+      gap:4px;align-items:stretch;}
+    #landControls .transport-row .ghost{font-size:10.5px;padding:0 4px;min-height:34px;
+      margin-left:0 !important;white-space:normal;line-height:1.15;}
+    /* :not([hidden]) を付けないと、隠してある倍率ボタン列まで出てしまう */
+    #landControls .transport-row .zoombar:not([hidden]){grid-column:span 5;display:flex;gap:4px;}
+    #landControls .transport{padding:6px 7px 7px;}
     .stage-card{height:100%;min-height:0;display:flex;flex-direction:column;position:static;}
     .stage{flex:1 1 auto;min-height:110px;aspect-ratio:auto;max-height:none;}
     /* 操作は下半分に収め、足りなければこの中だけスクロールする */
@@ -459,10 +464,10 @@
     #landControls .steps:not(.fine-row){grid-template-columns:repeat(7,minmax(0,1fr));}
     #landControls .steps .tbtn.fine[data-step="0.01"],
     #landControls .steps .tbtn.fine[data-step="-0.01"]{display:block;}
-    #landControls .quick-acts{grid-template-columns:repeat(4,minmax(0,1fr));}
+    #landControls .quick-acts{grid-template-columns:repeat(2,minmax(0,1fr));}
     /* タブは右側の上に貼り付けておく。スクロールしても切り替えられるように。
        折り返すと3行=120px を使ってしまうので、1行にして横に流す。 */
-    .tabs{position:sticky;top:0;z-index:3;background:var(--bg-0);margin:0 0 8px;
+    .tabs{margin:0 0 8px;
       flex-wrap:nowrap;overflow-x:auto;gap:4px;padding-bottom:4px;
       -webkit-overflow-scrolling:touch;}
     .tabs::-webkit-scrollbar{height:4px;}
@@ -607,11 +612,11 @@
       <input type="file" id="fileInputB" accept="video/*">
     </div>
 
-    <!-- 横向きのときだけ、動画の下にある操作一式をここへ移す(下の syncLandscape)。
-         右上に固定して、下のグラフをスクロールしても操作が流れないようにする -->
-    <div id="landControls"></div>
-
     <div class="sidebar">
+      <!-- 横向きのときだけ、動画の下にある操作一式をここへ移す(下の syncLandscape)。
+           右側の上に貼り付くので、下をスクロールしても操作は残る。
+           高さで切り取らないので、画面が小さくてもボタンが枠の外に出ない。 -->
+      <div id="landControls"></div>
       <div class="tabs" role="tablist">
         <button class="tab active" data-tab="setup" role="tab">打者・撮影</button>
         <button class="tab" data-tab="analyze" role="tab">解析</button>
