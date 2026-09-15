@@ -46,6 +46,13 @@
     font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--chalk-dim);
     background:var(--panel);border:1px solid var(--panel-line);border-radius:20px;
     padding:5px 12px;max-width:100%;}
+  /* 現場モード/詳細モードの切り替え。
+     機能を消すのではなく、現場で使うものだけに絞って出す。
+     何を隠すかは data-mode="detail" で印を付けてある。 */
+  .mode-btn{background:var(--bg-1);border:1px solid var(--panel-line);color:var(--chalk);
+    border-radius:16px;min-height:32px;padding:0 12px;font-size:12px;cursor:pointer;flex:none;}
+  .mode-btn.field{border-color:var(--amber);color:var(--amber);font-weight:700;}
+  body.mode-field [data-mode="detail"]{display:none !important;}
   .status-dot{width:7px;height:7px;border-radius:50%;background:var(--chalk-dim);flex:none;}
   .status-dot.ok{background:var(--turf);box-shadow:0 0 6px var(--turf);}
   .status-dot.busy{background:var(--amber);box-shadow:0 0 6px var(--amber);animation:pulse 1s infinite;}
@@ -379,6 +386,7 @@
     header{padding:2px;margin:0 0 4px;gap:8px;flex-wrap:nowrap;}
     header .eyebrow{display:none;}
     h1{font-size:13px;white-space:nowrap;}
+    .mode-btn{min-height:26px;padding:0 9px;font-size:11px;}
     .status-line{font-size:10px;padding:2px 8px;}
 
     /* 左の幅は動画の縦横比から決める(--land-left は syncLandscape が入れる)。
@@ -459,6 +467,7 @@
   <header>
     <span class="eyebrow">PITCH LAB Ver.1</span>
     <h1>投球動作解析システム</h1>
+    <button id="modeBtn" class="mode-btn" title="表示する機能の範囲を切り替えます">現場モード</button>
     <div class="status-line">
       <span class="status-dot" id="statusDot"></span>
       <span id="statusText">モデル未読み込み</span>
@@ -592,11 +601,11 @@
         <button class="tab active" data-tab="setup" role="tab">選手・撮影</button>
         <button class="tab" data-tab="analyze" role="tab">解析</button>
         <button class="tab" data-tab="metrics" role="tab">指標</button>
-        <button class="tab" data-tab="chain" role="tab">連鎖</button>
-        <button class="tab" data-tab="repeat" role="tab">再現性</button>
-        <button class="tab" data-tab="compare" role="tab">比較</button>
-        <button class="tab" data-tab="change" role="tab">変化・出力</button>
-        <button class="tab" data-tab="config" role="tab">設定</button>
+        <button class="tab" data-tab="chain" data-mode="detail" role="tab">連鎖</button>
+        <button class="tab" data-tab="repeat" data-mode="detail" role="tab">再現性</button>
+        <button class="tab" data-tab="compare" data-mode="detail" role="tab">比較</button>
+        <button class="tab" data-tab="change" data-mode="detail" role="tab">変化・出力</button>
+        <button class="tab" data-tab="config" data-mode="detail" role="tab">設定</button>
         <button class="tab" data-tab="help" role="tab">使い方</button>
       </div>
 
@@ -736,7 +745,7 @@
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel" data-mode="detail">
           <h2>発射角 <span class="tag" id="ballTag">印なし</span></h2>
           <div class="toolbar">
             <button id="btnBallAuto" class="primary">自動でさがす</button>
@@ -1218,6 +1227,19 @@
 
       <!-- ===== 使い方 ===== -->
       <div class="tabpage" id="tab-help">
+        <div class="panel">
+          <h2>現場モードと詳細モード</h2>
+          <div class="legend">
+            画面の上の<b>「現場モード / 詳細モード」</b>ボタンで、出す機能の範囲を切り替えます。
+            <b>機能を消してはいません。</b>1回押せば全部戻ります。<br>
+            <b>現場モード</b>は、撮る・イベントを確定する・見る、に絞ります。
+            タブは<b>4つ</b>(選手/解析/指標/使い方)、指標は<b>9項目</b>だけ出ます。
+            残す指標は「単眼・30fpsでも安定して測れて、しかも指導が変わるもの」で選んでいます。<br>
+            <b>詳細モード</b>は今までどおり全部(タブ9つ・指標19項目)。
+            グラフ・再現性・比較・書き出し・各種しきい値はこちらです。<br>
+            選んだモードは端末に覚えます。次に開いたときも同じモードで始まります。
+          </div>
+        </div>
         <div class="panel">
           <h2>iPhone は横向きで使えます</h2>
           <div class="legend">
@@ -3832,6 +3854,36 @@ $("captureFpsSel").addEventListener("change",e=>{
   const f=slowFactor();
   toast(f>1?`実時間 = 動画時間 ÷ ${f.toFixed(0)} として計算します`:"時間の補正なし");
 });
+/* ============ 現場モード / 詳細モード ============
+   機能を消さずに、現場で使うものだけに絞って出す。
+   隠す対象は data-mode="detail"、指標は core:true で印を付けてある。
+   迷ったら詳細モードに1回押せば全部戻る。 */
+let uiMode="field";
+const MODE_KEY="pitchlab.uimode.v1";
+function applyUiMode(){
+  document.body.classList.toggle("mode-field", uiMode==="field");
+  const b=$("modeBtn");
+  if(b){ b.textContent = uiMode==="field" ? "現場モード" : "詳細モード";
+         b.classList.toggle("field", uiMode==="field"); }
+  /* いま開いているタブが隠れたら、解析へ戻す */
+  const act=document.querySelector(".tab.active");
+  if(act && uiMode==="field" && act.dataset.mode==="detail"){
+    const go=document.querySelector('.tab[data-tab="analyze"]');
+    if(go) go.click();
+  }
+  try{ renderMetrics(); }catch{}
+  try{ syncLandscape(); }catch{}
+}
+$("modeBtn").addEventListener("click",()=>{
+  uiMode = (uiMode==="field") ? "full" : "field";
+  try{ lsSet(MODE_KEY, uiMode); }catch{}
+  applyUiMode();
+  toast(uiMode==="field"
+    ? "現場モード: 撮る・確定する・見るだけに絞りました"
+    : "詳細モード: すべての機能を出しました");
+});
+try{ const sv=lsGet(MODE_KEY); if(sv==="full"||sv==="field") uiMode=sv; }catch{}
+applyUiMode();
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
   document.querySelectorAll(".tabpage").forEach(x=>x.classList.remove("active"));
@@ -4099,26 +4151,29 @@ function loadDraft(){
    指標の算出(仕様書 §5 A〜E)
    すべて平滑化後の系列・等方座標・身長比。時間は実時間(スロー補正込み)。
    ============================================================ */
+/* core:true は「現場モード」でも出す指標。
+   単眼・30fps でも安定して測れて、しかも指導が変わるものに絞ってある。
+   印のないものは詳細モードでだけ出る(消してはいない)。 */
 const METRIC_ROWS = [
-  { k:"speed_kmh",  label:"球速",                    unit:"km/h", dec:1 },
-  { k:"stride_ratio",label:"ストライド長",           unit:"%",    dec:1, cm:"stride_cm" },
+  { core:true, k:"speed_kmh",  label:"球速",                    unit:"km/h", dec:1 },
+  { core:true, k:"stride_ratio",label:"ストライド長",           unit:"%",    dec:1, cm:"stride_cm" },
   { k:"pelvis_disp",label:"骨盤中心の前方移動",       unit:"身長比", dec:3 },
   { k:"pelvis_vel", label:"骨盤中心の移動速度",       unit:"身長/秒", dec:2 },
-  { k:"knee_fp",    label:"FP時 前膝角度",           unit:"°",    dec:0 },
-  { k:"knee_rel",   label:"リリース時 前膝角度",      unit:"°",    dec:0 },
-  { k:"knee_ext",   label:"前膝の伸展量",            unit:"°",    dec:0, signed:true },
+  { core:true, k:"knee_fp",    label:"FP時 前膝角度",           unit:"°",    dec:0 },
+  { core:true, k:"knee_rel",   label:"リリース時 前膝角度",      unit:"°",    dec:0 },
+  { core:true, k:"knee_ext",   label:"前膝の伸展量",            unit:"°",    dec:0, signed:true },
   { k:"elbow_fp",   label:"FP時 肘角度",             unit:"°",    dec:0 },
-  { k:"trunk_fp",   label:"FP時 体幹前傾",           unit:"°",    dec:1, signed:true },
-  { k:"trunk_rel",  label:"リリース時 体幹前傾",      unit:"°",    dec:1, signed:true },
+  { core:true, k:"trunk_fp",   label:"FP時 体幹前傾",           unit:"°",    dec:1, signed:true },
+  { core:true, k:"trunk_rel",  label:"リリース時 体幹前傾",      unit:"°",    dec:1, signed:true },
   { k:"t_fp_arm",   label:"FP→Arm Peak",            unit:"ms",   dec:0, signed:true, timing:true },
-  { k:"t_fp_rel",   label:"FP→リリース",             unit:"ms",   dec:0, timing:true },
+  { core:true, k:"t_fp_rel",   label:"FP→リリース",             unit:"ms",   dec:0, timing:true },
   { k:"t_arm_rel",  label:"Arm Peak→リリース",       unit:"ms",   dec:0, timing:true },
   { k:"rel_height", label:"リリース高 (RPZ)",         unit:"身長比", dec:3, cm:"rel_height_cm" },
   { k:"rel_ext",    label:"エクステンション (RPEx)",  unit:"身長比", dec:3, cm:"rel_ext_cm", side:true },
   { k:"rel_side",   label:"リリースサイド (RPX・腕側＋)", unit:"身長比", dec:3, cm:"rel_side_cm", signed:true, back:true },
   { k:"launch_ang", label:"発射角(横から見た打ち出し)",unit:"°",    dec:1, signed:true, side:true },
   { k:"shin_min",   label:"軸足スネ角(最小)",         unit:"°",    dec:0, side:true },
-  { k:"shin_fp",    label:"軸足スネ角(接地時)",       unit:"°",    dec:0, side:true },
+  { core:true, k:"shin_fp",    label:"軸足スネ角(接地時)",       unit:"°",    dec:0, side:true },
 ];
 let metrics=null;
 
@@ -4331,12 +4386,14 @@ function renderMetrics(){
     return;
   }
   const {m,conf,resMs}=metrics;
-  const n=METRIC_ROWS.filter(r=>m[r.k]!=null).length;
-  $("metricsTag").textContent=`${n}/${METRIC_ROWS.length} 項目`;
+  const rows=METRIC_ROWS.filter(r=> uiMode!=="field" || r.core);
+  const n=rows.filter(r=>m[r.k]!=null).length;
+  $("metricsTag").textContent=`${n}/${rows.length} 項目`
+    + (uiMode==="field" ? `(詳細モードで ${METRIC_ROWS.length} 項目)` : "");
   const confOf=(k)=>({stride_ratio:conf.stride,pelvis_disp:conf.pelvis,pelvis_vel:conf.pelvis,
     knee_fp:conf.knee_fp,knee_rel:conf.knee_rel,knee_ext:conf.knee_fp,elbow_fp:conf.elbow,
     rel_height:conf.release,rel_side:conf.relside,shin_fp:conf.shin}[k]);
-  list.innerHTML=METRIC_ROWS.map(r=>{
+  list.innerHTML=rows.map(r=>{
     const v=m[r.k];
     let txt="--", cls="na";
     /* 撮影の向きに合わない指標は「--」ではなく、どう撮れば出るかを書く。
