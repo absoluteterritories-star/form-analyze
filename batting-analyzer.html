@@ -775,6 +775,7 @@
             <span class="k">画面からのはみ出し</span><span class="v na" id="kEdge">--</span>
             <span class="k">選手の大きさ</span><span class="v na" id="kSubj">--</span>
             <span class="k">バットを画像から測れたコマ</span><span class="v na" id="kBat">--</span>
+            <span class="k">ヘッドの軌跡</span><span class="v na" id="kTip">--</span>
             <span class="k">1コマの実時間</span><span class="v na" id="kFrameMs">--</span>
             <span class="k">解析にかかった時間</span><span class="v na" id="kCost">--</span>
           </div>
@@ -1240,6 +1241,10 @@
             <label class="switch"><input type="checkbox" id="batPathToggle" checked><span class="slider-toggle"></span></label>
           </div>
           <div class="opt-row">
+            <span class="lab">ヘッドの軌跡</span>
+            <label class="switch"><input type="checkbox" id="tipPathToggle" checked><span class="slider-toggle"></span></label>
+          </div>
+          <div class="opt-row">
             <span class="lab">芯の向きを矢印で表示</span>
             <label class="switch"><input type="checkbox" id="batFaceToggle" checked><span class="slider-toggle"></span></label>
           </div>
@@ -1342,6 +1347,29 @@
 
       <!-- ===== 使い方 ===== -->
       <div class="tabpage" id="tab-help">
+        <div class="panel">
+          <h2>ヘッドの軌跡について</h2>
+          <div class="legend">
+            バットの<b>先端(ヘッド)が通った道</b>を、始まりを赤・終わりを青にして描きます。
+            設定の<b>「ヘッドの軌跡」</b>で切り替えられます。<br>
+            <b>これはバットの向きを当てる機能とは別物です。</b>
+            向きを当てる方法は、背景の直線(屋根の桟・柵)に乗り移って外れることが
+            実写で何度も起きました。先端は点なので裏返りようがなく、
+            握りからの距離が決まっているぶん素直に追えます。<br>
+            <b>探し方</b>: 握りを中心にした輪の中で、隣のコマとの<b>動き</b>と<b>暗さ</b>を
+            手がかりに候補を出し、<b>細い線は落とします</b>
+            (手ぶれがあると静止した屋根の縁にも差分が出るため。バットは太い)。
+            そのうえで、候補の中から<b>物理的につながる道</b>を選びます。
+            バットの先端は剛体の端なので、<b>軌跡は滑らかにしか曲がりません</b>。
+            曲がり方が不自然な道は選ばず、それでも不自然なら<b>何も描きません</b>
+            (事前解析の一覧に理由が出ます)。<br>
+            <b>⚠️ 120fps 以上で撮ってください。</b>
+            実写で確かめたところ、<b>240fps では滑らかな弧が取れました</b>が、
+            <b>30fps では取れません</b>。30fps は1コマでバット長の1.5倍動くため、
+            どの点とどの点がつながるのかを決められないからです。
+            当てにならない軌跡を描くより、出さない方を選んでいます。
+          </div>
+        </div>
         <div class="panel">
           <h2>現場モードと詳細モード</h2>
           <div class="legend">
@@ -2329,6 +2357,7 @@ function drawSkeleton(c,cv,lm,color,width,dots){
 const HAND={ L:{wrist:15,pinky:17,index:19,thumb:21}, R:{wrist:16,pinky:18,index:20,thumb:22} };
 const COLOR_BAT="#d9a15c", COLOR_FACE="#e05a4e", COLOR_BALL="#f4f6f4";
 let showBat=true, showBatPath=true, showBatFace=true, batInch=33;
+let showTipPath=true;      // ヘッドの軌跡
 let measureBat=true;      // バットを画像からも測る
 let ballPt=null, ballMode=false;   // ボールは検出できないので手で指してもらう
 
@@ -2515,6 +2544,315 @@ function batAxisAt(t,lm){
   return hb ? mk(hb.near) : null;
 }
 const isoToPx=(q,cv)=>({ x:(q.x/(videoAR||1))*cv.width, y:q.y*cv.height });
+
+/* ================= バットの「先端」を追う =================
+   向き(線)を当てる方法は、実写で何度やっても背景の直線に乗り移って外れた。
+   点(先端)なら裏返りが無く、握りからの距離が決まっているので
+   探すのは円周上の角度だけになる。実写(240fps)で組み立て直して確かめた。
+
+   1コマぶんの手順:
+     1) 握りを中心に、半径 0.50〜1.35 バット長の輪を作る
+     2) 隣のコマとの差(動き)と、暗さ(バットは黒い)を掛けた重みを作る
+     3) 細い線を落とす。ここがいちばん効いた。
+        手ぶれがあると、静止した屋根の縁や柱にも差分が強く出る。
+        実写でまさにそこを拾っていた(元コマと並べて確認済み)。
+        バットは太いので、5x5 の窓の半分以上が埋まっていることを求める。
+     4) 角度を2°きざみに集計し、いちばん強い向きを先端の向きとする
+        (前のコマの向きに近いほど少し有利にする)
+     5) その向きの外側(85%点)の半径を先端の位置とする
+     6) 1コマで動ける距離を超えていたら「決められない」として出さない
+
+   実写240fps・372コマでの結果: 63コマで先端が取れ、
+   1コマの移動量は中央17画素・最大41画素、ありえない跳びは0回。
+   半径÷バット長は中央0.84・9割1.00(1.0 が先端)。
+   6コマを元コマに重ねて目でも確認し、すべて先端に乗っていた。 */
+/* 切り出しを何ピクセル四方で見るか。
+   ここは太さの判定の効きに直結する。224 では ROI の中でバットが 5画素ほどしかなく、
+   同じくらいの大きさのノイズが通ってしまった(元動画での試作は 16画素で、
+   スイング中の63コマだけを拾えていたのに、アプリは構え中も含め151コマ拾っていた)。
+   448 にするとバットは 11画素になり、試作と同じ効きになる。 */
+const BAT_TIP_ROI=448;
+const batTipCv=document.createElement("canvas");
+batTipCv.width=batTipCv.height=BAT_TIP_ROI;
+const batTipCtx=batTipCv.getContext("2d",{willReadFrequently:true});
+let batTipPrevGray=null, batTipPrev=null, batTipPrev2=null, batTipPrevAng=null;
+/* 毎コマ作ると重いので使い回す */
+let _tipSel=null, _tipII=null;
+function batTipBuf(R){ if(!_tipSel||_tipSel.length!==R*R) _tipSel=new Uint8Array(R*R); else _tipSel.fill(0); return _tipSel; }
+function batTipII(W1){ if(!_tipII||_tipII.length!==W1*W1) _tipII=new Int32Array(W1*W1); return _tipII; }
+function resetBatTip(){ batTipPrevGray=null; batTipPrev=null; batTipPrev2=null; batTipPrevAng=null; }
+
+function batTipGray(src, cBotIso, lenIso){
+  const vw=src.videoWidth||src.width, vh=src.videoHeight||src.height;
+  if(!vw||!vh) return null;
+  const c=isoToNorm({x:cBotIso.x, y:cBotIso.y});
+  const side=Math.max(0.02, lenIso*2.9);          // 輪(1.35倍)が入る広さ
+  const sw=side/videoAR*vw, sh=side*vh;
+  const sx=c.x*vw-sw/2, sy=c.y*vh-sh/2;
+  batTipCtx.clearRect(0,0,BAT_TIP_ROI,BAT_TIP_ROI);
+  try{ batTipCtx.drawImage(src, sx,sy,sw,sh, 0,0,BAT_TIP_ROI,BAT_TIP_ROI); }catch{ return null; }
+  const d=batTipCtx.getImageData(0,0,BAT_TIP_ROI,BAT_TIP_ROI).data;
+  const g=new Float32Array(BAT_TIP_ROI*BAT_TIP_ROI);
+  for(let i=0,j=0;i<d.length;i+=4,j++) g[j]=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+  /* 切り出し枠が動画の外にはみ出した部分は真っ黒になる。
+     握りが動くと、その境目が「動く・暗い・太い」領域として出てしまい、
+     実際にそこを先端と誤って拾っていた(画面外の x=-0.03 などが出た)。
+     動画の中に入っている範囲を返して、外は使わないようにする。 */
+  const inX0=(0-sx)/sw*BAT_TIP_ROI, inX1=(vw-sx)/sw*BAT_TIP_ROI;
+  const inY0=(0-sy)/sh*BAT_TIP_ROI, inY1=(vh-sy)/sh*BAT_TIP_ROI;
+  return { g, side, inX0, inX1, inY0, inY1 };
+}
+const BAT_TIP_NB=180;           // 2°きざみ
+const BAT_TIP_CANDS=3;          // 1コマにいくつ候補を出すか
+/* 1コマぶんの候補を出すだけの関数。時間のつながりは見ない。
+   1コマに1つしか返さないと、スイングの途中で1コマでもノイズが勝った時点で
+   軌跡が途切れる(実測では161コマ検出できていても、つながったのは19コマだけ)。
+   候補を複数返しておき、どれを採るかは後の経路選びに任せる。 */
+function measureBatTip(src, lm){
+  const base=batBase(lm);
+  if(!base){ batTipPrevGray=null; return null; }
+  const roi=batTipGray(src, base.cBot, base.len);
+  if(!roi){ batTipPrevGray=null; return null; }
+  const g=roi.g, prev=batTipPrevGray;
+  batTipPrevGray=g;
+  if(!prev) return null;
+  const R=BAT_TIP_ROI, cx=R/2, cy=R/2;
+  const L=base.len/roi.side*R;
+  if(!(L>20)) return null;
+  const r0=0.50*L, r1=1.35*L, r0s=r0*r0, r1s=r1*r1;
+  const ax0=Math.max(1,Math.ceil(roi.inX0+1)), ax1=Math.min(R-1,Math.floor(roi.inX1-1));
+  const ay0=Math.max(1,Math.ceil(roi.inY0+1)), ay1=Math.min(R-1,Math.floor(roi.inY1-1));
+  if(ax1-ax0<20||ay1-ay0<20) return null;
+  let n=0, sum=0, sum2=0;
+  const bri=new Int32Array(256);
+  const idx=new Int32Array(R*R); let m=0;
+  for(let y=ay0;y<=ay1;y++){
+    const dy=y-cy, dy2=dy*dy;
+    for(let x=ax0;x<=ax1;x++){
+      const dx=x-cx, rr=dx*dx+dy2;
+      if(rr<r0s||rr>r1s) continue;
+      const i=y*R+x, v=Math.abs(g[i]-prev[i]);
+      n++; sum+=v; sum2+=v*v;
+      bri[Math.min(255,Math.max(0,g[i]|0))]++;
+      idx[m++]=i;
+    }
+  }
+  if(n<200) return null;
+  const mean=sum/n, sd=Math.sqrt(Math.max(0,sum2/n-mean*mean));
+  const dTh=Math.max(8, mean+1.5*sd);
+  let acc=0, darkTh=255; const want=n*0.35;
+  for(let v=0;v<256;v++){ acc+=bri[v]; if(acc>=want){ darkTh=v; break; } }
+  const sel=batTipBuf(R);
+  let cnt=0;
+  for(let k=0;k<m;k++){
+    const i=idx[k];
+    if(Math.abs(g[i]-prev[i])>dTh && g[i]<darkTh){ sel[i]=1; cnt++; }
+  }
+  if(cnt<10) return null;
+  /* 細い線を落とす(手ぶれで出る屋根の縁・柱よけ)。窓はバット長に比例させる */
+  const K=Math.max(5, (Math.round(L*0.06)|1)), HK=K>>1, need=Math.ceil(K*K*0.45);
+  const W1=R+1;
+  const ii=batTipII(W1);
+  for(let y=0;y<R;y++){
+    let row=0;
+    for(let x=0;x<R;x++){ row+=sel[y*R+x]; ii[(y+1)*W1+(x+1)]=ii[y*W1+(x+1)]+row; }
+  }
+  const boxAt=(x,y)=>{
+    const x0=Math.max(0,x-HK), y0=Math.max(0,y-HK);
+    const x1=Math.min(R,x+HK+1), y1=Math.min(R,y+HK+1);
+    return ii[y1*W1+x1]-ii[y0*W1+x1]-ii[y1*W1+x0]+ii[y0*W1+x0];
+  };
+  const hist=new Float64Array(BAT_TIP_NB);
+  const pb=[], pr=[];
+  for(let k=0;k<m;k++){
+    const i=idx[k]; if(!sel[i]) continue;
+    const x=i%R, y=(i-x)/R;
+    if(boxAt(x,y)<need) continue;
+    const dx=x-cx, dy=y-cy;
+    const w=Math.abs(g[i]-prev[i])*(1+(darkTh-g[i])/Math.max(1,darkTh));
+    let b=((Math.atan2(dy,dx)+Math.PI)/(2*Math.PI)*BAT_TIP_NB)|0;
+    if(b<0) b=0; if(b>=BAT_TIP_NB) b=BAT_TIP_NB-1;
+    hist[b]+=w; pb.push(b); pr.push(Math.sqrt(dx*dx+dy*dy));
+  }
+  if(pb.length<10) return null;
+  const hs=new Float64Array(BAT_TIP_NB);
+  for(let b=0;b<BAT_TIP_NB;b++){
+    hs[b]=(hist[(b+BAT_TIP_NB-2)%BAT_TIP_NB]+2*hist[(b+BAT_TIP_NB-1)%BAT_TIP_NB]+3*hist[b]
+          +2*hist[(b+1)%BAT_TIP_NB]+hist[(b+2)%BAT_TIP_NB])/9;
+  }
+  const nz=[]; for(let b=0;b<BAT_TIP_NB;b++) if(hs[b]>0) nz.push(hs[b]);
+  nz.sort((a,b)=>a-b);
+  const med=nz.length?nz[nz.length>>1]:0;
+  /* 山(まわりより高いところ)を強い順に取る */
+  const peaks=[];
+  for(let b=0;b<BAT_TIP_NB;b++){
+    const p=hs[(b+BAT_TIP_NB-1)%BAT_TIP_NB], q=hs[b], r=hs[(b+1)%BAT_TIP_NB];
+    if(q>0 && q>=p && q>=r) peaks.push(b);
+  }
+  peaks.sort((a,b)=>hs[b]-hs[a]);
+  const out=[];
+  for(const kb of peaks){
+    if(out.length>=BAT_TIP_CANDS) break;
+    /* 近すぎる山は同じもの */
+    let dup=false;
+    for(const o of out){ let df=Math.abs(o.b-kb); df=Math.min(df,BAT_TIP_NB-df); if(df<6){ dup=true; break; } }
+    if(dup) continue;
+    const rs=[];
+    for(let k=0;k<pb.length;k++){
+      let df=Math.abs(pb[k]-kb); df=Math.min(df,BAT_TIP_NB-df);
+      if(df<=3) rs.push(pr[k]);
+    }
+    if(rs.length<5) continue;
+    rs.sort((a,b)=>a-b);
+    const rad=rs[Math.min(rs.length-1, Math.floor(rs.length*0.85))];
+    const ang=(kb+0.5)/BAT_TIP_NB*2*Math.PI-Math.PI;
+    const tx=cx+rad*Math.cos(ang), ty=cy+rad*Math.sin(ang);
+    const ix=base.cBot.x+(tx-cx)/R*roi.side;
+    const iy=base.cBot.y+(ty-cy)/R*roi.side;
+    out.push({ b:kb, x:ix/videoAR, y:iy,
+               conf:+(med>0?hs[kb]/med:0).toFixed(2), rOverL:+(rad/L).toFixed(3) });
+  }
+  return out.length?out:null;
+}
+/* 候補の中から「物理的につながる経路」を選び出す。
+
+   1コマごとの検出にはノイズが混じる。検出器をこれ以上厳しくするより、
+   出てきた候補の中から「隣り合うコマで、1コマで動ける距離の範囲でつながる」
+   いちばん長い並びを選ぶほうが素直で、ノイズに強い。
+   バットの先端は剛体の端なので、本物の軌跡は必ずそういう並びになる。
+   候補を1コマに1つしか持たないと、途中の1コマでノイズが勝った時点で
+   道が切れてしまう(実測 161コマ検出できてもつながったのは19コマだけ)。
+
+   1コマで動ける距離: ヘッドは速くても 35m/s 程度なので、
+   バット長に対して 45/fps 倍まで(240fps なら 0.19倍、30fps なら 1.5倍)。 */
+/* 曲がり方の上限。バットの先端は剛体の端なので、軌跡は滑らかにしか曲がらない。
+   実測: 目視で確かめた240fpsの軌跡は曲がり角の中央 10.6°・9割 49°。
+   30fps で崩れた経路は中央 102°。
+   75° も試したが、30fps の崩れた経路が通ってしまった(33コマ描かれ、
+   1コマの移動量の9割が身長の0.25倍という異常な値になった)。
+   240fps 側は 60° でも 75° でも 19コマで変わらなかったので 60° を採る。
+   なお、ここを 75° 以下にすると、後段の検査のうち「90°を超えた割合」は
+   原理的に発火しなくなる(そんな曲がり方は選ばれないため)。
+   残る「曲がり角の中央」の方は働いていて、30fps はそこで止まっている
+   (実測 中央44° > しきい値40°)。二段構えのうち片方だけが効いている。 */
+const TIP_TURN_MAX=60;
+const TIP_TURN_MED_MAX=40, TIP_TURN_BIG_RATE=0.25;
+let tipNote="--";
+function markTipSwing(){
+  tipNote="--";
+  const V=[];
+  for(let i=0;i<smoothSeries.length;i++){
+    const f=smoothSeries[i];
+    f.tipUse=false; f.tipX=null; f.tipY=null;
+    const cs=f.tipCands;
+    if(!cs||!cs.length) continue;
+    const b=batBase(f.lm);
+    for(const c of cs) V.push({i, t:f.t, x:c.x*videoAR, y:c.y, nx:c.x, ny:c.y, L:b?b.len:0.25, c});
+  }
+  if(V.length<5){ tipNote="先端の候補が足りません"; return; }
+  const fpsNow=Math.max(1,fps);
+  const stepMax=Math.min(1.5, 45/fpsNow);
+  /* つなげてよい2点の組(辺)を作る */
+  const preds=V.map(()=>[]);
+  for(let a=1;a<V.length;a++){
+    for(let b=a-1;b>=0;b--){
+      const dt=V[a].t-V[b].t;
+      if(dt<=0) continue;
+      if(dt>3.2/fpsNow) break;
+      const gap=Math.max(1,Math.round(dt*fpsNow));
+      const lim=(V[a].L||V[b].L||0.25)*stepMax*gap;
+      if(Math.hypot(V[a].x-V[b].x, V[a].y-V[b].y)<=lim) preds[a].push(b);
+    }
+  }
+  /* 辺をつないで道を作る。ここで「曲がりすぎ」を弾く。
+     長さだけを最大にすると、条件が少し緩むだけでノイズをつないでしまう
+     (同じ動画でも fps の測定が 240 か 200 かで結果が変わってしまった)。
+     曲がり方を選び方そのものに入れると、その揺れに強くなる。 */
+  const E=[], key=new Map();
+  for(let a=0;a<V.length;a++) for(const b of preds[a]){ key.set(b*V.length+a, E.length); E.push({b,a}); }
+  if(!E.length){ tipNote="先端をつなげませんでした"; return; }
+  const ord=E.map((_,i)=>i).sort((p,q)=>V[E[p].a].t-V[E[q].a].t);
+  const dp=new Array(E.length).fill(2), from=new Array(E.length).fill(-1);
+  const turnOf=(c,b,a)=>{
+    const a1=Math.atan2(V[b].y-V[c].y, V[b].x-V[c].x);
+    const a2=Math.atan2(V[a].y-V[b].y, V[a].x-V[b].x);
+    let d=(a2-a1)*180/Math.PI;
+    while(d>180) d-=360; while(d<-180) d+=360;
+    return Math.abs(d);
+  };
+  for(const e of ord){
+    const {b,a}=E[e];
+    for(const c of preds[b]){
+      const g=key.get(c*V.length+b); if(g===undefined) continue;
+      if(turnOf(c,b,a)>TIP_TURN_MAX) continue;
+      if(dp[g]+1>dp[e]){ dp[e]=dp[g]+1; from[e]=g; }
+    }
+  }
+  let bestE=0; for(let i=1;i<E.length;i++) if(dp[i]>dp[bestE]) bestE=i;
+  if(dp[bestE]<6){ tipNote=`つながったのが ${dp[bestE]} コマだけでした`; return; }
+  /* 道を復元する */
+  const seq=[];
+  for(let e=bestE;e>=0;){ seq.push(E[e].a); if(from[e]<0){ seq.push(E[e].b); break; } e=from[e]; }
+  seq.reverse();
+  const path=seq.map(i=>V[i]);
+  /* 念のため、できあがった道の曲がり方も見ておく */
+  const tn=[];
+  for(let i=2;i<path.length;i++){
+    const a1=Math.atan2(path[i-1].y-path[i-2].y, path[i-1].x-path[i-2].x);
+    const a2=Math.atan2(path[i].y-path[i-1].y, path[i].x-path[i-1].x);
+    let d=(a2-a1)*180/Math.PI;
+    while(d>180) d-=360; while(d<-180) d+=360;
+    tn.push(Math.abs(d));
+  }
+  if(tn.length>=4){
+    const st=[...tn].sort((x,y)=>x-y);
+    const med=st[st.length>>1];
+    const bigRate=tn.filter(v=>v>90).length/tn.length;
+    if(med>TIP_TURN_MED_MAX || bigRate>TIP_TURN_BIG_RATE){
+      tipNote=`曲がり方が不自然なので出しません(曲がり角の中央 ${med.toFixed(0)}°)`;
+      return;
+    }
+  }
+  for(const v of path){
+    const f=smoothSeries[v.i];
+    f.tipUse=true; f.tipX=v.nx; f.tipY=v.ny; f.tipConf=v.c.conf;
+  }
+  tipNote=`${path.length}コマ`;
+}
+/* 軌跡を描く。始まりを赤、終わりを青にして、進む向きが分かるようにする */
+function drawBatTipPath(c,cv){
+  if(!showTipPath||!smoothSeries.length) return;
+  const P=[];
+  for(const f of smoothSeries) if(f.tipX!=null&&f.tipUse) P.push({t:f.t, x:f.tipX*cv.width, y:f.tipY*cv.height});
+  if(P.length<2) return;
+  c.save(); c.lineCap="round"; c.lineJoin="round";
+  /* 結ぶ条件は経路選びと同じにする。ここだけ厳しくすると、
+     経路としてはつながっているのに線が途切れ、弧が断片に見える(実際にそうなった)。 */
+  const fpsNow=Math.max(1,fps);
+  const stepMax=Math.min(1.5,45/fpsNow);
+  for(let i=1;i<P.length;i++){
+    const a=P[i-1], b=P[i];
+    const dt=b.t-a.t;
+    if(dt>3.2/fpsNow) continue;
+    const gap=Math.max(1,Math.round(dt*fpsNow));
+    if(Math.hypot(b.x-a.x,b.y-a.y) > cv.height*0.3*stepMax*gap) continue;
+    const k=i/(P.length-1);
+    c.strokeStyle=`rgba(${Math.round(240-150*k)},${Math.round(70+60*k)},${Math.round(70+170*k)},0.92)`;
+    c.lineWidth=4;
+    c.beginPath(); c.moveTo(a.x,a.y); c.lineTo(b.x,b.y); c.stroke();
+  }
+  /* いま出ているコマの先端に印を付ける */
+  const now=shownTime();
+  let best=null,bd=Infinity;
+  for(const p of P){ const d=Math.abs(p.t-now); if(d<bd){bd=d;best=p;} }
+  if(best && bd<=1.5/Math.max(1,fps)){
+    c.beginPath(); c.arc(best.x,best.y,7,0,Math.PI*2);
+    c.fillStyle="rgba(255,255,255,.95)"; c.fill();
+    c.lineWidth=3; c.strokeStyle="rgba(230,60,60,.95)"; c.stroke();
+  }
+  c.restore();
+}
+
 /* 3D が使えるときは、奥行きに応じて画面上の長さを縮める。
    カメラ側/奥に向いたバットは映像でも短く写るため。 */
 function batDrawPoints(t, lm){
@@ -3303,6 +3641,7 @@ function draw(){
   const sm=smoothedAt(video.currentTime);
   drawOnion(ctx,overlay,video.currentTime);
   if(showBat && showBatPath) drawBatPath(ctx,overlay,video.currentTime);
+  drawBatTipPath(ctx,overlay);
   if(showRaw || !sm) drawSkeleton(ctx,overlay,lastLandmarks, sm?COLOR_RAW:COLOR_SKELETON, sm?2:3, !sm);
   if(sm) drawSkeleton(ctx,overlay,sm,COLOR_SKELETON,3,true);
   drawRefGhost(ctx,overlay, sm||lastLandmarks, video.currentTime);
@@ -4085,7 +4424,7 @@ $("btnAnalyze").addEventListener("click",async()=>{
     /* 残り時間を出す。実写(1080x1920, 11秒)で4分かかったので、
        あと何分かが分からないと待てない。内訳(シーク/推論)も測って出す。 */
     const t0=performance.now(); let msSeek=0, msDetect=0;
-    batPrevGray=null; batLastTh=null;
+    batPrevGray=null; batLastTh=null; resetBatTip();
     for(let i=0;i<=total;i++){
       if(cancelBusy) break;
       const t=start+Math.min(dur-0.001,i*step);
@@ -4100,8 +4439,12 @@ $("btnAnalyze").addEventListener("click",async()=>{
         try{ const mb=measureBatAngle(video, got.lm, batPrevGray);
           if(mb){ bt={th:mb.th, conf:mb.conf}; batPrevGray=mb.gray; } }catch{}
       }
+      /* ヘッドの先端。向き(線)とは別物で、点として追う */
+      let tp=null;
+      if(got&&got.lm){ try{ tp=measureBatTip(video, got.lm); }catch{} }
       series.push({ t:video.currentTime, lm:got?got.lm:null, wlm:got?got.wlm:null,
-                    batTh:bt?bt.th:null, batConf:bt?bt.conf:null });
+                    batTh:bt?bt.th:null, batConf:bt?bt.conf:null,
+                    tipCands:tp||null });
       if(i%4===0){
         const pct2=Math.round(i/total*100);
         $("analyzeBar").style.width=pct2+"%";
@@ -4117,7 +4460,10 @@ $("btnAnalyze").addEventListener("click",async()=>{
     /* 平滑化はランドマークだけを触るので、画像から測ったバット角は付け直す */
     for(let i=0;i<smoothSeries.length&&i<series.length;i++){
       smoothSeries[i].batTh=series[i].batTh; smoothSeries[i].batConf=series[i].batConf;
+      smoothSeries[i].tipCands=series[i].tipCands;
     }
+    /* 先端のうち、実際に振っている区間だけに印を付ける */
+    markTipSwing();
     const detected=series.filter(f=>f.lm).length;
 
     /* 胴体長(仕様書 §2-5)。
@@ -4206,6 +4552,9 @@ function renderAnalysis(){
   const bn=rawSeries.filter(f=>f.lm).length;
   set("kBat", !measureBat ? "切っています" : (bn? `${bm} / ${bn} コマ` : "--"),
       !measureBat ? "na" : (bn&&bm/bn>=0.7?"ok":(bn&&bm/bn>=0.4?"":"warn")));
+  const tu=smoothSeries.filter(f=>f.tipUse).length;
+  set("kTip", tu? `${tu} コマ` : tipNote,
+      tu>=10?"ok":(tu>0?"":"warn"));
   const ss = subjectSize(smoothSeries.length?smoothSeries:rawSeries);
   set("kSubj", ss?`画面の高さの ${ss.pct}%`:"--",
       ss?(ss.h>=0.50?"ok":(ss.h>=0.35?"":"warn")):"na");
@@ -4386,7 +4735,7 @@ const PREF="battinglab.prefs.v1";
 function savePrefs(){
   try{ lsSet(PREF, JSON.stringify({
     modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value, FS_ANK, FS_TOE,
-    showBat, showBatPath, showBatFace, use3D, batInch,
+    showBat, showBatPath, showBatFace, showTipPath, use3D, batInch,
     measureBat,
     showAngles, angleSets, crossJoint, guideHip, guideShoulder, guideBackVert, guideFrontVert,
     refMode, refPickId, graphKey,
@@ -4399,6 +4748,7 @@ function savePrefs(){
   if(typeof p.mirror==="boolean") mirror=p.mirror;
   if(typeof p.showRaw==="boolean") showRaw=p.showRaw;
   if(typeof p.showBat==="boolean") showBat=p.showBat;
+  if(typeof p.showTipPath==="boolean") showTipPath=p.showTipPath;
   if(typeof p.measureBat==="boolean") measureBat=p.measureBat;
   if(typeof p.showBatPath==="boolean") showBatPath=p.showBatPath;
   if(typeof p.showBatFace==="boolean") showBatFace=p.showBatFace;
@@ -4427,6 +4777,7 @@ function savePrefs(){
   $("rawToggle").checked=showRaw; $("captureFpsSel").value=String(captureFps||0);
   $("measBatToggle").checked=measureBat;
   $("batToggle").checked=showBat; $("batPathToggle").checked=showBatPath;
+  $("tipPathToggle").checked=showTipPath;
   $("batFaceToggle").checked=showBatFace;
   $("use3DToggle").checked=use3D;
   $("refMode").value=refMode;
@@ -4472,6 +4823,7 @@ $("measBatToggle").addEventListener("change",e=>{ measureBat=e.target.checked; s
   if(measureBat && smoothSeries.length) toast("次の解析から画像で測ります"); });
 $("batToggle").addEventListener("change",e=>{ showBat=e.target.checked; savePrefs(); draw(); });
 $("batPathToggle").addEventListener("change",e=>{ showBatPath=e.target.checked; savePrefs(); draw(); });
+$("tipPathToggle").addEventListener("change",e=>{ showTipPath=e.target.checked; savePrefs(); draw(); });
 $("batFaceToggle").addEventListener("change",e=>{ showBatFace=e.target.checked; savePrefs(); draw(); });
 $("use3DToggle").addEventListener("change",e=>{ use3D=e.target.checked; savePrefs(); draw(); });
 $("btnBallPick").addEventListener("click",()=>{
@@ -6710,7 +7062,7 @@ window.__batlab = {
   get cropMode(){ return cropMode; },
   subjectSize, edgeReport,
   refPose, refAnchorOf, refEventNear, drawRefGhost,
-  measureBatAngle, batGrayFrom, buildQuickEvents,
+  measureBatAngle, batGrayFrom, buildQuickEvents, batBase, batAxis, markTipSwing, measureBatTip,
   get refMode(){ return refMode; }, get refPickId(){ return refPickId; },
   ptrCount:()=>ptrs.size,
   get mirror(){ return mirror; }, get calibPts(){ return calibPts; }, get busy(){ return busy; },
