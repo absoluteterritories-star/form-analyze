@@ -394,51 +394,61 @@
        映像そのものが小さくなる。高さをすべて使い、幅はそれに合わせる。 */
     .layout{flex:1 1 auto;min-height:0;display:grid;gap:8px;align-items:stretch;
       grid-template-columns:var(--land-left,240px) minmax(0,1fr);}
-    /* 操作は右側の上に貼り付ける。高さで切り取らないので、画面が小さくても
-       「別の動画」「拡大」などが枠の外に出て押せなくなることがない
-       (切り取っていたときは実測で最大6つ押せなくなっていた)。
-       解析タブに同じものがあるボタンは、ここでは出さない。 */
-    #landControls{display:block;position:sticky;top:0;z-index:4;background:var(--bg-0);padding-bottom:6px;}
+    /* 目盛りと再生ボタンは映像のすぐ下に置く(写真の並び)。
+       映像を見ながら位置を動かすものなので、左右に離すと目が往復する。
+       それ以外のボタン(映像ON・描き込み・先頭・拡大・別の動画…)は
+       右側へ移す。高さで切り取らないので、小さい画面でも枠の外に出ない。 */
+    .stage-card{height:100%;min-height:0;display:flex;flex-direction:column;position:static;}
+    /* layout() が付ける縦横比(style="aspect-ratio:1080/1920")より優先させる。
+       そのままだと幅から高さが決まり、下の操作列が枠の外へ押し出されて
+       再生ボタンが押せなくなる(実測でそうなった)。
+       横向きでは高さを先に決め、映像はその中に収める。 */
+    .stage{flex:1 1 auto;min-height:100px;aspect-ratio:auto !important;max-height:none;}
+    .transport{flex:0 0 auto;min-height:0;overflow:visible;padding:4px 6px 5px;border-top:none;}
+    /* 目盛りは全幅、その下に「時刻 | 再生ボタン」を1段で並べる */
+    /* 時刻の欄は幅を決め打ちにする。auto にすると時刻が横幅を取り切って
+       再生ボタンの列が 0 幅になり、ボタンが枠の外に出てしまう(実測でそうなった)。 */
+    .transport.show{display:grid;gap:2px;
+      grid-template-columns:58px minmax(0,1fr);
+      grid-template-areas:"seek seek" "time steps";}
+    .seek-wrap{grid-area:seek;padding:2px 0 0;}
+    .trim-rail{height:18px;margin:0;}
+    .tg{top:0;height:16px;}
+    /* 「開始/終了/長さ」は幅が足りないと1文字ずつ折り返して読めなくなる。
+       1行に収め、はみ出す分は横に流す。 */
+    .trim-lab{font-size:9px;margin:0;gap:6px;flex-wrap:nowrap;overflow-x:auto;
+      white-space:nowrap;}
+    .trim-lab::-webkit-scrollbar{display:none;}
+    .tline{grid-area:time;min-width:0;font-size:9.5px;gap:2px;margin:0;align-self:center;
+      line-height:1.25;flex-direction:column;align-items:flex-start;}
+    .tline b{font-size:12px;}
+    .tline .chip{padding:0 4px;font-size:9px;}
+    /* 狭いので、時刻とコマ番号だけにする(fps や速度は右側の設定で見られる) */
+    .tline>span:not(.chip),.tline .chip#fpsRead,.tline .chip#realRead,.tline .right{display:none;}
+    /* 再生は文字が長いので幅を多めに配る。折り返すとボタンが2段になって
+       列全体が高くなり、そのぶん映像が低くなる。 */
+    .steps:not(.fine-row){grid-area:steps;grid-template-columns:1fr 1.5fr 1fr;
+      gap:4px;margin:0;align-self:center;}
+    /* 0.1/0.01秒きざみは右側に置く。左はコマ送りと再生だけにする */
+    .steps .tbtn.fine{display:none;}
+    .tbtn{min-height:34px;font-size:11px;white-space:nowrap;}
+    .steps.fine-row{display:none;}
+
+    /* ---- 右側に移したボタン ---- */
+    #landControls{display:block;position:sticky;top:0;z-index:4;background:var(--bg-0);
+      padding-bottom:6px;}
     #landControls #qAnalyze,#landControls #qDetect,#landControls #qSave{display:none;}
-    #landControls .steps.fine-row{display:none;}
+    #landControls .quick-acts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;
+      margin-bottom:6px;}
     #landControls .transport-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));
       gap:4px;align-items:stretch;}
     #landControls .transport-row .ghost{font-size:10.5px;padding:0 4px;min-height:34px;
       margin-left:0 !important;white-space:normal;line-height:1.15;}
     /* :not([hidden]) を付けないと、隠してある倍率ボタン列まで出てしまう */
     #landControls .transport-row .zoombar:not([hidden]){grid-column:span 5;display:flex;gap:4px;}
-    #landControls .transport{padding:6px 7px 7px;}
-    .stage-card{height:100%;min-height:0;display:flex;flex-direction:column;position:static;}
-    .stage{flex:1 1 auto;min-height:110px;aspect-ratio:auto;max-height:none;}
-    /* 操作は下半分に収め、足りなければこの中だけスクロールする */
-    .transport{flex:0 1 auto;min-height:0;overflow-y:auto;padding:6px 8px 8px;
-      -webkit-overflow-scrolling:touch;}
-    .transport.show{display:flex;flex-direction:column;}
-    /* クイックバーは「イベントのボタン」と「操作のボタン」がひとつの箱に
-       入っている。横向きでは前者だけを上に出したいので、箱をほどいて
-       中身を直接 .transport の子として並べ替える。 */
-    .quickbar:not([hidden]){display:contents;}
-    /* 目盛りまわりは3段(再生位置・範囲のレール・範囲の文字)で 54px 使う。
-       横向きではその分そのまま映像が縮むので、詰めて 38px にする。 */
-    .seek-wrap{order:1;padding:2px 0 0;}
-    .trim-rail{height:20px;margin:0;}
-    .tg{top:0;height:18px;}
-    .trim-lab{font-size:9.5px;margin:0;}
-    /* 時刻・コマ・fps は、コマ送りしながら必ず見るので目盛りのすぐ下に置く */
-    .tline{order:2;font-size:10.5px;gap:6px;margin-bottom:2px;}
-    .steps:not(.fine-row){order:3;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;margin-bottom:6px;}
-    .quick-acts{order:4;}
-    .steps.fine-row{order:6;margin-bottom:4px;}
-    .quick-draw{order:7;}
-    .transport-row{order:8;gap:6px;}
-    /* 0.01秒きざみは細かい詰めに使うもの。狭い横向きでは出さない
-       (コマ送り ◀| |▶ は残す) */
-    .steps .tbtn.fine[data-step="0.01"],.steps .tbtn.fine[data-step="-0.01"]{display:none;}
-    .tbtn{min-height:36px;font-size:11.5px;}
-    .quick-acts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;}
-    .qbtn{min-height:36px;padding:6px 8px;font-size:11.5px;}
+    #landControls .quickbar{border-top:none;margin:0;padding:0;}
+    .qbtn{min-height:34px;padding:6px 8px;font-size:11.5px;}
     .quick-evs .qbtn{width:auto;}
-    .transport-row .ghost{min-height:34px;font-size:11px;padding:0 9px;}
     select.mini{min-height:34px;}
 
     .sidebar{height:100%;min-height:0;max-height:none;overflow-y:auto;position:static;
@@ -2572,19 +2582,26 @@ function syncLandscape(){
   const land = landMQ.matches;
   const tr=$("transport"), host=$("landControls"), card=document.querySelector(".stage-card");
   if(!tr||!host||!card) return;
+  /* 目盛りと再生ボタンは映像のすぐ下に残し、それ以外のボタンだけ右へ移す。
+     写真のような並び(映像 → 目盛り → 再生)にするため。 */
+  const qb=document.querySelector(".quickbar"), trow=document.querySelector(".transport-row");
   if(land !== landNow){
     landNow = land;
-    if(land) host.appendChild(tr);
-    else card.insertBefore(tr, $("fileInput"));   // もとの位置(動画のすぐ下)へ戻す
+    if(land){ if(qb) host.appendChild(qb); if(trow) host.appendChild(trow); }
+    else    { if(qb) tr.appendChild(qb);   if(trow) tr.appendChild(trow); }
   }
   if(!land){ document.documentElement.style.removeProperty("--land-left"); return; }
-  /* 左の幅 = 映像の高さ x 動画の縦横比。操作は右にあるので細くてよいが、
-     動画が読み込まれる前や横長の動画でも破綻しないように幅を挟む。 */
-  const h=card.clientHeight || 0;
+  /* 左の幅 = 目盛りと再生ボタンを引いた残りの高さ x 動画の縦横比。
+     操作が下に付くぶん映像は低くなるので、その高さで幅を決め直す。
+     細すぎると再生ボタンが潰れるので下限を置く。 */
   const n=(typeof cmpOn==="function" && cmpOn())?2:1;
   const ar=(videoAR>0?videoAR:0.5625)*n;
+  const strip=tr.offsetHeight||0;
+  const h=Math.max(60,(card.clientHeight||0)-strip);
   const w=Math.round(h*ar);
-  const lo=Math.round(innerWidth*0.14), hi=Math.round(innerWidth*0.62);
+  /* 再生ボタンが指で押せる幅を確保する。縦動画では左右に黒帯が出るが、
+     ボタンが細くなるより見やすい。 */
+  const lo=Math.max(190, Math.round(innerWidth*0.14)), hi=Math.round(innerWidth*0.62);
   document.documentElement.style.setProperty("--land-left",
     Math.max(lo, Math.min(hi, w||lo))+"px");
 }
