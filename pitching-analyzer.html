@@ -257,6 +257,21 @@
   .ghost:hover{border-color:var(--amber);color:var(--amber);}
 
   /* panels */
+  /* 改善の提案 */
+  .adv{border-top:1px solid var(--panel-line);padding:10px 12px;}
+  .adv:first-child{border-top:none;}
+  .adv-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+  .adv-n{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--bg-0);
+    background:var(--amber);border-radius:3px;padding:1px 6px;font-weight:700;flex:none;}
+  .adv-t{font-weight:700;font-size:13.5px;}
+  .adv-num{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 4px;
+    font-family:'JetBrains Mono',monospace;font-size:12px;}
+  .adv-num b{color:var(--chalk);font-weight:600;}
+  .adv-now{color:var(--alert);}
+  .adv-goal{color:var(--turf);}
+  .adv-why{font-size:12px;line-height:1.7;color:var(--chalk-dim);}
+  .adv-basis{font-size:10.5px;color:var(--chalk-dim);margin-top:4px;}
+  .adv-ok{padding:12px;font-size:12.5px;line-height:1.7;color:var(--chalk-dim);}
   .panel{background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;margin-bottom:14px;overflow:hidden;min-width:0;}
   .panel h2{font-family:'Oswald',sans-serif;font-size:12.5px;letter-spacing:.1em;font-weight:600;
     color:var(--chalk-dim);margin:0;padding:11px 14px 9px;border-bottom:1px solid var(--panel-line);
@@ -816,6 +831,12 @@
 
       <!-- ===== 指標 ===== -->
       <div class="tabpage" id="tab-metrics">
+        <div class="panel">
+          <h2>改善の提案 <span class="tag" id="adviceTag">--</span></h2>
+          <div id="adviceList"></div>
+          <div class="legend" id="adviceNote"></div>
+        </div>
+
         <div class="panel">
           <h2>球速 <span class="tag">手入力</span></h2>
           <div class="field">
@@ -4398,6 +4419,115 @@ function computeMetricsAll(){
   return { m, conf, resMs, dir, H, calibrated:!!(currentPitcher&&currentPitcher.calibrated) };
 }
 
+
+/* ================= 改善の提案 =================
+   指標を「一般的な目安」と見比べて、直す順に並べる。
+
+   方針:
+   ・目安がはっきりしている指標だけを対象にする。
+     根拠があいまいなものに数値目標を付けると、もっともらしいだけの助言になる。
+     各項目に根拠の確かさ(高/中)を出して、読む人が重みを判断できるようにする。
+   ・測定が当てにならないものからは助言しない(確かさ0.40未満、
+     fps が 60 未満のときのタイミング系は外す)。
+   ・あくまで一般論。その選手に合う値とは限らない。
+     記録がたまったら「再現性」タブの本人のばらつきで見るほうが確か。 */
+const ADVICE_RULES = [
+  { key:"knee_ext", title:"前膝を伸ばして支点を作る",
+    name:"前膝の伸展量", unit:"°", dec:0, signed:true, lo:10, scale:10, level:"高",
+    goal:(v)=> v<=0 ? "まず 0°以上(曲がり続けない)、慣れたら +10°以上" : "+10°以上",
+    why:"接地からリリースにかけて前膝が伸びると、前脚が支点になって骨盤と体幹の回転が速くなります。曲がったままだと力が前へ逃げ、球速も上がりません。",
+    basis:"前膝の伸展と球速の関係は、計測研究でも指導書でも共通して挙げられます。" },
+
+  { key:"stride_ratio", title:"ストライドを適正な長さに",
+    name:"ストライド長", unit:"%", dec:1, lo:80, hi:95, scale:8, level:"中",
+    goal:()=>"身長の 80〜95%",
+    why:"短いと下半身の力を使い切れません。長すぎると前脚で支えきれず、上体が遅れてリリースがばらつきます。",
+    basis:"投手のストライドは身長の8割前後という報告が多い。範囲は目安です。" },
+
+  { key:"knee_fp", title:"接地の前膝は曲げすぎず伸ばしすぎず",
+    name:"FP時 前膝角度", unit:"°", dec:0, lo:135, hi:155, scale:15, level:"中",
+    goal:()=>"135〜155°",
+    why:"曲げすぎると受け止めきれずに潰れ、伸ばしすぎると衝撃を吸収できず、そこから伸ばす余地もなくなります。",
+    basis:"適度な屈曲という向きは共通。範囲は目安です。" },
+
+  { key:"trunk_rel", title:"リリースで上体を前に被せる",
+    name:"リリース時 体幹前傾", unit:"°", dec:0, lo:30, hi:45, scale:10, level:"中",
+    goal:()=>"30〜45°",
+    why:"上体が前に被さるとリリースが打者寄りになり、ボールに力を加える距離も伸びます。立ったままだと球持ちが短くなります。",
+    basis:"リリース時の体幹前傾は 30°台という報告が多い。範囲は目安です。" },
+
+  { key:"elbow_fp", title:"接地時の肘は90°前後に",
+    name:"FP時 肘角度", unit:"°", dec:0, lo:80, hi:100, scale:12, level:"中",
+    goal:()=>"80〜100°",
+    why:"90°前後だと肩と肘への負担が小さく、そこから外旋・内旋につなげやすくなります。伸びすぎ・曲げすぎはどちらも力が伝わりにくく、負担も増えます。",
+    basis:"接地時の肘は90°前後という指導・報告が多い。範囲は目安です。" },
+];
+function adviceItems(){
+  if(!metrics) return null;
+  const {m,conf}=metrics;
+  const cOf=(k)=>({stride_ratio:conf.stride, knee_fp:conf.knee_fp, knee_rel:conf.knee_rel,
+                   knee_ext:conf.knee_fp, elbow_fp:conf.elbow}[k]);
+  const out=[];
+  for(const r of ADVICE_RULES){
+    if(r.timing && fps<60) continue;
+    const v=m[r.key];
+    if(v==null||!isFinite(v)) continue;
+    const c=cOf(r.key);
+    if(c!=null && isFinite(c) && c<0.40) continue;   // 当てにならない測定からは助言しない
+    const x=r.abs?Math.abs(v):v;
+    let miss=0;
+    if(r.lo!=null && x<r.lo) miss=r.lo-x;
+    if(r.hi!=null && x>r.hi) miss=x-r.hi;
+    if(miss<=0) continue;
+    const w=(r.level==="高")?1.25:1.0;
+    out.push({ r, v, lab:(c!=null&&isFinite(c))?(c>=0.8?"Good":c>=0.6?"Fair":"Poor"):null,
+               score:(miss/r.scale)*w });
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return out;
+}
+function renderAdvice(){
+  const box=$("adviceList"), tag=$("adviceTag"), note=$("adviceNote");
+  if(!box) return;
+  const caveat = `<b>これは一般的な目安との比較です。</b>年齢・体格・その選手の体の使い方は考えていません。
+    目安は出発点であって、その選手にとっての正解とは限りません。<br>
+    測定が当てにならない項目と、fps が 60 未満のときのタイミング系は外しています。<br>
+    <b>10球ほど記録がたまったら</b>「再現性」タブで<b>本人のばらつき</b>を見てください。
+    一般の目安より、その選手自身の普段の値と比べるほうが確かです。`;
+  if(!metrics){
+    tag.textContent="--";
+    box.innerHTML=`<div class="adv-ok">解析とイベントの確定が終わると、ここに提案が出ます。</div>`;
+    note.innerHTML=caveat;
+    return;
+  }
+  const it=adviceItems();
+  if(!it||!it.length){
+    tag.textContent="目安の範囲内";
+    box.innerHTML=`<div class="adv-ok">見ている項目は<b>すべて一般的な目安の範囲に入っています</b>。
+      ここから先は、一般論ではなく<b>その選手自身のばらつき</b>(「再現性」タブ)を見て、
+      同じ動きを繰り返せているかで判断してください。</div>`;
+    note.innerHTML=caveat;
+    return;
+  }
+  const top=it.slice(0,3);
+  tag.textContent=`${top.length}件`;
+  box.innerHTML=top.map((a,i)=>{
+    const r=a.r;
+    const now=(r.signed&&a.v>0?"+":"")+a.v.toFixed(r.dec)+(r.unit?" "+r.unit:"");
+    return `<div class="adv">
+      <div class="adv-h"><span class="adv-n">${i+1}</span><span class="adv-t">${r.title}</span></div>
+      <div class="adv-num">
+        <span>${r.name}: <b class="adv-now">いま ${now}</b></span>
+        <span>→ <b class="adv-goal">目標 ${r.goal(a.v)}</b></span>
+      </div>
+      <div class="adv-why">${r.why}</div>
+      <div class="adv-basis">根拠の確かさ: <b>${r.level}</b> — ${r.basis}
+        ${a.lab?` / この測定の確かさ: <b>${a.lab}</b>`:""}</div>
+    </div>`;
+  }).join("");
+  note.innerHTML=caveat;
+}
+
 function renderMetrics(){
   metrics=computeMetricsAll();
   const list=$("metricsList");
@@ -4405,6 +4535,7 @@ function renderMetrics(){
     $("metricsTag").textContent="--";
     list.innerHTML=`<span class="k" style="grid-column:span 2;">解析とイベントの確定が必要です</span>`;
     $("metricsNote").textContent="";
+    renderAdvice();
     return;
   }
   const {m,conf,resMs}=metrics;
@@ -4466,7 +4597,7 @@ function renderMetrics(){
   if(lowc.length) warns.push(`検出信頼度が低い項目があります(${lowc.join(", ")})。⚠印の値は参考程度に`);
   $("metricsNote").innerHTML=warns.length?warns.map(w=>"・"+w).join("<br>"):
     "すべて平滑化後の骨格から、等方座標・身長比で算出しています。";
-  drawTimeline(); renderRepeat();
+  drawTimeline(); renderRepeat(); renderAdvice();
 }
 $("speedKmh").addEventListener("input",()=>{ renderMetrics(); if(isChainVisible()) drawChain(); });
 
