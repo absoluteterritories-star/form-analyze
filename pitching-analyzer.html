@@ -824,9 +824,14 @@
             自動検出は<b>候補の提示</b>です。必ず目で確認して確定してください。
             とくに<b>リリース</b>は、手の速度が最大になるコマとボールが離れるコマが
             数コマずれることがあります。<br>
-            <b>Arm Peak は肩の最大外旋角度(MER)ではありません。</b>
+            <b>「トップ」は肩の最大外旋角度(MER)ではありません。</b>
             側面2Dでは真の外旋角度は測れないため、
-            「肘が最も後方かつ高い位置に来たコマ」を近似として出しています。
+            <b>肩から見て肘が最も後ろ・高い位置に来たコマ</b>を出しています。
+            MER はトップより<b>後</b>、腕が前に加速している途中で前腕が最も寝る瞬間で、
+            この映像からは測れません。<br>
+            ⚠️ 見ているのは<b>肘</b>で、手やボールの位置ではありません。
+            肘は上がっているのに手が垂れている選手などでは、
+            手で見た「トップ」と数コマずれることがあります。
           </div>
         </div>
       </div>
@@ -875,12 +880,15 @@
           <div class="graph-wrap"><canvas id="timeline" width="680" height="132"></canvas></div>
           <div class="kv" id="tlKv"></div>
           <div class="legend">
-            接地(FP)から Arm Peak を経てリリースまでの時間配分です。
+            接地(FP)からトップを経てリリースまでの時間配分です。
             長さがそのまま実時間の比です(スロー撮影の補正込み)。<br>
-            <b>Arm Peak が FP より前に来ることもあります</b>(早めに腕が上がっている)。
-            そのときは FP の左側に伸びた帯として表示します。<br>
-            ⚠️ <b>Arm Peak は肩の最大外旋角度(MER)ではありません。</b>
-            側面2Dでは真の外旋角度は測れないため、「肘が最も後方かつ高い位置に来たコマ」の近似です。
+            <b>トップが FP より前に来ることもあります</b>(早めに腕が上がっている)。
+            そのときは FP の左側に伸びた帯として表示します。
+            <b>「接地のときにトップに入れているか」は、この FP→トップ の符号で読めます</b>
+            (マイナスなら接地より前にトップ、プラスなら接地してからトップ)。<br>
+            ⚠️ <b>「トップ」は肩の最大外旋角度(MER)ではありません。</b>
+            側面2Dでは真の外旋角度は測れないため、肩から見て肘が最も後ろ・高いコマを出しています。
+            見ているのは<b>肘</b>で、手やボールの位置ではありません。
           </div>
         </div>
 
@@ -1323,7 +1331,7 @@
             ⑫ アラート(しきい値は変更可) ⑬ 10球ブロックごとの変化
             ⑭ CSV / JSON の書き出しと読み込み
             ⑮ セッション概要 ⑯ 2球の比較(骨格の重ね + 指標の差)
-            ⑰ リリース位置の散布図(縦横同縮尺) ⑱ FP→Arm Peak→リリースのタイムライン
+            ⑰ リリース位置の散布図(縦横同縮尺) ⑱ FP→トップ→リリースのタイムライン
             ⑲ 10球ブロックの推移グラフ<br><br>
             <b>Ver.1 の予定範囲はこれで一通り入りました。</b>
             実際の動画で試して、検出のしきい値やアラートのしきい値を詰めていく段階です。<br><br>
@@ -4010,7 +4018,7 @@ const EVENTS = [
   { id:"set", short:"セット",  label:"セット/構え" },
   { id:"lift", short:"脚上げ", label:"最大脚上げ" },
   { id:"fp", short:"接地",   label:"前足接地 (FP)" },
-  { id:"arm", short:"Arm",  label:"Arm Peak (2D近似)" },
+  { id:"arm", short:"トップ", label:"トップ (腕が最も後ろ・高い)" },
   { id:"rel", short:"リリース",  label:"リリース" },
   { id:"fin", short:"フィニッシュ",  label:"フィニッシュ" },
 ];
@@ -4103,7 +4111,9 @@ function detectEvents(){
     for(let i=fp;i<N;i++){ const v=spd(i,armW); if(v!=null&&v>maxW){ maxW=v; rel=i; } }
   }
 
-  /* ⑤ Arm Peak(§4-2): fp−0.15秒 〜 rel で 後方度+高さ度 が最大 */
+  /* ⑤ トップ(仕様書では Arm Peak。§4-2): fp−0.15秒 〜 rel で 後方度+高さ度 が最大。
+     中の id は "arm" のまま。画面の名前だけ「トップ」にしている
+     (id や CSV の列名を変えると、これまでの記録・書き出しと食い違うため) */
   let arm=-1, best=-Infinity;
   const tFrom=S[fp].t-0.15, tTo=rel>=0?S[rel].t:S[N-1].t;
   for(let i=0;i<N;i++){
@@ -4256,9 +4266,9 @@ const METRIC_ROWS = [
   { k:"elbow_fp",   label:"FP時 肘角度",             unit:"°",    dec:0 },
   { core:true, k:"trunk_fp",   label:"FP時 体幹前傾",           unit:"°",    dec:1, signed:true },
   { core:true, k:"trunk_rel",  label:"リリース時 体幹前傾",      unit:"°",    dec:1, signed:true },
-  { k:"t_fp_arm",   label:"FP→Arm Peak",            unit:"ms",   dec:0, signed:true, timing:true },
+  { k:"t_fp_arm",   label:"FP→トップ",               unit:"ms",   dec:0, signed:true, timing:true },
   { core:true, k:"t_fp_rel",   label:"FP→リリース",             unit:"ms",   dec:0, timing:true },
-  { k:"t_arm_rel",  label:"Arm Peak→リリース",       unit:"ms",   dec:0, timing:true },
+  { k:"t_arm_rel",  label:"トップ→リリース",          unit:"ms",   dec:0, timing:true },
   { k:"rel_height", label:"リリース高 (RPZ)",         unit:"身長比", dec:3, cm:"rel_height_cm" },
   { k:"rel_ext",    label:"エクステンション (RPEx)",  unit:"身長比", dec:3, cm:"rel_ext_cm", side:true },
   { k:"rel_side",   label:"リリースサイド (RPX・腕側＋)", unit:"身長比", dec:3, cm:"rel_side_cm", signed:true, back:true },
@@ -5091,9 +5101,9 @@ const STAT_DEFS = [
   { k:"elbow_fp",     label:"FP時 肘角度",             unit:"°",       dec:0, c:"elbow",    cv:true },
   { k:"trunk_fp",     label:"FP時 体幹前傾",           unit:"°",       dec:1, c:null,       cv:false, signed:true },
   { k:"trunk_rel",    label:"リリース時 体幹前傾",      unit:"°",       dec:1, c:null,       cv:false, signed:true },
-  { k:"t_fp_arm",     label:"FP→Arm Peak",           unit:"ms",      dec:0, c:null,       cv:false, signed:true, timing:true },
+  { k:"t_fp_arm",     label:"FP→トップ",              unit:"ms",      dec:0, c:null,       cv:false, signed:true, timing:true },
   { k:"t_fp_rel",     label:"FP→リリース",            unit:"ms",      dec:0, c:null,       cv:true,  timing:true },
-  { k:"t_arm_rel",    label:"Arm Peak→リリース",      unit:"ms",      dec:0, c:null,       cv:true,  timing:true },
+  { k:"t_arm_rel",    label:"トップ→リリース",         unit:"ms",      dec:0, c:null,       cv:true,  timing:true },
   { k:"rel_height",   label:"リリース高 (RPZ)",        unit:"身長比",  dec:3, c:"release",  cv:true },
   { k:"rel_ext",      label:"エクステンション (RPEx)", unit:"身長比",  dec:3, c:"release",  cv:false, signed:true },
   { k:"rel_side",     label:"リリースサイド (RPX)",    unit:"身長比",  dec:3, c:"relside",  cv:false, signed:true },
@@ -5642,7 +5652,7 @@ async function renderSummary(){
     : "このセッションで記録した投球の要約です。他人の値とは比べていません。";
 }
 
-/* ---- FP→Arm Peak→リリース のタイムライン(仕様書 §10 Timing) ---- */
+/* ---- FP→トップ→リリース のタイムライン(仕様書 §10 Timing。旧称 Arm Peak) ---- */
 function drawTimeline(){
   const cv=$("timeline"); if(!cv) return;
   const g=cv.getContext("2d"), W=cv.width, H=cv.height;
@@ -5659,7 +5669,7 @@ function drawTimeline(){
   $("tlTag").textContent=`FP→リリース ${Math.round(tFR)}ms`;
   const PAD={l:14,r:14,t:26,b:30};
   const pw=W-PAD.l-PAD.r;
-  /* Arm Peak が FP より前なら、その分だけ左に余白を取る */
+  /* トップが FP より前なら、その分だけ左に余白を取る */
   const lo=Math.min(0, tFA!=null?tFA:0), hi=tFR;
   const span=Math.max(1, hi-lo);
   const X=(ms)=>PAD.l+(ms-lo)/span*pw;
@@ -5686,7 +5696,7 @@ function drawTimeline(){
     g.fillText(label, x, yBar-12);
   };
   mark(0,"接地(FP)","#f2b632");
-  if(tFA!=null&&isFinite(tFA)) mark(tFA,"Arm Peak","#9b7ede");
+  if(tFA!=null&&isFinite(tFA)) mark(tFA,"トップ","#9b7ede");
   mark(tFR,"リリース","#e05a4e");
   /* 時間目盛り */
   g.fillStyle="#5f6f68"; g.font="10px monospace";
@@ -5697,9 +5707,9 @@ function drawTimeline(){
     tick(tFA,(tFA>0?"+":"")+Math.round(tFA)+"ms");
   const res=1000/fps/slowFactor();
   kv.innerHTML=
-     `<span class="k">FP → Arm Peak</span><span class="v ${tFA!=null?"":"na"}">${
+     `<span class="k">FP → トップ</span><span class="v ${tFA!=null?"":"na"}">${
         tFA==null?"--":(tFA>0?"+":"")+Math.round(tFA)+" ms"}</span>`
-    +`<span class="k">Arm Peak → リリース</span><span class="v ${tAR!=null?"":"na"}">${
+    +`<span class="k">トップ → リリース</span><span class="v ${tAR!=null?"":"na"}">${
         tAR==null?"--":Math.round(tAR)+" ms"}</span>`
     +`<span class="k">FP → リリース</span><span class="v">${Math.round(tFR)} ms</span>`
     +`<span class="k">時間分解能(1コマ)</span><span class="v ${fps>=50?"ok":"warn"}">±${res.toFixed(1)} ms${
