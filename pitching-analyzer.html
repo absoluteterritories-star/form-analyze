@@ -3530,7 +3530,20 @@ $("btnAnalyze").addEventListener("click",async()=>{
   $("btnAnalyze").textContent="中止"; $("btnAnalyze").disabled=false;
   /* 刻みは 1/fps なので、fps を測り損ねていると 240fps の動画でも
      30fps ぶんしか読まない。解析に入る前にここで測る。 */
-  if(!fpsProbed){ setStatus("busy","コマの間隔を測っています…"); await probeFps(); }
+  /* コマの間隔を外したまま解析すると、240fps の動画を 30fps として扱い、
+     コマの 7/8 を黙って捨てることになる。ここは解析の入口なので、
+     読み込み時より粘って測り、それでも駄目なら本人に伝える。 */
+  if(!fpsProbed){
+    setStatus("busy","コマの間隔を測っています…");
+    for(let k=0;k<3 && !fpsProbed;k++){ await waitReady(3,3000); await probeFps(); }
+  }
+  if(!fpsMeasured){
+    /* 「撮影時のfps」の設定は実時間の換算用で、コマの間隔そのものは直せない。
+       直す手立ては動画を選び直すことなので、そう言う。 */
+    setStatus("err","コマの間隔を測れませんでした。1秒30コマとして解析します。"+
+      "スローで撮った動画なら、いったん「別の動画」から選び直してください");
+    toast("コマの間隔を測れませんでした(1秒30コマとして解析します)");
+  }
   const start=clamp(trim.start,0,video.duration);
   const end=trim.end!=null?Math.min(video.duration,trim.end):video.duration;
   const dur=Math.max(0.1,end-start);

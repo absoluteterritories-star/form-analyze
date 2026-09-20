@@ -1239,12 +1239,19 @@
             測った向きがバット本体と背景の直線のあいだでコマごとに入れ替わり、
             元コマと並べると 131〜166° 外れているコマがありました。
             先端は<b>点</b>なので裏返りようがなく、握りからの距離も決まっているので素直に追えます。<br>
-            <b>先端が追えたコマだけ描きます。</b>追えないコマは何も描きません。
-            実測(240fps)では 21コマで、バットの絵と軌跡の数は必ず一致します。<br>
-            <b>⚠️ 120fps 以上で撮ってください。</b>
-            30fps では1コマでバット長の1.5倍動くため先端を追えず、
-            <b>バットの絵も軌跡も出ません</b>。当てにならない絵を描くより出さない方を選んでいます。
-            30fps でも全コマに描きたい場合は、このスイッチを切ってください
+            <b>先端が追えたコマだけ描きます。</b>追えないコマは何も描きません。<br>
+            切り出す枠は握りについて動くので、以前は「1つ前のコマの切り出し」と
+            引き算していたぶん、枠のずれが動きとして出て、
+            <b>静止した屋根の縁や木を先端と取り違えていました</b>
+            (スイングが速いほどずれが大きくなるので、速いほど崩れていました)。
+            いまは1つ前のコマを<b>同じ枠で切り直して</b>比べます。
+            実測(同じ動画)で、拾う候補が 732個 → 58個 に減り、
+            半径÷バット長の9割値が 1.33(輪の外れ際) → 1.15(先端の位置)になりました。<br>
+            軌跡が取れたコマ: 240fps 42コマ / 120fps 27コマ / 60fps 24コマ。<br>
+            <b>120fps 以上で撮ってください。</b>
+            30fps でも出ることはありますが(実測 6〜30コマ)、
+            1コマでバット長の半分以上動くため途切れやすく、出ないこともあります。
+            30fps で全コマに描きたい場合は、このスイッチを切ってください
             （当てにならないと承知のうえで、両手の並びから描きます）。
           </div>
           <div class="opt-row">
@@ -1378,11 +1385,17 @@
             バットの先端は剛体の端なので、<b>軌跡は滑らかにしか曲がりません</b>。
             曲がり方が不自然な道は選ばず、それでも不自然なら<b>何も描きません</b>
             (事前解析の一覧に理由が出ます)。<br>
-            <b>⚠️ 120fps 以上で撮ってください。</b>
-            実写で確かめたところ、<b>240fps では滑らかな弧が取れました</b>が、
-            <b>30fps では取れません</b>。30fps は1コマでバット長の1.5倍動くため、
-            どの点とどの点がつながるのかを決められないからです。
-            当てにならない軌跡を描くより、出さない方を選んでいます。
+            <b>比べる相手は、今と同じ枠で切り直します。</b>
+            切り出す枠は握りについて動くので、1つ前のコマの切り出しをそのまま引くと、
+            <b>枠のずれが「動き」として出て</b>、静止した屋根の縁や木を先端と
+            取り違えます。握りが速く動くほどずれるので、
+            <b>スイングが速いほど崩れる</b>という形で出ていました。<br>
+            <b>120fps 以上で撮ってください。</b>
+            同じ動画から作った実測で、軌跡が取れたコマは
+            <b>240fps 42コマ / 120fps 27コマ / 60fps 24コマ</b>。
+            30fps でも出ることはありますが(実測 6〜30コマ)、
+            1コマでバット長の半分以上動くので途切れやすく、
+            つながらないときは<b>何も描きません</b>(理由が出ます)。
           </div>
         </div>
         <div class="panel">
@@ -2581,12 +2594,33 @@ const BAT_TIP_ROI=448;
 const batTipCv=document.createElement("canvas");
 batTipCv.width=batTipCv.height=BAT_TIP_ROI;
 const batTipCtx=batTipCv.getContext("2d",{willReadFrequently:true});
-let batTipPrevGray=null, batTipPrev=null, batTipPrev2=null, batTipPrevAng=null;
+let batTipPrev=null, batTipPrev2=null, batTipPrevAng=null;
+/* ============ 1つ前のコマを「同じ枠で」切り直すための控え ============
+   ここが先端追跡のいちばんの穴だった。
+   切り出す枠は握りについて動き、大きさも胴体長で毎コマ変わる。
+   それなのに「1つ前のコマの切り出し」と引き算していたので、
+   枠がずれたぶんだけ、静止した屋根の縁・木・柵までが「動いた」ことになっていた。
+   握りが速く動くほどずれが大きくなるので、
+   スイングが速いほど背景を拾いやすいという、実際に起きている症状になる。
+   1つ前のコマの映像そのものを取っておき、今のコマと同じ枠で切り直して引けば、
+   本当に動いたものだけが残る。 */
+const batTipPrevCv=document.createElement("canvas");
+const batTipPrevCtx=batTipPrevCv.getContext("2d",{willReadFrequently:true});
+const batTipCv2=document.createElement("canvas");
+batTipCv2.width=batTipCv2.height=BAT_TIP_ROI;
+const batTipCtx2=batTipCv2.getContext("2d",{willReadFrequently:true});
+let batTipPrevOk=false;
+function batTipKeepFrame(src){
+  const vw=src.videoWidth||src.width, vh=src.videoHeight||src.height;
+  if(!vw||!vh){ batTipPrevOk=false; return; }
+  if(batTipPrevCv.width!==vw||batTipPrevCv.height!==vh){ batTipPrevCv.width=vw; batTipPrevCv.height=vh; }
+  try{ batTipPrevCtx.drawImage(src,0,0,vw,vh); batTipPrevOk=true; }catch{ batTipPrevOk=false; }
+}
 /* 毎コマ作ると重いので使い回す */
 let _tipSel=null, _tipII=null;
 function batTipBuf(R){ if(!_tipSel||_tipSel.length!==R*R) _tipSel=new Uint8Array(R*R); else _tipSel.fill(0); return _tipSel; }
 function batTipII(W1){ if(!_tipII||_tipII.length!==W1*W1) _tipII=new Int32Array(W1*W1); return _tipII; }
-function resetBatTip(){ batTipPrevGray=null; batTipPrev=null; batTipPrev2=null; batTipPrevAng=null; }
+function resetBatTip(){ batTipPrev=null; batTipPrev2=null; batTipPrevAng=null; batTipPrevOk=false; }
 
 function batTipGray(src, cBotIso, lenIso){
   const vw=src.videoWidth||src.width, vh=src.videoHeight||src.height;
@@ -2600,13 +2634,25 @@ function batTipGray(src, cBotIso, lenIso){
   const d=batTipCtx.getImageData(0,0,BAT_TIP_ROI,BAT_TIP_ROI).data;
   const g=new Float32Array(BAT_TIP_ROI*BAT_TIP_ROI);
   for(let i=0,j=0;i<d.length;i+=4,j++) g[j]=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+  /* 1つ前のコマを、今とまったく同じ枠で切り直す。
+     こうしないと、枠が動いたぶんが「動き」として出てしまう。 */
+  let gp=null;
+  if(batTipPrevOk){
+    batTipCtx2.clearRect(0,0,BAT_TIP_ROI,BAT_TIP_ROI);
+    try{
+      batTipCtx2.drawImage(batTipPrevCv, sx,sy,sw,sh, 0,0,BAT_TIP_ROI,BAT_TIP_ROI);
+      const d2=batTipCtx2.getImageData(0,0,BAT_TIP_ROI,BAT_TIP_ROI).data;
+      gp=new Float32Array(BAT_TIP_ROI*BAT_TIP_ROI);
+      for(let i=0,j=0;i<d2.length;i+=4,j++) gp[j]=d2[i]*0.299+d2[i+1]*0.587+d2[i+2]*0.114;
+    }catch{ gp=null; }
+  }
   /* 切り出し枠が動画の外にはみ出した部分は真っ黒になる。
      握りが動くと、その境目が「動く・暗い・太い」領域として出てしまい、
      実際にそこを先端と誤って拾っていた(画面外の x=-0.03 などが出た)。
      動画の中に入っている範囲を返して、外は使わないようにする。 */
   const inX0=(0-sx)/sw*BAT_TIP_ROI, inX1=(vw-sx)/sw*BAT_TIP_ROI;
   const inY0=(0-sy)/sh*BAT_TIP_ROI, inY1=(vh-sy)/sh*BAT_TIP_ROI;
-  return { g, side, inX0, inX1, inY0, inY1 };
+  return { g, gp, side, inX0, inX1, inY0, inY1 };
 }
 const BAT_TIP_NB=180;           // 2°きざみ
 const BAT_TIP_CANDS=3;          // 1コマにいくつ候補を出すか
@@ -2616,11 +2662,10 @@ const BAT_TIP_CANDS=3;          // 1コマにいくつ候補を出すか
    候補を複数返しておき、どれを採るかは後の経路選びに任せる。 */
 function measureBatTip(src, lm){
   const base=batBase(lm);
-  if(!base){ batTipPrevGray=null; return null; }
+  if(!base) return null;
   const roi=batTipGray(src, base.cBot, base.len);
-  if(!roi){ batTipPrevGray=null; return null; }
-  const g=roi.g, prev=batTipPrevGray;
-  batTipPrevGray=g;
+  if(!roi) return null;
+  const g=roi.g, prev=roi.gp;   // prev は今と同じ枠で切り直した1つ前のコマ
   if(!prev) return null;
   const R=BAT_TIP_ROI, cx=R/2, cy=R/2;
   const L=base.len/roi.side*R;
@@ -3057,7 +3102,8 @@ const BAT_SEARCH_STEP=1.5;    // 何度きざみで探すか
 const BAT_ROI=128;            // 切り出しを何ピクセル四方に縮めて調べるか
 const batRoi=document.createElement("canvas"); batRoi.width=batRoi.height=BAT_ROI;
 const batRoiCtx=batRoi.getContext("2d",{willReadFrequently:true});
-let batPrevGray=null, batPrevKey="";
+const batRoi2=document.createElement("canvas"); batRoi2.width=batRoi2.height=BAT_ROI;
+const batRoi2Ctx=batRoi2.getContext("2d",{willReadFrequently:true});
 /* 画面(等方)座標 → 元動画の正規化座標 */
 function isoToNorm(q){ return { x:q.x/videoAR, y:q.y }; }
 /* src(video か canvas) から、バットが収まる正方形を切り出して灰色にする */
@@ -3073,7 +3119,20 @@ function batGrayFrom(src, cBotIso, lenIso){
   const d=batRoiCtx.getImageData(0,0,BAT_ROI,BAT_ROI).data;
   const g=new Float32Array(BAT_ROI*BAT_ROI);
   for(let i=0,j=0;i<d.length;i+=4,j++) g[j]=(d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114);
-  return { g, sx, sy, sw, sh, side };
+  /* 先端追跡と同じ直し。切り出す枠は握りについて動くので、
+     「1つ前のコマの切り出し」と引くと、枠のずれが動きとして出てしまう。
+     1つ前のコマを今と同じ枠で切り直して返す。 */
+  let gp=null;
+  if(batTipPrevOk){
+    batRoi2Ctx.clearRect(0,0,BAT_ROI,BAT_ROI);
+    try{
+      batRoi2Ctx.drawImage(batTipPrevCv, sx,sy,sw,sh, 0,0,BAT_ROI,BAT_ROI);
+      const d2=batRoi2Ctx.getImageData(0,0,BAT_ROI,BAT_ROI).data;
+      gp=new Float32Array(BAT_ROI*BAT_ROI);
+      for(let i=0,j=0;i<d2.length;i+=4,j++) gp[j]=(d2[i]*0.299+d2[i+1]*0.587+d2[i+2]*0.114);
+    }catch{ gp=null; }
+  }
+  return { g, gp, sx, sy, sw, sh, side };
 }
 const batAt=(g,x,y)=>{
   const xi=x|0, yi=y|0;
@@ -3092,11 +3151,13 @@ function batAnchor(lm){
   return { cBot:base.cBot, len:base.len, seed:batLastTh, from:"prev" };
 }
 let batLastTh=null;
-function measureBatAngle(src, lm, prevGray){
+function measureBatAngle(src, lm){
   if(!lm) return null;
   const b=batAnchor(lm); if(!b) return null;
   const roi=batGrayFrom(src, b.cBot, b.len); if(!roi) return null;
   const g=roi.g;
+  /* 引数の prevGray(前のコマの切り出しそのもの)は枠がずれているので使わない */
+  const prevGray=roi.gp;
   /* ROI の中で、握りは中心。バット長は ROI の何ピクセルか */
   const cx=BAT_ROI/2, cy=BAT_ROI/2;
   const lenPx=b.len/roi.side*BAT_ROI;
@@ -3148,7 +3209,7 @@ function measureBatAngle(src, lm, prevGray){
   const conf = prom*even;
   if(conf>=BAT_CONF_MIN) batLastTh=best.th;      // 次のコマの種にする
   return { th:best.th, conf, prom:+prom.toFixed(3), even:+even.toFixed(3),
-           seed, from:b.from, dDeg:best.d*180/Math.PI, gray:g };
+           seed, from:b.from, dDeg:best.d*180/Math.PI };
 }
 
 function drawBat(c,cv,lm,t){
@@ -4448,7 +4509,20 @@ $("btnAnalyze").addEventListener("click",async()=>{
   $("btnAnalyze").textContent="中止"; $("btnAnalyze").disabled=false;
   /* 刻みは 1/fps なので、fps を測り損ねていると 240fps の動画でも
      30fps ぶんしか読まない。解析に入る前にここで測る。 */
-  if(!fpsProbed){ setStatus("busy","コマの間隔を測っています…"); await probeFps(); }
+  /* コマの間隔を外したまま解析すると、240fps の動画を 30fps として扱い、
+     コマの 7/8 を黙って捨てることになる。ここは解析の入口なので、
+     読み込み時より粘って測り、それでも駄目なら本人に伝える。 */
+  if(!fpsProbed){
+    setStatus("busy","コマの間隔を測っています…");
+    for(let k=0;k<3 && !fpsProbed;k++){ await waitReady(3,3000); await probeFps(); }
+  }
+  if(!fpsMeasured){
+    /* 「撮影時のfps」の設定は実時間の換算用で、コマの間隔そのものは直せない。
+       直す手立ては動画を選び直すことなので、そう言う。 */
+    setStatus("err","コマの間隔を測れませんでした。1秒30コマとして解析します。"+
+      "スローで撮った動画なら、いったん「別の動画」から選び直してください");
+    toast("コマの間隔を測れませんでした(1秒30コマとして解析します)");
+  }
   const start=clamp(trim.start,0,video.duration);
   const end=trim.end!=null?Math.min(video.duration,trim.end):video.duration;
   const dur=Math.max(0.1,end-start);
@@ -4465,7 +4539,7 @@ $("btnAnalyze").addEventListener("click",async()=>{
     /* 残り時間を出す。実写(1080x1920, 11秒)で4分かかったので、
        あと何分かが分からないと待てない。内訳(シーク/推論)も測って出す。 */
     const t0=performance.now(); let msSeek=0, msDetect=0;
-    batPrevGray=null; batLastTh=null; resetBatTip();
+    batLastTh=null; resetBatTip();
     for(let i=0;i<=total;i++){
       if(cancelBusy) break;
       const t=start+Math.min(dur-0.001,i*step);
@@ -4477,12 +4551,17 @@ $("btnAnalyze").addEventListener("click",async()=>{
          (切り出しキャンバスだと座標系が合わないため) */
       let bt=null;
       if(got&&got.lm&&measureBat){
-        try{ const mb=measureBatAngle(video, got.lm, batPrevGray);
-          if(mb){ bt={th:mb.th, conf:mb.conf}; batPrevGray=mb.gray; } }catch{}
+        /* 前のコマは measureBatAngle の中で「同じ枠で切り直して」使うので、
+           ここで切り出しを持ち回す必要はもう無い。 */
+        try{ const mb=measureBatAngle(video, got.lm);
+          if(mb){ bt={th:mb.th, conf:mb.conf}; } }catch{}
       }
       /* ヘッドの先端。向き(線)とは別物で、点として追う */
       let tp=null;
       if(got&&got.lm){ try{ tp=measureBatTip(video, got.lm); }catch{} }
+      /* 骨格が取れなかったコマでも控えは更新する。飛ばすと、
+         次のコマが「2コマ前」と比べることになって動きが倍に出る。 */
+      try{ batTipKeepFrame(video); }catch{}
       series.push({ t:video.currentTime, lm:got?got.lm:null, wlm:got?got.wlm:null,
                     batTh:bt?bt.th:null, batConf:bt?bt.conf:null,
                     tipCands:tp||null });
@@ -7194,6 +7273,7 @@ $("btnJgCsv").addEventListener("click",()=>{
 });
 
 window.__batlab = {
+  get analyzeCost(){ return analyzeCost; },
   get crop(){ return crop; },
   get lastLandmarks(){ return lastLandmarks; },
   get raw(){ return rawSeries; },
