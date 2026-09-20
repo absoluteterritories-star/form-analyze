@@ -436,6 +436,27 @@
        横向きでは高さを先に決め、映像はその中に収める。 */
     .stage{flex:1 1 auto;min-height:100px;aspect-ratio:auto !important;max-height:none;}
     .transport{flex:0 0 auto;min-height:0;overflow:visible;padding:4px 6px 5px;border-top:none;}
+    /* 比べる動画を出しているときは、A と B の目盛りをそれぞれの映像の真下に並べる。
+       上下に積むと、どちらの目盛りがどちらの映像のものか分からなくなる。 */
+    .under-row{display:flex;gap:0;align-items:stretch;}
+    .under-row > .transport{flex:1 1 0;min-width:0;}
+    .under-row > #transportB{border-left:2px solid var(--panel-line);}
+    #transportB .seek-wrap{padding:2px 0 0 !important;}
+    #transportB .tline{padding:0 !important;}
+    #transportB .steps{padding:0 !important;grid-template-columns:1fr 1.5fr 1fr !important;}
+    #transportB .tbtn.fine{display:none;}
+    #transportB .tline>span:not(.chip),#transportB .tline .chip#fpsReadB{display:none;}
+    /* 2画面のとき: 時刻は1行、その下にコマ送りを横いっぱいに */
+    .under-row.two > .transport.show{grid-template-columns:minmax(0,1fr);
+      grid-template-areas:"seek" "time" "steps";}
+    .under-row.two .tline{flex-direction:row;align-items:center;gap:5px;flex-wrap:nowrap;
+      overflow:hidden;white-space:nowrap;}
+    .under-row.two .tline b{font-size:11px;}
+    .under-row.two .steps:not(.fine-row){grid-template-columns:1fr 1.6fr 1fr !important;}
+    .under-row.two .tbtn{font-size:10.5px;min-height:32px;}
+    /* どちらの目盛りがどちらの映像のものか分かるように、頭に小さく出す */
+    #transportB .tline::before{content:"比";font-size:8.5px;color:var(--chalk-dim);
+      border:1px solid var(--panel-line);border-radius:6px;padding:0 3px;}
     /* 目盛りは全幅、その下に「時刻 | 再生ボタン」を1段で並べる */
     /* 時刻の欄は幅を決め打ちにする。auto にすると時刻が横幅を取り切って
        再生ボタンの列が 0 幅になり、ボタンが枠の外に出てしまう(実測でそうなった)。 */
@@ -549,8 +570,10 @@
         <!-- 比べる動画。比較タブで読み込んだときだけ出る -->
         <div class="pane" id="paneB" hidden>
           <div class="pane-tag" id="paneTagB">比べる動画</div>
-          <video id="videoB" playsinline preload="auto" muted></video>
-          <canvas class="overlay" id="overlayB"></canvas>
+          <div class="cropwrap" id="cropWrapB">
+            <video id="videoB" playsinline preload="auto" muted></video>
+            <canvas class="overlay" id="overlayB"></canvas>
+          </div>
         </div>
       </div>
 
@@ -568,6 +591,8 @@
         ></div>
       </div>
 
+      <!-- 横向きで比べる動画を出したとき、A と B の目盛りを左右に並べるための行 -->
+      <div class="under-row" id="underRow">
       <div class="transport" id="transport">
         <div class="seek-wrap">
           <div class="seek-trim" id="seekTrim"></div>
@@ -635,6 +660,7 @@
           <button class="ghost" id="pickBtn2" style="margin-left:auto;">別の動画</button>
         </div>
       </div>
+      </div><!-- /under-row -->
       <input type="file" id="fileInput" accept="video/*">
       <input type="file" id="fileInputB" accept="video/*">
     </div>
@@ -1014,25 +1040,35 @@
             <button id="btnCmpClear" disabled>外す</button>
           </div>
           <div id="cmpVidCtl" hidden>
-            <div class="seek-wrap" style="padding:8px 12px 0;">
-              <input type="range" class="seek" id="seekB" min="0" max="1000" value="0" step="1"
-                aria-label="比べる動画の再生位置">
-            </div>
-            <div class="tline" style="padding:6px 12px 2px;">
-              <b id="timeReadB">0.000</b><span>/ <span id="durReadB">0.000</span> s</span>
-              <span class="chip" id="frameReadB">コマ 0</span>
-              <span class="chip" id="fpsReadB">fps --</span>
-            </div>
-            <div class="steps" style="padding:0 12px 10px;grid-template-columns:repeat(5,minmax(0,1fr));">
-              <button class="tbtn fine" data-bstep="-0.1">−0.1<em>秒</em></button>
-              <button class="tbtn" data-bframe="-1" title="1コマ戻る">◀|</button>
-              <button class="tbtn play" id="btnPlayB">▶ 再生</button>
-              <button class="tbtn" data-bframe="1" title="1コマ進む">|▶</button>
-              <button class="tbtn fine" data-bstep="0.1">＋0.1<em>秒</em></button>
+            <!-- 横向きのときは、この一式ごと A の目盛りの右へ移して左右に並べる -->
+            <div class="transport show" id="transportB">
+              <div class="seek-wrap" style="padding:8px 12px 0;">
+                <input type="range" class="seek" id="seekB" min="0" max="1000" value="0" step="1"
+                  aria-label="比べる動画の再生位置">
+              </div>
+              <div class="tline" style="padding:6px 12px 2px;">
+                <b id="timeReadB">0.000</b><span>/ <span id="durReadB">0.000</span> s</span>
+                <span class="chip" id="frameReadB">コマ 0</span>
+                <span class="chip" id="fpsReadB">fps --</span>
+              </div>
+              <div class="steps" style="padding:0 12px 10px;grid-template-columns:repeat(5,minmax(0,1fr));">
+                <button class="tbtn fine" data-bstep="-0.1">−0.1<em>秒</em></button>
+                <button class="tbtn" data-bframe="-1" title="1コマ戻る">◀|</button>
+                <button class="tbtn play" id="btnPlayB">▶ 再生</button>
+                <button class="tbtn" data-bframe="1" title="1コマ進む">|▶</button>
+                <button class="tbtn fine" data-bstep="0.1">＋0.1<em>秒</em></button>
+              </div>
             </div>
             <div class="toolbar" style="padding-top:0;">
+              <button id="btnCmpAuto" class="primary">インパクトで自動で合わせる</button>
               <button id="btnCmpAlign">いまの2コマを合わせる</button>
               <button id="btnCmpSwapSide">左右を入れ替え</button>
+            </div>
+            <div class="toolbar" style="padding-top:0;">
+              <span class="lab" style="align-self:center;font-size:11px;">比べる動画の拡大</span>
+              <button id="btnZoomOutB" title="引く">−</button>
+              <button id="btnZoomInB" title="寄る">＋</button>
+              <button id="btnCropResetB">全体に戻す</button>
             </div>
             <div class="opt-row">
               <span class="lab">Aと一緒に動かす</span>
@@ -1045,9 +1081,30 @@
             <div class="legend">
               別の選手の動画をそのまま右に並べます。<b>読み込んだ動画は解析も保存もしません</b>
               (骨格だけは出せます)。動画が外部に送られないのは今までどおりです。<br>
-              <b>「いまの2コマを合わせる」</b>を押すと、そのときの2つの位置のずれを覚えます。
-              以後「Aと一緒に動かす」でコマ送りすると、同じずれのまま並んで進みます。
-              インパクトの瞬間どうしを合わせてから見比べてください。<br>
+              <b>「インパクトで自動で合わせる」</b>は、両方の動画で
+              <b>画のうごきがいちばん大きいところ</b>を探して、そこで並べます。
+              スイングではバットがいちばん速いところで画が大きく動くので、
+              だいたい接触のあたりになります。<br>
+              <b>⚠️ これは目安です。</b>接触そのものを見つけているわけではありません。
+              ヘッドがいちばん速いコマと比べると<b>0.06〜0.10秒ほど早め</b>に出ます。
+              ただし<b>両方を同じやり方で測っている</b>ので早さは両方に同じだけ乗り、
+              並べたときには打ち消し合います。
+              実測(同じスイングを 240/120/60fps にしたもので比較)では、
+              そろえたあとに残るずれは<b>0.004〜0.17秒</b>でした。<br>
+              <b>⚠️ 1スイングだけに切った動画で使ってください。</b>
+              何本も入っていたり、打ったあと歩いて戻る場面まで入っていると、
+              そちらのほうが大きく動いて選ばれてしまいます
+              (実測: 5.6秒・複数の動きが入った動画で<b>0.9秒</b>ずれました)。
+              本人の動画はトリミングした範囲だけを見るので、先に範囲を切ってください。<br>
+              ずれていたら、コマ送りで合わせて<b>「いまの2コマを合わせる」</b>を押すと、
+              そのときの2つの位置のずれを覚えます。
+              以後「Aと一緒に動かす」でコマ送りすると、同じずれのまま並んで進みます。<br>
+              <b>「比べる動画の拡大」</b>の ＋ / − で、比べる動画だけを大きくできます。
+              選手の写っている大きさが違うときに揃えられます。
+              拡大中は<b>映像を指でなぞると見る場所が動きます</b>。<br>
+              <b>iPhone を横にすると</b>、2つの映像が左右に並び、
+              <b>それぞれの目盛りとコマ送りが真下に付きます</b>。
+              右側の目盛りには「比」と出ます。<br>
               コマの長さが違う動画どうしでも、時間(秒)で合わせるので並びます。
             </div>
           </div>
@@ -2354,12 +2411,18 @@ function fitOverlay(){
 function layout(){
   if(video.videoWidth&&video.videoHeight){
     /* 比べる動画を出しているときは2つ横に並ぶので、枠も倍の横幅にする */
-    const n=(typeof cmpOn==="function" && cmpOn())?2:1;
-    const ar=`${video.videoWidth*n} / ${video.videoHeight}`;
+    let wSum=video.videoWidth;
+    if(typeof cmpOn==="function" && cmpOn()){
+      const bw=videoB&&videoB.videoWidth, bh=videoB&&videoB.videoHeight;
+      /* B を A と同じ高さに並べたときの幅を足す */
+      wSum += (bw&&bh) ? video.videoHeight*(bw/bh) : video.videoWidth;
+    }
+    const ar=`${Math.round(wSum)} / ${video.videoHeight}`;
     if(stage.style.aspectRatio!==ar) stage.style.aspectRatio=ar;
   }
   fitOverlay(); if(typeof fitOverlayB==="function") fitOverlayB();
   applyCropTransform(); renderCropBox(); draw();
+  if(typeof applyCropTransformB==="function") applyCropTransformB();
   if(typeof drawB==="function") drawB();
 }
 function drawSkeleton(c,cv,lm,color,width,dots){
@@ -3892,6 +3955,9 @@ function noteFrameTime(mt){
    240fps で撮った動画の 7/8 のコマが黙って捨てられる。
    スロー撮影の意味がなくなるので、解析の前に必ず測る。 */
 let fpsProbed=false, fpsProbing=false;
+/* うごきの山を探している最中の目印。再生を道具として使うだけなので、
+   ふだんの再生用の処理(骨格の描き直し・比べる動画の追従)は動かさない。 */
+let mpScanning=false;
 const FPS_PROBE_RATE=0.25, FPS_PROBE_MAX_MS=3000, FPS_PROBE_WANT=20;
 async function probeFps(){
   if(fpsProbed || !video.duration || !isFinite(video.duration)) return;
@@ -3960,18 +4026,37 @@ function syncLandscape(){
     if(land){ if(qb) host.appendChild(qb); if(trow) host.appendChild(trow); }
     else    { if(qb) tr.appendChild(qb);   if(trow) tr.appendChild(trow); }
   }
+  /* 比べる動画の目盛りは、横向きのときだけ A の右へ。
+     縦向きでは比較タブの中(元の場所)に戻す。 */
+  {
+    const tb=$("transportB"), row=$("underRow"), home=$("cmpVidCtl");
+    const wantSide = land && (typeof cmpOn==="function" && cmpOn());
+    if(tb&&row&&home){
+      if(wantSide && tb.parentElement!==row) row.appendChild(tb);
+      else if(!wantSide && tb.parentElement!==home) home.insertBefore(tb, home.firstChild);
+      row.classList.toggle("two", !!wantSide);
+    }
+  }
   if(!land){ document.documentElement.style.removeProperty("--land-left"); return; }
   /* 左の幅 = 目盛りと再生ボタンを引いた残りの高さ x 動画の縦横比。
      操作が下に付くぶん映像は低くなるので、その高さで幅を決め直す。
      細すぎると再生ボタンが潰れるので下限を置く。 */
-  const n=(typeof cmpOn==="function" && cmpOn())?2:1;
-  const ar=(videoAR>0?videoAR:0.5625)*n;
-  const strip=tr.offsetHeight||0;
+  /* 2つ並ぶときは、それぞれの縦横比を足した幅がいる。
+     A の比を2倍にすると、B が横長の動画のときに右が切れる。 */
+  let ar=(videoAR>0?videoAR:0.5625);
+  if(typeof cmpOn==="function" && cmpOn()){
+    const bw=videoB&&videoB.videoWidth, bh=videoB&&videoB.videoHeight;
+    ar += (bw&&bh) ? bw/bh : ar;
+  }
+  const row=$("underRow");
+  const strip=(row?row.offsetHeight:0)||tr.offsetHeight||0;
   const h=Math.max(60,(card.clientHeight||0)-strip);
   const w=Math.round(h*ar);
   /* 再生ボタンが指で押せる幅を確保する。縦動画では左右に黒帯が出るが、
      ボタンが細くなるより見やすい。 */
-  const lo=Math.max(190, Math.round(innerWidth*0.14)), hi=Math.round(innerWidth*0.62);
+  const two=(typeof cmpOn==="function" && cmpOn());
+  const lo=Math.max(two?320:190, Math.round(innerWidth*(two?0.28:0.14)));
+  const hi=Math.round(innerWidth*(two?0.78:0.62));
   document.documentElement.style.setProperty("--land-left",
     Math.max(lo, Math.min(hi, w||lo))+"px");
 }
@@ -4076,8 +4161,8 @@ function stopLoop(){ if(rafHandle){cancelAnimationFrame(rafHandle);rafHandle=nul
 /* fps を測っている間は、いつもの再生処理を動かさない。
    解析前は1コマごとに姿勢検出をかけるため(detectAndRender)、
    2.5秒のあいだに数コマしか進まず、コマの間隔が測れなくなる。 */
-video.addEventListener("play",()=>{ if(fpsProbing) return; btnPlay.textContent="❚❚ 停止"; startLoop(); });
-video.addEventListener("pause",()=>{ if(fpsProbing) return; btnPlay.textContent="▶ 再生"; stopLoop(); detectAndRender(); });
+video.addEventListener("play",()=>{ if(fpsProbing||mpScanning) return; btnPlay.textContent="❚❚ 停止"; startLoop(); });
+video.addEventListener("pause",()=>{ if(fpsProbing||mpScanning) return; btnPlay.textContent="▶ 再生"; stopLoop(); detectAndRender(); });
 video.addEventListener("ended",()=>{ btnPlay.textContent="▶ 再生"; stopLoop(); });
 btnPlay.addEventListener("click",()=>{
   if(!video.src) return;
@@ -6677,14 +6762,56 @@ var cmpUrl=null, cmpFps=30, cmpOffset=0, cmpLink=true, cmpPoseOn=false;
 var cmpSwapped=false, poseB=null, lastTsB=-1, cmpLmB=null;
 function cmpOn(){ return !!(videoB && videoB.src); }
 
+/* ============ 比べる動画の拡大 ============
+   A の拡大と考え方は同じだが、こちらは検出に渡さないので見た目だけ。
+   cropB は「動画全体を 0..1 にした中の、見せる四角」。
+   A と同じく w===h の箱にすると、動画と同じ縦横比になって枠いっぱいに出る。 */
+var cropB=null, cropGeomB=null;
+const CROP_B_MIN=0.10;
+function applyCropTransformB(){
+  const wrap=$("cropWrapB"), pane=$("paneB");
+  if(!wrap||!pane) return;
+  pane.classList.toggle("zoomed", !!cropB);
+  if(!cropB||!cropGeomB){ wrap.style.transform=""; return; }
+  const pw=pane.clientWidth, ph=pane.clientHeight;
+  const ox=cropGeomB.ox, oy=cropGeomB.oy, dw=cropGeomB.dw, dh=cropGeomB.dh;
+  const cw=cropB.w*dw, ch=cropB.h*dh;
+  if(cw<1||ch<1){ wrap.style.transform=""; return; }
+  const sc=Math.min(pw/cw, ph/ch);
+  const cx=ox+(cropB.x+cropB.w/2)*dw, cy=oy+(cropB.y+cropB.h/2)*dh;
+  wrap.style.transform="translate("+(pw/2-sc*cx).toFixed(2)+"px, "+(ph/2-sc*cy).toFixed(2)+"px) scale("+sc.toFixed(4)+")";
+}
+/* 中心はそのままに、見せる四角の大きさだけ変える */
+function zoomByB(k){
+  if(!cmpOn()) return;
+  const cur=cropB||{x:0,y:0,w:1,h:1};
+  const cx=cur.x+cur.w/2, cy=cur.y+cur.h/2;
+  const w=Math.min(1, Math.max(CROP_B_MIN, cur.w/k));
+  if(w>=0.999){ resetCropB(); return; }
+  cropB={ x:clamp(cx-w/2,0,1-w), y:clamp(cy-w/2,0,1-w), w, h:w };
+  applyCropTransformB(); fitOverlayB(); drawB();
+}
+function resetCropB(){ cropB=null; applyCropTransformB(); fitOverlayB(); drawB(); }
+/* 拡大中は指でなぞって見る場所を動かせる(A と同じ操作) */
+function panCropB(dxPx, dyPx){
+  if(!cropB||!cropGeomB) return;
+  const pane=$("paneB"); if(!pane) return;
+  const sc=Math.min(pane.clientWidth/(cropB.w*cropGeomB.dw), pane.clientHeight/(cropB.h*cropGeomB.dh));
+  const nx=cropB.x - dxPx/sc/cropGeomB.dw, ny=cropB.y - dyPx/sc/cropGeomB.dh;
+  cropB.x=clamp(nx,0,1-cropB.w); cropB.y=clamp(ny,0,1-cropB.h);
+  applyCropTransformB();
+}
+
 function fitOverlayB(){
   if(!videoB||!overlayB) return;
   const vw=videoB.videoWidth, vh=videoB.videoHeight;
   const rw=videoB.offsetWidth, rh=videoB.offsetHeight;
   if(!vw||!vh||!rw||!rh) return;
   const sc=Math.min(rw/vw, rh/vh), dw=vw*sc, dh=vh*sc;
-  overlayB.style.left=(videoB.offsetLeft+(rw-dw)/2)+"px";
-  overlayB.style.top =(videoB.offsetTop +(rh-dh)/2)+"px";
+  const ox=videoB.offsetLeft+(rw-dw)/2, oy=videoB.offsetTop+(rh-dh)/2;
+  cropGeomB={ox,oy,dw,dh};       // 拡大の変形はこの枠を基準にする
+  overlayB.style.left=ox+"px";
+  overlayB.style.top =oy+"px";
   overlayB.style.width=dw+"px"; overlayB.style.height=dh+"px";
   const dpr=Math.min(window.devicePixelRatio||1,2);
   const w=Math.max(1,Math.round(dw*dpr)), h=Math.max(1,Math.round(dh*dpr));
@@ -6779,7 +6906,7 @@ $("fileInputB").addEventListener("change",(e)=>{
   if(cmpUrl){ try{ URL.revokeObjectURL(cmpUrl); }catch{} }
   cmpUrl=URL.createObjectURL(f);
   videoB.src=cmpUrl; videoB.load();
-  cmpOffset=0;
+  cmpOffset=0; cropB=null;
   e.target.value="";
   toast("比べる動画を読み込みました");
 });
@@ -6787,6 +6914,8 @@ $("btnCmpClear").addEventListener("click",()=>{
   videoB.pause(); videoB.removeAttribute("src"); videoB.load();
   if(cmpUrl){ try{ URL.revokeObjectURL(cmpUrl); }catch{} cmpUrl=null; }
   cmpLmB=null; cmpOffset=0;
+  cropB=null; cropGeomB=null;
+  const wb=$("cropWrapB"); if(wb) wb.style.transform="";
   setCmpVisible(false);
 });
 videoB.addEventListener("loadedmetadata",async()=>{
@@ -6814,6 +6943,188 @@ document.querySelectorAll("[data-bframe]").forEach(b=>b.addEventListener("click"
   videoB.pause(); seekB(videoB.currentTime + parseInt(b.dataset.bframe,10)/(cmpFps||30)); }));
 document.querySelectorAll("[data-bstep]").forEach(b=>b.addEventListener("click",()=>{
   videoB.pause(); seekB(videoB.currentTime + parseFloat(b.dataset.bstep)); }));
+/* ============ インパクトで自動で合わせる ============
+   比べる動画は解析しない決まりなので、骨格からインパクトを出すことはできない。
+   代わりに「画のうごきがいちばん大きいコマ」を探す。
+   スイングではヘッドの速さが接触の直前に最大になり、画のうごきもそこで最大になる。
+   本人の動画は、インパクトを確定してあればその時刻をそのまま使う
+   (自分で決めた位置のほうが確かなので、推定で上書きしない)。
+   あくまで目安なので、ずれていたらコマ送りして
+   「いまの2コマを合わせる」で直してもらう。 */
+const MP_W=96;                  // うごきを測る絵の横幅。小さいほど速い
+const mpCv=document.createElement("canvas");
+const mpCtx=mpCv.getContext("2d",{willReadFrequently:true});
+function mpSeek(v,t){
+  return new Promise(res=>{
+    const d=v.duration;
+    const tt=Math.max(0, Math.min(isFinite(d)?d-0.001:t, t));
+    if(Math.abs(v.currentTime-tt)<1e-4) return res();
+    let done=false;
+    const on=()=>{ if(done) return; done=true; v.removeEventListener("seeked",on); res(); };
+    v.addEventListener("seeked",on);
+    setTimeout(on, 700);          // 進まないコマで止まらないための保険
+    try{ v.currentTime=tt; }catch{ on(); }
+  });
+}
+/* t のところの絵を小さな灰色にして返す */
+function mpGray(v){
+  const vw=v.videoWidth, vh=v.videoHeight;
+  if(!vw||!vh) return null;
+  const w=MP_W, h=Math.max(8, Math.round(MP_W*vh/vw));
+  if(mpCv.width!==w||mpCv.height!==h){ mpCv.width=w; mpCv.height=h; }
+  try{ mpCtx.drawImage(v,0,0,w,h); }catch{ return null; }
+  const d=mpCtx.getImageData(0,0,w,h).data;
+  const g=new Float32Array(w*h);
+  for(let i=0,j=0;i<d.length;i+=4,j++) g[j]=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+  return g;
+}
+/* うごきの大きさ。差の大きい上位1%だけを足す。
+   体は大きくてもゆっくりなので差は中くらい、バットは小さくても速いので差が大きい。
+   平均で測ると体に埋もれてしまい、実測でヘッド最速から平均945msも外した。
+   上位1%にすると平均315ms(1スイングに切った動画なら約110ms)まで縮む。 */
+let _mpBuf=null;
+function mpEnergy(g, prev){
+  const n=g.length;
+  if(!_mpBuf||_mpBuf.length!==n) _mpBuf=new Float32Array(n);
+  const d=_mpBuf;
+  for(let i=0;i<n;i++) d[i]=Math.abs(g[i]-prev[i]);
+  /* 上位1%のしきい値を、256段のヒストグラムから出す(並べ替えより速い) */
+  const h=new Int32Array(256);
+  for(let i=0;i<n;i++) h[d[i]>255?255:(d[i]|0)]++;
+  const want=Math.max(1, Math.round(n*0.01));
+  let acc=0, th=255;
+  for(let v=255;v>=0;v--){ acc+=h[v]; if(acc>=want){ th=v; break; } }
+  let sum=0;
+  for(let i=0;i<n;i++) if(d[i]>=th) sum+=d[i];
+  return sum/n;
+}
+/* [t0,t1] を step きざみでシークして測る。細かく見るとき用(回数は少しだけ) */
+async function mpScan(v, t0, t1, step){
+  const ts=[], en=[];
+  let prev=null;
+  for(let t=t0; t<=t1+1e-9; t+=step){
+    await mpSeek(v,t);
+    const g=mpGray(v);
+    if(!g) continue;
+    if(prev && prev.length===g.length){
+      ts.push(v.currentTime); en.push(mpEnergy(g,prev));
+    }
+    prev=g;
+  }
+  return {ts,en};
+}
+/* ざっと見る方は「再生しながら」測る。
+   シークは1回あたり数十ミリ秒かかるので、全体をシークで舐めると
+   1.8秒の動画に39秒かかった(実測)。再生なら動画の長さぶんで済む。 */
+async function mpPlayScan(v, t0, t1, rate, onProgress){
+  const ts=[], en=[];
+  let prev=null;
+  if(!("requestVideoFrameCallback" in HTMLVideoElement.prototype)) return {ts,en};
+  const wasRate=v.playbackRate, wasMuted=v.muted;
+  try{
+    v.muted=true; v.playbackRate=rate;
+    await mpSeek(v,t0);
+    await v.play().catch(()=>{});
+    await new Promise(res=>{
+      let done=false;
+      const fin=()=>{ if(done) return; done=true; clearTimeout(tmo); try{v.pause();}catch{} res(); };
+      const tmo=setTimeout(fin, ((t1-t0)/Math.max(0.1,rate))*1000 + 4000);
+      const step=(_n,meta)=>{
+        const t=meta.mediaTime;
+        if(t>t1+1e-3){ fin(); return; }
+        const g=mpGray(v);
+        if(g){
+          if(prev && prev.length===g.length){
+            ts.push(t); en.push(mpEnergy(g,prev));
+          }
+          prev=g;
+        }
+        if(v.paused||v.ended){ fin(); return; }
+        v.requestVideoFrameCallback(step);
+      };
+      v.requestVideoFrameCallback(step);
+    });
+  }catch{}finally{
+    try{ v.pause(); }catch{}
+    v.playbackRate=wasRate; v.muted=wasMuted;
+  }
+  return {ts,en};
+}
+/* 山を選ぶ。頭の数個は捨てる。
+   ⚠️ 最初の差は「黒い画→最初のコマ」になりがちで、必ず大きく出る。
+   捨てないと、どの動画でも先頭が山になる(実測で 0.017s が選ばれた)。 */
+function mpArgMax(ts, en){
+  const skip=Math.min(3, Math.max(1, Math.floor(en.length*0.03)));
+  if(en.length<=skip+2) return null;
+  const sm=en.map((x,i,a)=>(a[i-1]??x)*0.25+x*0.5+(a[i+1]??x)*0.25);
+  let k=skip;
+  for(let i=skip;i<sm.length-1;i++) if(sm[i]>sm[k]) k=i;
+  return ts[k];
+}
+/* うごきがいちばん大きい時刻。まず再生しながらざっと、次にそのまわりを細かく。 */
+async function motionPeak(v, fpsHint, onProgress, range){
+  const dur=v.duration;
+  if(!dur||!isFinite(dur)) return null;
+  const t0=Math.max(0, (range&&range.t0)||0);
+  const t1=Math.min(dur, (range&&range.t1!=null)?range.t1:dur);
+  if(t1-t0<0.05) return null;
+  const wasT=v.currentTime, wasPaused=v.paused;
+  mpScanning=true;
+  try{
+    if(onProgress) onProgress("ざっと見ています…");
+    const rate=(t1-t0)>4 ? 2 : 1;
+    let a=await mpPlayScan(v, t0, t1, rate, onProgress);
+    /* 再生が止められている環境では、シークで舐める方に落とす */
+    if(a.en.length<5) a=await mpScan(v, t0, t1, Math.max(1/60,(t1-t0)/120));
+    const tc=mpArgMax(a.ts, a.en);
+    if(tc==null) return null;
+    const fine=1/Math.max(1,fpsHint||30);
+    const win=Math.max(2*fine, 0.05);
+    if(onProgress) onProgress("そのまわりを細かく見ています…");
+    const b=await mpScan(v, Math.max(t0,tc-win), Math.min(t1,tc+win), fine);
+    const tf=mpArgMax(b.ts, b.en);
+    return tf!=null ? tf : tc;
+  }finally{
+    await mpSeek(v, wasT);
+    mpScanning=false;
+    if(!wasPaused) v.play().catch(()=>{});
+  }
+}
+let cmpAutoBusy=false;
+async function cmpAutoAlign(){
+  if(!cmpOn()||cmpAutoBusy) return;
+  cmpAutoBusy=true;
+  const btn=$("btnCmpAuto"); if(btn) btn.disabled=true;
+  const wasLink=cmpLink; cmpLink=false;       // 探している間は連れて動かさない
+  try{
+    /* ⚠️ 確定したインパクトがあってもそれは使わない。
+       うごきの山は本当の接触より少し早く出る癖があり(実測 約110ms)、
+       片方だけ確定値にすると、その癖がまるごとずれとして残る。
+       両方を同じやり方で測れば、癖は引き算で消える。 */
+    setStatus("busy","この動画のインパクトを探しています…");
+    const at0=Math.max(0,trim.start||0);
+    const at1=(trim.end!=null)?trim.end:video.duration;
+    const ta=await motionPeak(video, fps, m=>setStatus("busy","この動画: "+m), {t0:at0,t1:at1});
+    if(ta==null){ setStatus("err","この動画のインパクトを見つけられませんでした"); return; }
+    setStatus("busy","比べる動画のインパクトを探しています…");
+    const tb=await motionPeak(videoB, cmpFps, m=>setStatus("busy","比べる動画: "+m));
+    if(tb==null){ setStatus("err","比べる動画のインパクトを見つけられませんでした"); return; }
+    cmpOffset=tb-ta;
+    setStatus("ok","スイングのところで合わせました(この動画 "+ta.toFixed(3)+"s ←→ 比べる動画 "+tb.toFixed(3)+"s)。"+
+      "目安なので 0.1〜0.2秒ほどずれることがあります");
+    toast("だいたい合わせました。ずれていたらコマ送りして「いまの2コマを合わせる」で直せます");
+  }catch(err){
+    console.error(err);
+    setStatus("err","自動で合わせられませんでした");
+  }finally{
+    cmpLink=wasLink;
+    if(btn) btn.disabled=false;
+    cmpAutoBusy=false;
+    if(cmpLink) followA();
+    updateBRead();
+  }
+}
+$("btnCmpAuto").addEventListener("click",cmpAutoAlign);
 $("btnCmpAlign").addEventListener("click",()=>{
   if(!cmpOn()) return;
   cmpOffset=videoB.currentTime - video.currentTime;
@@ -6825,16 +7136,38 @@ $("btnCmpSwapSide").addEventListener("click",()=>{
   st.style.flexDirection=cmpSwapped?"row-reverse":"";
   layout();
 });
+$("btnZoomInB") .addEventListener("click",()=>zoomByB(1.25));
+$("btnZoomOutB").addEventListener("click",()=>zoomByB(1/1.25));
+$("btnCropResetB").addEventListener("click",resetCropB);
+/* 拡大中は、比べる動画の上をなぞると見る場所が動く。
+   A 側は切り出し枠の編集にも指を使うが、B は編集が無いぶん素直に動かせる。 */
+(function(){
+  const pane=$("paneB"); if(!pane) return;
+  let dragging=false, lx=0, ly=0;
+  pane.addEventListener("pointerdown",(e)=>{
+    if(!cropB) return;
+    dragging=true; lx=e.clientX; ly=e.clientY;
+    try{ pane.setPointerCapture(e.pointerId); }catch{}
+  });
+  pane.addEventListener("pointermove",(e)=>{
+    if(!dragging) return;
+    panCropB(e.clientX-lx, e.clientY-ly);
+    lx=e.clientX; ly=e.clientY;
+  });
+  const up=()=>{ dragging=false; };
+  pane.addEventListener("pointerup",up);
+  pane.addEventListener("pointercancel",up);
+})();
 $("cmpLinkToggle").addEventListener("change",(e)=>{ cmpLink=e.target.checked; if(cmpLink) followA(); });
 /* A を動かしたら B も追いかける。fps の実測中は A が勝手に再生されるので除く */
-video.addEventListener("seeked",()=>{ if(cmpOn()&&cmpLink&&!fpsProbing) followA(); });
+video.addEventListener("seeked",()=>{ if(cmpOn()&&cmpLink&&!fpsProbing&&!mpScanning) followA(); });
 video.addEventListener("play",()=>{
-  if(!cmpOn()||!cmpLink||fpsProbing) return;
+  if(!cmpOn()||!cmpLink||fpsProbing||mpScanning) return;
   videoB.playbackRate=video.playbackRate; followA();
   videoB.play().catch(()=>{});
 });
 video.addEventListener("pause",()=>{
-  if(!cmpOn()||!cmpLink||fpsProbing) return;
+  if(!cmpOn()||!cmpLink||fpsProbing||mpScanning) return;
   videoB.pause(); followA();
 });
 $("cmpPoseToggle").addEventListener("change",async(e)=>{
@@ -7273,6 +7606,9 @@ $("btnJgCsv").addEventListener("click",()=>{
 });
 
 window.__batlab = {
+  motionPeak, cmpAutoAlign,
+  get cmpOffset(){ return cmpOffset; },
+  get cropB(){ return cropB; },
   get analyzeCost(){ return analyzeCost; },
   get crop(){ return crop; },
   get lastLandmarks(){ return lastLandmarks; },
