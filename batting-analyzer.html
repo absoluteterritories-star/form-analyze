@@ -416,7 +416,8 @@
     header{padding:2px;margin:0 0 4px;gap:8px;flex-wrap:nowrap;}
     header .eyebrow{display:none;}
     h1{font-size:13px;white-space:nowrap;}
-    .mode-btn{min-height:26px;padding:0 9px;font-size:11px;}
+    /* 指で押す的なので、横向きでも高さは 32px 以下にしない(26px では押し外しが起きる) */
+    .mode-btn{min-height:32px;padding:0 10px;font-size:11px;}
     .status-line{font-size:10px;padding:2px 8px;}
 
     /* 左の幅は動画の縦横比から決める(--land-left は syncLandscape が入れる)。
@@ -448,6 +449,7 @@
        1行に収め、はみ出す分は横に流す。 */
     .trim-lab{font-size:9px;margin:0;gap:6px;flex-wrap:nowrap;overflow-x:auto;
       white-space:nowrap;}
+    .trim-lab .tl-end{display:none;}
     .trim-lab::-webkit-scrollbar{display:none;}
     .tline{grid-area:time;min-width:0;font-size:9.5px;gap:2px;margin:0;align-self:center;
       line-height:1.25;flex-direction:column;align-items:flex-start;}
@@ -936,9 +938,7 @@
           <div class="kv" id="kneeUse"></div>
           <div class="legend" id="kneeNote"></div>
         </div>
-      </div>
 
-      <!-- ===== 再現性(比較レイヤー) ===== -->
         <div class="panel">
           <h2>時系列グラフ <span class="tag" id="jgTag">--</span></h2>
           <div class="opt-row">
@@ -956,7 +956,9 @@
             縦線は<b>チェックポイント</b>です。実線が確定済み、点線が自動検出のままのものです。
           </div>
         </div>
+      </div>
 
+      <!-- ===== 再現性(比較レイヤー) ===== -->
       <div class="tabpage" id="tab-repeat">
         <div class="panel">
           <h2>ベースライン <span class="tag" id="maturityTag">--</span></h2>
@@ -3725,7 +3727,34 @@ video.addEventListener("loadedmetadata",()=>{
   setStatus("ok","解析できます — トリミングしてから「この範囲を解析する」");
   refreshReady();
 });
-video.addEventListener("loadeddata",()=>{ layout(); detectAndRender(); });
+/* 読み込んだ直後にコマの間隔を測る。
+   解析のときだけ測ると、それまでのコマ送り・トリミングが 30fps のままになり、
+   240fps の動画では「1コマ進む」が実際には8コマ進んでしまう。
+   音を消しての再生なので iPhone でも自動再生が止められない。 */
+video.addEventListener("loadeddata",async()=>{
+  layout(); detectAndRender();
+  if(!fpsProbed && !fpsProbing){
+    /* 読み込み途中だと再生がつっかえてコマの間隔が測れない(3回に1回ほど外した)。
+       先の分まで貯まるのを待ってから測り、外したら1度だけやり直す。 */
+    await waitReady(3, 4000);
+    await probeFps();
+    if(!fpsProbed){ await waitReady(4, 4000); await probeFps(); }
+    if(fpsMeasured) setStatus("ok",`1秒 ${Math.round(fps)} コマの動画です — トリミングしてから「この範囲を解析する」`);
+    detectAndRender();
+  }
+});
+/* video.readyState が want 以上になるまで待つ(最大 ms ミリ秒) */
+function waitReady(want, ms){
+  if(video.readyState>=want) return Promise.resolve();
+  return new Promise(res=>{
+    const tm=setTimeout(done, ms);
+    function done(){ clearTimeout(tm); video.removeEventListener("progress",tick);
+      video.removeEventListener("canplay",tick); video.removeEventListener("canplaythrough",tick); res(); }
+    function tick(){ if(video.readyState>=want) done(); }
+    video.addEventListener("progress",tick); video.addEventListener("canplay",tick);
+    video.addEventListener("canplaythrough",tick);
+  });
+}
 
 /* ================= 動画が開けないときの案内 =================
    iPhone の既定は HEVC(高効率)。Safari では再生できるが、
@@ -3838,9 +3867,13 @@ async function probeFps(){
       if(near) f=near;
       /* 測れたら、そのあとの等速再生で上書きされないように締める */
       fps=f; fpsLocked=true; fpsMeasured=true; showFps(true); updateTimeRead();
+      fpsProbed=true;
     }
   }catch{}finally{
-    fpsProbing=false; fpsProbed=true;
+    /* 測れなかったときは fpsProbed を立てない。
+       立ててしまうと、あとで「この範囲を解析する」を押したときに測り直さず、
+       240fps の動画を 30fps として黙って解析してしまう(コマの 7/8 を捨てる)。 */
+    fpsProbing=false;
     video.playbackRate=wasRate; video.muted=wasMuted;
     try{ await seekTo(wasTime); }catch{}
   }
@@ -4072,7 +4105,9 @@ function trimRailUpdate(){
   const put=(el,t)=>{ el.style.left=(clamp(t/D,0,1)*(w-gw))+"px"; };
   put($("trimGripA"), trim.start); put($("trimGripB"), e);
   const len=Math.max(0,e-trim.start);
-  $("trimLab").innerHTML=`開始 <b>${fmt(trim.start)}</b>　終了 <b>${trim.end==null?"最後":fmt(e)}</b>`
+  /* 横向きの左列は 190px しかない。「終了」は目盛りのつまみを見れば分かるので、
+     そこだけ CSS で落とせるように印を付けておく(切れて読めないより良い)。 */
+  $("trimLab").innerHTML=`開始 <b>${fmt(trim.start)}</b><span class="tl-end">　終了 <b>${trim.end==null?"最後":fmt(e)}</b></span>`
     +`　長さ <b>${len.toFixed(3)}s</b>`;
 }
 function trimTimeAt(clientX){
@@ -6527,7 +6562,12 @@ $("jsonInput").addEventListener("change",async()=>{
     toast(`${added}本を読み込みました`);
   }catch(err){
     console.error(err);
-    setStatus("err","JSON を読み込めませんでした: "+(err.message||"形式が違います"));
+    /* JSON.parse の英語のエラー文をそのまま出しても直しようがない。
+       「壊れている」のか「別のファイル」なのかだけ分かれば十分。 */
+    const why = (err instanceof SyntaxError)
+      ? "ファイルが壊れているようです(JSON として読めません)。書き出し直してください"
+      : (err.message||"形式が違います");
+    setStatus("err","JSON を読み込めませんでした: "+why);
   }
 });
 async function refreshData(){
