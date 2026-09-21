@@ -748,6 +748,18 @@
               <option value="front">前から(捕手側)</option>
             </select>
           </div>
+          <div class="legend">
+            1台のカメラでは<b>奥行きが測れません</b>。向きを変えると、測れない項目は
+            <b>数値を出さず「横からの動画で」</b>(または「前後からの動画で」)と表示します。<br>
+            <b>横から</b>: ストライド長・骨盤の前方移動・膝の角度・体幹前傾・運動連鎖・
+            軸足スネ角・エクステンション・発射角。リリースサイド(RPX)は出ません。<br>
+            <b>前・後ろから</b>: リリースサイド(RPX)。上に挙げたものは出ません。<br>
+            <b>どちらでも出る</b>: リリース高・肘角度・区間の時間。<br>
+            計算式そのものは前後からでも動きますが、ストライド長は
+            <b>「投球方向への踏み出し」ではなく「両足の左右の開き」</b>になり、
+            膝や体幹の角度は実際より伸びて出ます。
+            <b>それらしい数字が出るほうが危ない</b>ので、出さないことにしました。
+          </div>
           <div class="toolbar" style="padding-top:12px;">
             <button id="btnAnalyze" class="primary">この範囲を解析する</button>
           </div>
@@ -821,6 +833,9 @@
             </div>
           </div>
           <div class="legend">
+            <b>フィニッシュは、どの指標にも使っていません。</b>
+            リリースが取れなかったときに、運動連鎖を見る区間の終わりの代わりになるだけです。
+            そのため<b>現場モードでは出しません</b>(詳細モードでは今までどおり出ます)。<br>
             自動検出は<b>候補の提示</b>です。必ず目で確認して確定してください。
             とくに<b>リリース</b>は、手の速度が最大になるコマとボールが離れるコマが
             数コマずれることがあります。<br>
@@ -4020,7 +4035,9 @@ const EVENTS = [
   { id:"fp", short:"接地",   label:"前足接地 (FP)" },
   { id:"arm", short:"トップ", label:"トップ (腕が最も後ろ・高い)" },
   { id:"rel", short:"リリース",  label:"リリース" },
-  { id:"fin", short:"フィニッシュ",  label:"フィニッシュ" },
+  /* detail:true = 現場モードでは出さない。指標に1つも使っていないため
+     (リリースが取れないときに、運動連鎖を見る区間の終わりの代わりになるだけ) */
+  { id:"fin", short:"フィニッシュ",  label:"フィニッシュ", detail:true },
 ];
 let events={};        // id -> {t, frame, confirmed, auto}
 let dirManual=null;   // 自動判定できないときの手動指定
@@ -4164,7 +4181,7 @@ function renderEvents(){
     const e=events[ev.id];
     const sub = e ? `${e.t.toFixed(3)}s / コマ ${e.frame}${e.confirmed?" ✓確定":"(候補)"}` : "--";
     const cls = e ? (e.confirmed?"sub ok":"sub set") : "sub";
-    return `<div class="ev-row${selectedEvent===ev.id?" sel":""}" data-id="${ev.id}">
+    return `<div class="ev-row${selectedEvent===ev.id?" sel":""}" data-id="${ev.id}"${ev.detail?' data-mode="detail"':""}>
       <span><span class="nm">${ev.label}</span><br><span class="${cls}">${sub}</span></span>
       <button class="go" ${e?"":"disabled"}>移動</button>
       <button class="pick" ${e?"":"disabled"}>選ぶ</button>
@@ -4257,15 +4274,15 @@ function loadDraft(){
    印のないものは詳細モードでだけ出る(消してはいない)。 */
 const METRIC_ROWS = [
   { core:true, k:"speed_kmh",  label:"球速",                    unit:"km/h", dec:1 },
-  { core:true, k:"stride_ratio",label:"ストライド長",           unit:"%",    dec:1, cm:"stride_cm" },
-  { k:"pelvis_disp",label:"骨盤中心の前方移動",       unit:"身長比", dec:3 },
-  { k:"pelvis_vel", label:"骨盤中心の移動速度",       unit:"身長/秒", dec:2 },
-  { core:true, k:"knee_fp",    label:"FP時 前膝角度",           unit:"°",    dec:0 },
-  { core:true, k:"knee_rel",   label:"リリース時 前膝角度",      unit:"°",    dec:0 },
-  { core:true, k:"knee_ext",   label:"前膝の伸展量",            unit:"°",    dec:0, signed:true },
+  { core:true, k:"stride_ratio",label:"ストライド長",           unit:"%",    dec:1, cm:"stride_cm", side:true },
+  { k:"pelvis_disp",label:"骨盤中心の前方移動",       unit:"身長比", dec:3, side:true },
+  { k:"pelvis_vel", label:"骨盤中心の移動速度",       unit:"身長/秒", dec:2, side:true },
+  { core:true, k:"knee_fp",    label:"FP時 前膝角度",           unit:"°",    dec:0, side:true },
+  { core:true, k:"knee_rel",   label:"リリース時 前膝角度",      unit:"°",    dec:0, side:true },
+  { core:true, k:"knee_ext",   label:"前膝の伸展量",            unit:"°",    dec:0, signed:true, side:true },
   { k:"elbow_fp",   label:"FP時 肘角度",             unit:"°",    dec:0 },
-  { core:true, k:"trunk_fp",   label:"FP時 体幹前傾",           unit:"°",    dec:1, signed:true },
-  { core:true, k:"trunk_rel",  label:"リリース時 体幹前傾",      unit:"°",    dec:1, signed:true },
+  { core:true, k:"trunk_fp",   label:"FP時 体幹前傾",           unit:"°",    dec:1, signed:true, side:true },
+  { core:true, k:"trunk_rel",  label:"リリース時 体幹前傾",      unit:"°",    dec:1, signed:true, side:true },
   { k:"t_fp_arm",   label:"FP→トップ",               unit:"ms",   dec:0, signed:true, timing:true },
   { core:true, k:"t_fp_rel",   label:"FP→リリース",             unit:"ms",   dec:0, timing:true },
   { k:"t_arm_rel",  label:"トップ→リリース",          unit:"ms",   dec:0, timing:true },
@@ -4378,8 +4395,9 @@ function computeMetricsAll(){
   const iKneeP=(mpSide(pivot)==="R")?L.rKnee:L.lKnee;
   const iSh=idxOf("shoulder",arm), iEl=idxOf("elbow",arm), iWr=idxOf("wrist",arm);
 
-  /* B-1 ストライド長 */
-  if(A.fp){
+  /* B-1 ストライド長。⚠️ 横からのみ。
+     前後から撮ると、これは投球方向の踏み出しではなく「両足の左右の開き」になる。 */
+  if(isSide()&&A.fp){
     const a=P2(A.fp,iAnkS), b=P2(A.fp,iAnkP);
     if(a&&b){
       m.stride_ratio=Math.abs(a.x-b.x)/H*100;
@@ -4387,8 +4405,8 @@ function computeMetricsAll(){
       conf.stride=minVis([A.fp,iAnkS],[A.fp,iAnkP]);
     }
   }
-  /* B-2 骨盤中心の前方移動 */
-  if(A.fp&&A.lift){
+  /* B-2 骨盤中心の前方移動。⚠️ 横からのみ(投球方向に沿った距離のため) */
+  if(isSide()&&A.fp&&A.lift){
     const a=midOf(A.lift,L.lHip,L.rHip), b=midOf(A.fp,L.lHip,L.rHip);
     if(a&&b){
       m.pelvis_disp=D*(b.x-a.x)/H;
@@ -4400,8 +4418,10 @@ function computeMetricsAll(){
   /* C-1 / C-2 前膝 */
   const kneeAt=(lm)=>{ const h=P2(lm,iHipS), k=P2(lm,iKneeS), a=P2(lm,iAnkS);
     return (h&&k&&a)?angle2(h,k,a):null; };
-  if(A.fp){ m.knee_fp=kneeAt(A.fp); conf.knee_fp=minVis([A.fp,iHipS],[A.fp,iKneeS],[A.fp,iAnkS]); }
-  if(A.rel){ m.knee_rel=kneeAt(A.rel); conf.knee_rel=minVis([A.rel,iHipS],[A.rel,iKneeS],[A.rel,iAnkS]); }
+  /* ⚠️ 膝の曲げ伸ばしは矢状面の角度。前後から撮るとほとんど見えず、
+     実際より伸びた角度が出てしまうので、横からのときだけ出す。 */
+  if(isSide()&&A.fp){ m.knee_fp=kneeAt(A.fp); conf.knee_fp=minVis([A.fp,iHipS],[A.fp,iKneeS],[A.fp,iAnkS]); }
+  if(isSide()&&A.rel){ m.knee_rel=kneeAt(A.rel); conf.knee_rel=minVis([A.rel,iHipS],[A.rel,iKneeS],[A.rel,iAnkS]); }
   if(m.knee_fp!=null&&m.knee_rel!=null) m.knee_ext=m.knee_rel-m.knee_fp;
   /* C-3 肘 */
   if(A.fp){
@@ -4414,8 +4434,9 @@ function computeMetricsAll(){
     if(!sh||!hp) return null;
     return Math.atan2(D*(sh.x-hp.x), (hp.y-sh.y))*180/Math.PI;
   };
-  if(A.fp) m.trunk_fp=trunkAt(A.fp);
-  if(A.rel) m.trunk_rel=trunkAt(A.rel);
+  /* ⚠️ 前傾も矢状面の角度。前後からは見えないので横からのときだけ */
+  if(isSide()&&A.fp) m.trunk_fp=trunkAt(A.fp);
+  if(isSide()&&A.rel) m.trunk_rel=trunkAt(A.rel);
   /* D タイミング(実時間 ms、分解能に丸める) */
   const resMs=1000/fps/slowFactor();
   const round=(ms)=> ms==null?null:Math.round(ms/resMs)*resMs;
@@ -4520,8 +4541,10 @@ const ADVICE_RULES = [
     why:"90°前後だと肩と肘への負担が小さく、そこから外旋・内旋につなげやすくなります。伸びすぎ・曲げすぎはどちらも力が伝わりにくく、負担も増えます。",
     basis:"接地時の肘は90°前後という指導・報告が多い。範囲は目安です。" },
 ];
+let adviceSeen=0;               // 直近の adviceItems() で、実際に見られた項目の数
 function adviceItems(){
   if(!metrics) return null;
+  let seen=0;
   const {m,conf}=metrics;
   const cOf=(k)=>({stride_ratio:conf.stride, knee_fp:conf.knee_fp, knee_rel:conf.knee_rel,
                    knee_ext:conf.knee_fp, elbow_fp:conf.elbow}[k]);
@@ -4530,6 +4553,7 @@ function adviceItems(){
     if(r.timing && fps<60) continue;
     const v=m[r.key];
     if(v==null||!isFinite(v)) continue;
+    seen++;                       // 測れた項目の数(0なら「範囲内」ではなく「測れていない」)
     const c=cOf(r.key);
     if(c!=null && isFinite(c) && c<0.40) continue;   // 当てにならない測定からは助言しない
     const x=r.abs?Math.abs(v):v;
@@ -4542,6 +4566,7 @@ function adviceItems(){
                score:(miss/r.scale)*w });
   }
   out.sort((a,b)=>b.score-a.score);
+  adviceSeen=seen;
   return out;
 }
 function renderAdvice(){
@@ -4559,9 +4584,20 @@ function renderAdvice(){
     return;
   }
   const it=adviceItems();
+  if(it && !it.length && adviceSeen===0){
+    /* 1つも測れていない。範囲内なのではなく、材料が無い */
+    tag.textContent="出せません";
+    box.innerHTML=`<div class="adv-ok">提案の材料になる項目が<b>1つも測れていません</b>。
+      イベントが未確定か、<b>撮影の向きが「前から」「後ろから」</b>になっていないか確かめてください
+      (ストライド長・膝の角度・体幹前傾は、横から撮った動画でしか測れません)。</div>`;
+    note.innerHTML=caveat;
+    return;
+  }
   if(!it||!it.length){
-    tag.textContent="目安の範囲内";
-    box.innerHTML=`<div class="adv-ok">見ている項目は<b>すべて一般的な目安の範囲に入っています</b>。
+    /* 何件を見たうえで「範囲内」なのかを書く。件数が少ないのに
+       「すべて範囲内」とだけ出ると、確かめた範囲を大きく見せてしまう。 */
+    tag.textContent=`目安の範囲内(${adviceSeen}件)`;
+    box.innerHTML=`<div class="adv-ok">見た<b>${adviceSeen}項目</b>は<b>すべて一般的な目安の範囲に入っています</b>。${!isSide()?`<br><b>いまは「前・後ろから」の動画として計算しているので、ストライド長・膝の角度・体幹前傾などは見ていません。</b>`:""}
       ここから先は、一般論ではなく<b>その選手自身のばらつき</b>(「再現性」タブ)を見て、
       同じ動きを繰り返せているかで判断してください。</div>`;
     note.innerHTML=caveat;
@@ -4766,6 +4802,11 @@ function unwrap(arr){
 }
 function buildChain(){
   if(!smoothSeries.length||!analysis||!analysis.H_norm) return null;
+  /* ⚠️ 横から撮った動画でしか出せない。
+     骨盤・胸郭の回転は「見かけの幅がどれだけ狭くなったか」から出している。
+     前後から撮ると幅は最初から広く、回っても狭くならないため、
+     同じ計算をすると別のものを測ってしまう。 */
+  if(!isSide()) return null;
   const dir=effectiveDir(); if(dir==null) return null;
   const S=smoothSeries, N=S.length;
   const arm=throwArm();
@@ -4894,7 +4935,8 @@ function drawChain(){
   if(!chain){
     $("chainTag").textContent="--";
     g.fillStyle="#8fa39a"; g.font="13px sans-serif"; g.textAlign="center";
-    g.fillText("解析とイベントの確定が必要です", W/2, Hh/2);
+    g.fillText(isSide()?"解析とイベントの確定が必要です"
+                       :"運動連鎖は横から撮った動画で出ます", W/2, Hh/2);
     $("chainTable").innerHTML=""; $("chainLegend").innerHTML="";
     $("chainSeq").innerHTML=""; renderKneeUse(); return;
   }
@@ -6172,7 +6214,7 @@ $("cmpPoseToggle").addEventListener("change",async(e)=>{
 const QUICK_SRC = [["qAnalyze","btnAnalyze"],["qDetect","btnDetectEvents"],["qSave","btnSavePitch"]];
 function buildQuickEvents(){
   $("quickEvents").innerHTML = EVENTS.map((ev,i)=>
-    `<button class="qbtn${ev.need?" need":""}" data-qev="${ev.id}" title="いま表示しているコマで確定">`
+    `<button class="qbtn${ev.need?" need":""}" data-qev="${ev.id}"${ev.detail?' data-mode="detail"':""} title="いま表示しているコマで確定">`
     + `<span class="num">${i+1}</span>${ev.short||ev.label}<span class="tick"></span></button>`
   ).join("");
   renderQuickEvents();

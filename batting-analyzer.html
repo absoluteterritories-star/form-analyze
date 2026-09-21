@@ -804,6 +804,23 @@
 
         <div class="panel">
           <h2>事前解析 <span class="tag" id="analyzeTag">未実行</span></h2>
+          <div class="opt-row">
+            <span class="lab">撮影の向き</span>
+            <select class="mini" id="viewMode">
+              <option value="side">横から(打者の正面側・背中側)</option>
+              <option value="front">正面から(投手・捕手の方向)</option>
+            </select>
+          </div>
+          <div class="legend">
+            このアプリは<b>横から撮った動画</b>を前提にしています。
+            投手－捕手を結ぶ線に<b>直角</b>の位置から撮ってください。<br>
+            <b>正面から</b>撮ると、ステップ幅・頭部の前後移動・膝の角度などは
+            <b>奥行き方向の動き</b>になり、1台のカメラでは測れません。
+            「正面から」を選ぶと、それらは数値を出さずに
+            <b>「横からの動画で」</b>と表示します
+            (それらしい数字が出てしまうほうが危ないため)。<br>
+            正面からでも出るのは、<b>頭部の上下移動</b>と<b>区間の時間</b>です。
+          </div>
           <div class="toolbar" style="padding-top:12px;">
             <button id="btnAnalyze" class="primary">この範囲を解析する</button>
           </div>
@@ -1456,6 +1473,33 @@
           </div>
         </div>
         <div class="panel">
+          <h2>撮影の向きと、出る数値</h2>
+          <div class="legend">
+            1台のカメラでは<b>奥行きが測れません</b>。カメラに向かって手前・奥に動くものは、
+            画面上ではほとんど動かないからです。<br>
+            <b>解析</b>タブの「撮影の向き」を<b>正面から</b>にすると、
+            ステップ幅・頭部の前後移動・膝の角度・支持基底内の身体中心・
+            トップのタイムラグ・グリップ速度・ヘッド速度は
+            <b>数値を出さず「横からの動画で」</b>と表示します。<br>
+            計算式そのものは正面でも動きますが、それは
+            <b>「投手方向への踏み出し」ではなく「両足の左右の開き」</b>を測った数字です。
+            膝も正面からはほとんど曲がりが見えず、実際より伸びて出ます。
+            <b>それらしい数字が出るほうが危ない</b>ので、出さないことにしました。<br>
+            正面からでも出るのは<b>頭部の上下移動</b>と<b>区間の時間</b>です。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>フォロースルーについて</h2>
+          <div class="legend">
+            <b>フォロースルーは、どの指標にも使っていません。</b>
+            タイミング図の右端を決めることと、そのコマの骨格を記録に残すことだけに使います。
+            そのため<b>現場モードでは出しません</b>(詳細モードでは今までどおり出ます)。<br>
+            必須は<b>始動・接地・インパクト</b>の3つです。
+            <b>構え</b>は、頭部の前後・上下移動の基準点と、
+            トップのタイムラグを探し始める位置に使います。
+          </div>
+        </div>
+        <div class="panel">
           <h2>現場モードと詳細モード</h2>
           <div class="legend">
             画面の上の<b>「現場モード / 詳細モード」</b>ボタンで、出す機能の範囲を切り替えます。
@@ -1617,6 +1661,10 @@ const toastEl=$("toast");
 /* ---- 状態 ---- */
 let poseLandmarker=null, modelKind="full", libFailed=false;
 let VIS_MIN=0.4, mirror=false, showRaw=false, captureFps=0;
+/* 撮影の向き。"side"=横から(既定) / "front"=正面から。
+   横方向の距離と矢状面の角度は、正面からでは測れない。 */
+let viewMode="side";
+const isSide=()=> viewMode==="side";
 /* 時系列グラフで見ている量。設定の読み込みより先に宣言しておく
    (applyPrefs が先に走るので、あとで宣言すると初期化前アクセスで止まる) */
 let graphKey=null;
@@ -4939,7 +4987,7 @@ $("takesBtns")?.addEventListener("click",(e)=>{
 const PREF="battinglab.prefs.v1";
 function savePrefs(){
   try{ lsSet(PREF, JSON.stringify({
-    modelKind, VIS_MIN, mirror, showRaw, captureFps, speed:speedSel.value, FS_ANK, FS_TOE,
+    modelKind, VIS_MIN, mirror, showRaw, captureFps, viewMode, speed:speedSel.value, FS_ANK, FS_TOE,
     showBat, showBatPath, showBatFace, showTipPath, use3D, batInch,
     measureBat,
     showAngles, angleSets, crossJoint, guideHip, guideShoulder, guideBackVert, guideFrontVert,
@@ -4973,6 +5021,7 @@ function savePrefs(){
   if(typeof p.onionSpan==="number") onionSpan=clamp(p.onionSpan,0.05,0.6);
   if(typeof p.batInch==="number") batInch=Math.min(36,Math.max(26,p.batInch));
   if(typeof p.captureFps==="number") captureFps=p.captureFps;
+  if(p.viewMode==="side"||p.viewMode==="front") viewMode=p.viewMode;
   if(typeof p.FS_ANK==="number") FS_ANK=clamp(p.FS_ANK,0.05,0.40);
   if(typeof p.FS_TOE==="number") FS_TOE=clamp(p.FS_TOE,0.05,0.50);
   if(p.speed) speedSel.value=p.speed;
@@ -4980,6 +5029,7 @@ function savePrefs(){
   $("visVal").textContent=VIS_MIN.toFixed(2);
   $("mirrorToggle").checked=mirror; video.classList.toggle("mirrored",mirror);
   $("rawToggle").checked=showRaw; $("captureFpsSel").value=String(captureFps||0);
+  { const e=$("viewMode"); if(e) e.value=viewMode; }
   $("measBatToggle").checked=measureBat;
   $("batToggle").checked=showBat; $("batPathToggle").checked=showBatPath;
   $("tipPathToggle").checked=showTipPath;
@@ -5050,6 +5100,12 @@ $("fsAnk").addEventListener("input",e=>{ FS_ANK=parseFloat(e.target.value);
   $("fsAnkVal").textContent=FS_ANK.toFixed(2); savePrefs(); });
 $("fsToe").addEventListener("input",e=>{ FS_TOE=parseFloat(e.target.value);
   $("fsToeVal").textContent=FS_TOE.toFixed(2); savePrefs(); });
+$("viewMode").addEventListener("change",e=>{
+  viewMode=e.target.value; savePrefs();
+  toast(isSide()?"横からの動画として計算します"
+                :"正面からの動画として計算します(奥行き方向の指標は出しません)");
+  renderMetrics(); drawTiming();
+});
 $("captureFpsSel").addEventListener("change",e=>{
   captureFps=parseFloat(e.target.value)||0; savePrefs();
   showFps(fpsMeasured); updateTimeRead(); renderAnalysis(); recomputeAll();
@@ -5122,7 +5178,9 @@ const EVENTS = [
   { id:"commit", short:"始動", label:"始動 (Commit)",       need:true  },
   { id:"fs", short:"接地",     label:"踏み込み足接地 (FS)", need:true  },
   { id:"impact", short:"インパクト", label:"インパクト",          need:true  },
-  { id:"finish", short:"フォロー", label:"フォロースルー",      need:false },
+  /* detail:true = 現場モードでは出さない。指標に1つも使っていないため
+     (タイムライン図の右端と、そのコマの骨格を残すためだけに在る) */
+  { id:"finish", short:"フォロー", label:"フォロースルー",      need:false, detail:true },
 ];
 const REQUIRED=EVENTS.filter(e=>e.need).map(e=>e.id);
 let events={};          // id -> {t, frame, confirmed, auto}
@@ -5354,7 +5412,7 @@ function renderEvents(){
     const needMark = ev.need && (!e||!e.confirmed);
     const sub = e ? `${e.t.toFixed(3)}s / コマ ${e.frame}${e.confirmed?" ✓確定":"(候補)"}` : "--";
     const cls = e ? (e.confirmed?"sub ok":"sub set") : "sub";
-    return `<div class="ev-row${selectedEvent===ev.id?" sel":""}${needMark?" need":""}" data-id="${ev.id}">
+    return `<div class="ev-row${selectedEvent===ev.id?" sel":""}${needMark?" need":""}" data-id="${ev.id}"${ev.detail?' data-mode="detail"':""}>
       <span><span class="nm">${ev.label}${ev.need?' <span style="color:var(--alert);font-size:10px;">必須</span>':""}</span><br>
         <span class="${cls}">${sub}</span></span>
       <button class="go" ${e?"":"disabled"}>移動</button>
@@ -5458,22 +5516,22 @@ function loadDraft(){
    単眼・30fps でも安定して測れて、しかも指導が変わるものに絞ってある。
    印のないものは詳細モードでだけ出る(消してはいない)。 */
 const METRIC_ROWS = [
-  { core:true, k:"step_ratio",        label:"ステップ幅",                  unit:"%",       dec:1, cm:"step_cm", c:"step" },
-  { core:true, k:"head_fwd_impact",   label:"頭部の前後移動(インパクト時)", unit:"身長比",  dec:3, signed:true, c:"head" },
+  { core:true, k:"step_ratio",        label:"ステップ幅",                  unit:"%",       dec:1, cm:"step_cm", c:"step" , side:true },
+  { core:true, k:"head_fwd_impact",   label:"頭部の前後移動(インパクト時)", unit:"身長比",  dec:3, signed:true, c:"head" , side:true },
   { core:true, k:"head_vert_impact",  label:"頭部の上下移動(インパクト時)", unit:"身長比",  dec:3, signed:true, c:"head" },
-  { k:"head_fwd_max",      label:"頭部の前方移動(最大)",         unit:"身長比",  dec:3, signed:true, c:"head" },
+  { k:"head_fwd_max",      label:"頭部の前方移動(最大)",         unit:"身長比",  dec:3, signed:true, c:"head" , side:true },
   { k:"head_vert_drop",    label:"頭部の沈み込み(最大)",         unit:"身長比",  dec:3, signed:true, c:"head" },
-  { core:true, k:"knee_fs",           label:"接地時 前膝角度",             unit:"°",       dec:0, c:"knee" },
-  { core:true, k:"knee_impact",       label:"インパクト時 前膝角度",        unit:"°",       dec:0, c:"knee" },
-  { core:true, k:"knee_ext",          label:"前膝の伸展量",                unit:"°",       dec:0, signed:true, c:"knee" },
-  { k:"back_knee_fs",      label:"接地時 軸足膝角度",           unit:"°",       dec:0, c:"bknee" },
-  { k:"back_knee_impact",  label:"インパクト時 軸足膝角度",      unit:"°",       dec:0, c:"bknee" },
-  { k:"grip_speed_max",    label:"グリップ速度(最大)",          unit:"身長/秒", dec:2, c:"grip" },
-  { k:"grip_speed_impact", label:"グリップ速度(インパクト時)",   unit:"身長/秒", dec:2, c:"grip" },
-  { k:"bat_speed_avg",     label:"ヘッド速度(接触前60msの平均)", unit:"km/h",  dec:1, c:"grip", pm:"bat_speed_se" },
-  { k:"base_pos_fs",       label:"支持基底内の身体中心(接地時)", unit:"",        dec:2, signed:true, c:"base" },
-  { k:"base_pos_impact",   label:"支持基底内の身体中心(インパクト時)", unit:"",  dec:2, signed:true, c:"base" },
-  { k:"top_lag_ms",        label:"トップのタイムラグ",           unit:"ms",      dec:0, signed:true, c:"top", timing:true },
+  { core:true, k:"knee_fs",           label:"接地時 前膝角度",             unit:"°",       dec:0, c:"knee" , side:true },
+  { core:true, k:"knee_impact",       label:"インパクト時 前膝角度",        unit:"°",       dec:0, c:"knee" , side:true },
+  { core:true, k:"knee_ext",          label:"前膝の伸展量",                unit:"°",       dec:0, signed:true, c:"knee" , side:true },
+  { k:"back_knee_fs",      label:"接地時 軸足膝角度",           unit:"°",       dec:0, c:"bknee" , side:true },
+  { k:"back_knee_impact",  label:"インパクト時 軸足膝角度",      unit:"°",       dec:0, c:"bknee" , side:true },
+  { k:"grip_speed_max",    label:"グリップ速度(最大)",          unit:"身長/秒", dec:2, c:"grip" , side:true },
+  { k:"grip_speed_impact", label:"グリップ速度(インパクト時)",   unit:"身長/秒", dec:2, c:"grip" , side:true },
+  { k:"bat_speed_avg",     label:"ヘッド速度(接触前60msの平均)", unit:"km/h",  dec:1, c:"grip", pm:"bat_speed_se" , side:true },
+  { k:"base_pos_fs",       label:"支持基底内の身体中心(接地時)", unit:"",        dec:2, signed:true, c:"base" , side:true },
+  { k:"base_pos_impact",   label:"支持基底内の身体中心(インパクト時)", unit:"",  dec:2, signed:true, c:"base" , side:true },
+  { k:"top_lag_ms",        label:"トップのタイムラグ",           unit:"ms",      dec:0, signed:true, c:"top", timing:true , side:true },
   { core:true, k:"Commit_to_FS_ms",   label:"始動→接地",                   unit:"ms",      dec:0, timing:true },
   { core:true, k:"FS_to_Impact_ms",   label:"接地→インパクト",              unit:"ms",      dec:0, timing:true },
   { core:true, k:"Commit_to_Impact_ms",label:"始動→インパクト",             unit:"ms",      dec:0, timing:true },
@@ -5511,7 +5569,8 @@ function computeMetricsAll(){
   const iCommit=events.commit?indexAt(events.commit.t):-1;
 
   /* 5-1 ステップ幅 */
-  if(A.fs){
+  /* ⚠️ ステップ幅は投手方向に沿った距離。正面からでは奥行きになり測れない */
+  if(isSide()&&A.fs){
     const a=P2(A.fs,iAnkF), b=P2(A.fs,iAnkB);
     if(a&&b){
       m.step_ratio=Math.abs(a.x-b.x)/H*100;
@@ -5525,7 +5584,9 @@ function computeMetricsAll(){
     const headFwd=(lm)=>{ const n=P2(lm,L.nose); return (n&&n0)?dir*(n.x-n0.x)/H:null; };
     const headVert=(lm)=>{ const n=P2(lm,L.nose); return (n&&n0)?(n0.y-n.y)/H:null; };
     if(A.impact){
-      m.head_fwd_impact=headFwd(A.impact);
+      /* 前後移動は投手方向。正面からでは奥行きになるので出さない。
+         上下移動は画面の縦なので、どちらの向きでも出せる。 */
+      if(isSide()) m.head_fwd_impact=headFwd(A.impact);
       m.head_vert_impact=headVert(A.impact);
       conf.head=minVis([A.setup,L.nose],[A.impact,L.nose]);
     }
@@ -5537,15 +5598,18 @@ function computeMetricsAll(){
         if(f!=null&&(fMax==null||f>fMax)) fMax=f;
         if(v!=null&&(vMin==null||v<vMin)) vMin=v;
       }
-      m.head_fwd_max=fMax; m.head_vert_drop=vMin;
+      if(isSide()) m.head_fwd_max=fMax;   // 前方移動は奥行きになるので正面からは出さない
+      m.head_vert_drop=vMin;               // 沈み込みは画面の縦。どちらの向きでも出せる
     }
   }
   /* 5-3 / 5-4 膝角度 */
   const kneeOf=(lm,iH,iK,iA)=>{ const h=P2(lm,iH), k=P2(lm,iK), a=P2(lm,iA);
     return (h&&k&&a)?angle2(h,k,a):null; };
-  if(A.fs){ m.knee_fs=kneeOf(A.fs,iHipF,iKneeF,iAnkF);
+  /* ⚠️ 膝の曲げ伸ばしは矢状面(横から見た面)の角度。
+     正面からはほとんど見えず、実際より伸びた角度が出てしまう。 */
+  if(isSide()&&A.fs){ m.knee_fs=kneeOf(A.fs,iHipF,iKneeF,iAnkF);
             m.back_knee_fs=kneeOf(A.fs,iHipB,iKneeB,iAnkB); }
-  if(A.impact){ m.knee_impact=kneeOf(A.impact,iHipF,iKneeF,iAnkF);
+  if(isSide()&&A.impact){ m.knee_impact=kneeOf(A.impact,iHipF,iKneeF,iAnkF);
                 m.back_knee_impact=kneeOf(A.impact,iHipB,iKneeB,iAnkB); }
   if(m.knee_fs!=null&&m.knee_impact!=null) m.knee_ext=m.knee_impact-m.knee_fs;
   if(A.fs&&A.impact){
@@ -5559,12 +5623,18 @@ function computeMetricsAll(){
     const from=iCommit>=0?iCommit:0;
     let mx=null;
     for(let i=from;i<=iImpact;i++){ const v=gripSpeed[i]; if(v!=null&&(mx==null||v>mx)) mx=v; }
-    m.grip_speed_max=mx;
-    m.grip_speed_impact=gripSpeed[iImpact]??null;
+    /* ⚠️ 正面からは、手が向かってくる動きが画面上ほとんど進まないので
+       実際より遅く出る。見かけの速さを本物と取り違えないよう出さない。 */
+    if(isSide()){
+      m.grip_speed_max=mx;
+      m.grip_speed_impact=gripSpeed[iImpact]??null;
+    }
     conf.grip=A.impact?minVis([A.impact,L.lWrist],[A.impact,L.rWrist]):null;
   }
-  /* 5-6b ヘッドスピード。撮影が遅いと出さない(出すと嘘になるため) */
-  batSpd=batSpeedImpact();
+  /* 5-6b ヘッドスピード。撮影が遅いと出さない(出すと嘘になるため)。
+     ⚠️ 正面からも出さない。バットは奥行き方向に振られるので、
+     画面上の動きだけを見ると実際よりはるかに遅く出る。 */
+  batSpd=isSide()?batSpeedImpact():{ok:false, why:"横から撮った動画で出ます"};
   m.bat_speed_avg = batSpd.ok ? batSpd.avgKmh : null;
   m.bat_speed_se  = batSpd.ok ? batSpd.seKmh  : null;
   /* 5-7 支持基底内の身体中心(近似)。体重配分ではない */
@@ -5575,8 +5645,9 @@ function computeMetricsAll(){
     if(Math.abs(den)<1e-6) return null;
     return (hp.x-b.x)/den;
   };
-  if(A.fs) m.base_pos_fs=basePos(A.fs);
-  if(A.impact) m.base_pos_impact=basePos(A.impact);
+  /* ⚠️ 支持基底は軸足〜前足を結ぶ線。正面からでは奥行きになる */
+  if(isSide()&&A.fs) m.base_pos_fs=basePos(A.fs);
+  if(isSide()&&A.impact) m.base_pos_impact=basePos(A.impact);
   if(A.fs&&A.impact) conf.base=minVis([A.fs,L.lHip],[A.fs,L.rHip],[A.fs,iAnkF],[A.fs,iAnkB]);
 
   /* 5-5 トップ(割れ)のタイムラグ。
@@ -5590,7 +5661,10 @@ function computeMetricsAll(){
     const ig=onsetIndex(fwdPos, Math.max(1,iSetup), iImpact);
     if(ig>=0) tGrip=S[ig].t;
   }
-  if(tPelvis!=null&&tGrip!=null){
+  /* ⚠️ 骨盤の開き始めは「見かけの股関節幅が広がり始めた時刻」、
+     グリップの始動は「投手方向へ動き出した時刻」。どちらも横から前提。
+     正面からは股関節幅が最初から広く、投手方向は奥行きになる。 */
+  if(isSide()&&tPelvis!=null&&tGrip!=null){
     m.top_lag_ms=realSec(tGrip-tPelvis)*1000;
     m.t_pelvis_open=tPelvis; m.t_grip_fwd=tGrip;
     conf.top=A.impact?minVis([A.impact,L.lHip],[A.impact,L.rHip],[A.impact,L.lWrist],[A.impact,L.rWrist]):null;
@@ -5664,14 +5738,17 @@ const ADVICE_RULES = [
     why:"接地の時点で重心が前足寄りだと「突っ込み」になり、そこから回るぶんが残りません。後ろすぎると前に力が伝わりません。",
     basis:"突っ込みを避ける指導は共通。境目の数値は目安です。" },
 ];
+let adviceSeen=0;               // 直近の adviceItems() で、実際に見られた項目の数
 function adviceItems(){
   if(!metrics) return null;
   const {m,label}=metrics;
   const out=[];
+  let seen=0;
   for(const r of ADVICE_RULES){
     if(r.timing && fps<60) continue;
     const v=m[r.key];
     if(v==null||!isFinite(v)) continue;
+    seen++;                       // 測れた項目の数(0なら「範囲内」ではなく「測れていない」)
     const lab=r.conf?label[r.conf]:null;
     if(lab==="Invalid"||lab==="Poor") continue;     // 当てにならない測定からは助言しない
     const x=r.abs?Math.abs(v):v;
@@ -5683,6 +5760,7 @@ function adviceItems(){
     out.push({ r, v, lab, score:(miss/r.scale)*w });
   }
   out.sort((a,b)=>b.score-a.score);
+  adviceSeen=seen;
   return out;
 }
 function renderAdvice(){
@@ -5700,9 +5778,20 @@ function renderAdvice(){
     return;
   }
   const it=adviceItems();
+  if(it && !it.length && adviceSeen===0){
+    /* 1つも測れていない。範囲内なのではなく、材料が無い */
+    tag.textContent="出せません";
+    box.innerHTML=`<div class="adv-ok">提案の材料になる項目が<b>1つも測れていません</b>。
+      イベントが未確定か、<b>撮影の向きが「正面から」</b>になっていないか確かめてください
+      (ステップ幅・膝の角度・頭の前後移動は、横から撮った動画でしか測れません)。</div>`;
+    note.innerHTML=caveat;
+    return;
+  }
   if(!it||!it.length){
-    tag.textContent="目安の範囲内";
-    box.innerHTML=`<div class="adv-ok">見ている項目は<b>すべて一般的な目安の範囲に入っています</b>。
+    /* 何件を見たうえで「範囲内」なのかを書く。件数が少ないのに
+       「すべて範囲内」とだけ出ると、確かめた範囲を大きく見せてしまう。 */
+    tag.textContent=`目安の範囲内(${adviceSeen}件)`;
+    box.innerHTML=`<div class="adv-ok">見た<b>${adviceSeen}項目</b>は<b>すべて一般的な目安の範囲に入っています</b>。${!isSide()?`<br><b>いまは「正面から」の動画として計算しているので、ステップ幅・膝の角度・頭の前後移動などは見ていません。</b>`:""}
       ここから先は、一般論ではなく<b>その選手自身のばらつき</b>(「再現性」タブ)を見て、
       同じ動きを繰り返せているかで判断してください。</div>`;
     note.innerHTML=caveat;
@@ -5745,6 +5834,10 @@ function renderMetrics(){
   list.innerHTML=rows.map(r=>{
     const v=m[r.k];
     let txt="--", cls="na", badge="";
+    /* 撮影の向きに合わない指標は「--」ではなく、どう撮れば出るかを書く。
+       1台のカメラでは奥行きが測れないので、出せないものは出さない。 */
+    if(v==null && r.side && !isSide())
+      return `<span class="k">${r.label}</span><span class="v na">横からの動画で</span>`;
     if(v!=null&&isFinite(v)){
       const sign=(r.signed&&v>0)?"+":"";
       txt=sign+v.toFixed(r.dec)+(r.unit?" "+r.unit:"");
@@ -5910,7 +6003,8 @@ $("btnSaveSwing").addEventListener("click",()=>withSaveLock("btnSaveSwing",async
             T_norm:analysis.T_norm, H_norm:analysis.H_norm,
             cm_per_unit:currentBatter.cm_per_unit??null,
             dir:metrics.dir, dir_manual:dirManual!=null,
-            capture_fps:captureFps||null, slow_factor:slowFactor() },
+            capture_fps:captureFps||null, slow_factor:slowFactor(),
+            view_mode:viewMode },
     events:evOut, commit_source:commitSource,
     metrics:metrics.m, landmarks:lmOut,
     quality:{ conf:metrics.conf, label:metrics.label,
@@ -6645,7 +6739,7 @@ const CSV_COLS = ["date","session_id","swing_no","batter_name","height_cm","bats
   "exit_velocity_kmh","launch_angle_deg","spray_dir",
   "conf_step","conf_head","conf_knee","conf_grip","conf_top",
   "label_step","label_head","label_knee","label_grip","label_top",
-  "event_commit_confirmed","event_fs_confirmed","event_impact_confirmed","fps_warning","note"];
+  "event_commit_confirmed","event_fs_confirmed","event_impact_confirmed","fps_warning","view_mode","note"];
 function csvCell(v){
   if(v==null||v==="") return "";                       // 欠測は空欄
   if(typeof v==="number"){ if(!isFinite(v)) return ""; return String(Math.round(v*1000)/1000); }
@@ -6665,7 +6759,7 @@ function swingToRow(s, batter, session){
     batter_name:batter?batter.name:"", height_cm:batter?batter.height_cm:null,
     bats:batter?batter.bats:"", fps:s.fps, capture_fps:cal.capture_fps, slow_factor:cal.slow_factor,
     calibrated:cal.calibrated, commit_source:s.commit_source, note:s.note||"",
-    fps_warning:q.fps_warning,
+    fps_warning:q.fps_warning, view_mode:cal.view_mode||"side",
     event_commit_confirmed:ev.commit?.confirmed, event_fs_confirmed:ev.fs?.confirmed,
     event_impact_confirmed:ev.impact?.confirmed };
   ["Commit_to_FS_ms","FS_to_Impact_ms","Commit_to_Impact_ms","top_lag_ms","step_ratio","step_cm",
@@ -7188,7 +7282,7 @@ $("cmpPoseToggle").addEventListener("change",async(e)=>{
 const QUICK_SRC = [["qAnalyze","btnAnalyze"],["qDetect","btnDetectEvents"],["qSave","btnSaveSwing"]];
 function buildQuickEvents(){
   $("quickEvents").innerHTML = EVENTS.map((ev,i)=>
-    `<button class="qbtn${ev.need?" need":""}" data-qev="${ev.id}" title="いま表示しているコマで確定">`
+    `<button class="qbtn${ev.need?" need":""}" data-qev="${ev.id}"${ev.detail?' data-mode="detail"':""} title="いま表示しているコマで確定">`
     + `<span class="num">${i+1}</span>${ev.short||ev.label}<span class="tick"></span></button>`
   ).join("");
   renderQuickEvents();

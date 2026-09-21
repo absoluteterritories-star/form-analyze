@@ -319,6 +319,29 @@
   <h2>撮る</h2>
   <p class="sub">ここでほとんど決まります。撮り方が違うと、あとの数値はすべて意味を失います。</p>
 
+  <h3>撮る向きで、出る数値が変わります</h3>
+  <p>1台のカメラでは<strong>奥行きが測れません。</strong>カメラに対して手前・奥に動くものは、画面上ではほとんど動かないからです。そこで両アプリとも、<strong>撮影の向き</strong>を選ぶと、その向きでは測れない項目を<strong>数値を出さずに「横からの動画で」と表示します。</strong></p>
+  <div class="note">
+    <span class="lbl">なぜ「それらしい数字」を出さないのか</span>
+    <p>正面から撮った動画でも、ステップ幅の計算式そのものは動きます。ただしそれは「投手方向への踏み出し」ではなく<strong>「両足の左右の開き」</strong>を測った数字です。膝の角度も、正面からはほとんど曲がりが見えないので<strong>実際より伸びて出ます。</strong>出さないほうが安全だと判断しました。</p>
+  </div>
+  <div class="tw"><table>
+    <thead><tr><th>　</th><th>横から</th><th>正面・前後から</th></tr></thead>
+    <tbody>
+      <tr><td class="k"><span class="chip bat">打撃</span> ステップ幅／頭部の前後移動／膝の角度／支持基底内の身体中心／トップのタイムラグ／グリップ速度／ヘッド速度</td>
+          <td>出る</td><td><strong>出ない</strong></td></tr>
+      <tr><td class="k"><span class="chip bat">打撃</span> 頭部の上下移動／区間の時間（始動→接地など）</td>
+          <td>出る</td><td>出る</td></tr>
+      <tr><td class="k"><span class="chip pitch">投球</span> ストライド長／骨盤の前方移動／膝の角度／体幹前傾／運動連鎖／軸足スネ角／エクステンション／発射角</td>
+          <td>出る</td><td><strong>出ない</strong></td></tr>
+      <tr><td class="k"><span class="chip pitch">投球</span> リリースサイド（RPX）</td>
+          <td><strong>出ない</strong></td><td>出る</td></tr>
+      <tr><td class="k"><span class="chip pitch">投球</span> リリース高／肘角度／区間の時間</td>
+          <td>出る</td><td>出る</td></tr>
+    </tbody>
+  </table></div>
+  <p>設定は<strong>解析</strong>タブの「撮影の向き」です（現場モードでも変えられます）。既定はどちらも<strong>横から</strong>です。<strong>記録にも残る</strong>ので、あとから「これは正面から撮ったものだ」と分かります。</p>
+
   <h3>カメラの位置</h3>
   <div class="tw"><table>
     <thead><tr><th>　</th><th>置く場所</th></tr></thead>
