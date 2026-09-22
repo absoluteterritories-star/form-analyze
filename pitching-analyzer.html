@@ -277,6 +277,16 @@
     color:var(--chalk-dim);margin:0;padding:11px 14px 9px;border-bottom:1px solid var(--panel-line);
     display:flex;justify-content:space-between;align-items:center;gap:8px;}
   .panel h2 .tag{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--amber);letter-spacing:0;}
+  /* ---- 折りたたみ ---- */
+  .panel h2.foldable{cursor:pointer;-webkit-user-select:none;user-select:none;}
+  .panel h2.foldable:active{background:var(--bg-1);}
+  .panel h2 .fold{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--chalk-dim);
+    flex:none;width:20px;text-align:center;transition:transform .12s ease;}
+  .panel.folded h2{border-bottom:none;}
+  .panel.folded h2 .fold{transform:rotate(-90deg);}
+  .panel.folded > *:not(h2){display:none !important;}
+  /* 見出しの中身が「題名 / タグ / 印」の3つになるので、題名に幅を渡す */
+  .panel h2 > .h2t{flex:1 1 auto;min-width:0;}
   .tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
   .tab{background:var(--panel);border:1px solid var(--panel-line);color:var(--chalk-dim);
     min-height:40px;border-radius:8px;font-size:12.5px;cursor:pointer;flex:1 1 30%;padding:0 6px;}
@@ -310,13 +320,15 @@
   .kv .v.warn{color:var(--alert);}
   .kv .v.mid{color:var(--amber);}
   .rowlist{padding:8px 12px 4px;display:flex;flex-direction:column;gap:6px;}
-  .rowitem{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;
+  /* 選択 と 削除 の2つ分。削除は取り返しがつかないので、色で見分けられるようにする */
+  .rowitem{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;
     background:var(--bg-1);border:1px solid var(--panel-line);border-radius:8px;padding:9px 10px;}
   .rowitem.sel{border-color:var(--amber);}
   .rowitem .nm{font-size:12.5px;}
   .rowitem .sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--chalk-dim);}
   .rowitem button{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--panel);
     border:1px solid var(--panel-line);color:var(--chalk);min-height:36px;padding:0 10px;border-radius:7px;cursor:pointer;}
+  .rowitem button.del{color:var(--alert);border-color:rgba(224,90,78,.45);padding:0 8px;}
   .range-set{padding:10px 12px 8px;border-bottom:1px solid var(--panel-line);}
   .range-set-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;margin-bottom:6px;}
   .range-set-time{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--amber);}
@@ -1288,6 +1300,27 @@
 
       <!-- ===== 使い方 ===== -->
       <div class="tabpage" id="tab-help">
+        <div class="panel">
+          <h2>見出しを押すと畳めます</h2>
+          <div class="legend">
+            どのパネルも<b>見出しを押すと中身を畳めます</b>(もう一度押すと開きます)。
+            右端の <b>▾</b> が畳んでいるかどうかの印です。
+            <b>畳んだかどうかは端末が覚える</b>ので、次に開いたときもそのままです。<br>
+            入力欄が多いタブで、下のほうにあるものへ届きやすくなります。
+          </div>
+        </div>
+        <div class="panel">
+          <h2>投手の削除</h2>
+          <div class="legend">
+            選手の一覧の<b>「削除」</b>で消せます。<br>
+            <b>⚠️ その選手の記録とセッションも一緒に消えます。元に戻せません。</b>
+            何件消えるのかを先に出すので、必ず数を確かめてください。
+            記録が1本でもあるときは<b>2回たずねます</b>。<br>
+            <b>残しておきたいときは、先に「変化・出力」タブで書き出してください。</b>
+            書き出した CSV / JSON は消えません。<br>
+            選んでいる選手を消したときは、選択もセッションも外れます。
+          </div>
+        </div>
         <div class="panel">
           <h2>現場モードと詳細モード</h2>
           <div class="legend">
@@ -3389,6 +3422,7 @@ async function reloadPitchers(){
       <span><span class="nm">${escapeHtml(p.name)}</span>
         <span class="sub">${p.height_cm}cm / ${p.throws==="R"?"右":"左"}投げ / ${p.calibrated?"較正済":"未較正"}</span></span>
       <button class="pick">選択</button>
+      <button class="del" title="この投手と、その記録をすべて消します">削除</button>
     </div>`).join("")
     :`<div class="legend" style="padding:0;">まだ登録がありません。下の欄に入力して登録してください。</div>`;
   $("pitcherTag").textContent=currentPitcher?currentPitcher.name:"未選択";
@@ -3430,9 +3464,47 @@ async function setCurrentPitcher(p){
   renderMetrics();
   return changed;
 }
+/* 投手をまるごと消す。取り消せないので、何が消えるかを先に数えて見せる。 */
+async function deletePitcher(p){
+  if(!dbOk()) return;
+  const recs=(await dbAll("pitches")).filter(x=>x.pitcher_id===p.id);
+  const sess=(await dbAll("sessions")).filter(x=>x.pitcher_id===p.id);
+  const what=`${p.name}(${p.height_cm}cm)`;
+  if(recs.length){
+    /* 記録があるときは二段で確かめる。書き出していなければ戻せない */
+    if(!confirm(`${what} を削除します。\n\n`
+      + `この投手の <${recs.length}> 本の投球の記録と、`
+      + `${sess.length} 件のセッションも一緒に消えます。\n`
+      + `元に戻せません。\n\n`
+      + `残しておきたい場合は、先に「変化・出力」タブで書き出してください。\n\n`
+      + `続けますか?`)) return;
+    if(!confirm(`本当に ${recs.length} 本の記録ごと消しますか?\n`
+      + `この操作は取り消せません。`)) return;
+  }else{
+    if(!confirm(`${what} を削除します。\n記録はまだ1本もありません。\n\n続けますか?`)) return;
+  }
+  try{
+    for(const r of recs) await dbDel("pitches", r.id);
+    for(const x of sess) await dbDel("sessions", x.id);
+    await dbDel("pitchers", p.id);
+  }catch(err){
+    console.error(err); setStatus("err","削除できませんでした"); return;
+  }
+  /* 選択中だった場合は、選択もセッションも外す。
+     外さないと、消えた投手のまま記録しようとして行き場のないデータができる。 */
+  if(currentPitcher && currentPitcher.id===p.id){
+    currentPitcher=null; currentSession=null;
+    try{ localStorage.removeItem("pitchlab.lastPitcher"); }catch{}
+  }
+  await reloadPitchers();
+  if(typeof setCurrentPitcher==="function" && !currentPitcher) await setCurrentPitcher(null);
+  setStatus("ok",`${what} を削除しました(記録 ${recs.length} 本・セッション ${sess.length} 件)`);
+  toast("削除しました");
+}
 $("pitcherList").addEventListener("click",async(e)=>{
   const row=e.target.closest(".rowitem"); if(!row) return;
   const p=pitchers.find(x=>x.id===row.dataset.id); if(!p) return;
+  if(e.target.closest(".del")){ await deletePitcher(p); return; }
   const hadSession=!!currentSession;
   await setCurrentPitcher(p);
   if(hadSession&&!currentSession) toast("別の選手に切り替えたので、セッションを閉じました");
@@ -3968,6 +4040,64 @@ $("captureFpsSel").addEventListener("change",e=>{
   const f=slowFactor();
   toast(f>1?`実時間 = 動画時間 ÷ ${f.toFixed(0)} として計算します`:"時間の補正なし");
 });
+/* ================= パネルの折りたたみ =================
+   入力欄が並ぶと、小さい画面では目的のものに届くまで遠い。
+   見出しを押して畳めるようにし、畳んだかどうかを端末に覚える。
+   ⚠️ 畳んだ中に canvas があると、開いたときに大きさが 0 のままになる。
+   開いたら並べ直し(layout)と描き直しを呼ぶ。 */
+const FOLD_KEY="pitchlab.folded.v1";
+let foldedSet=new Set();
+try{ foldedSet=new Set(JSON.parse(lsGet(FOLD_KEY)||"[]")); }catch{}
+function saveFolded(){ lsSet(FOLD_KEY, JSON.stringify([...foldedSet])); }
+/* 見出しの文字ではなく「どのタブの何番目のパネルか」を鍵にする。
+   見出しは中の値で変わる(「打者 未選択」など)ので鍵に使えない。 */
+function foldKey(panel){
+  const page=panel.closest(".tabpage");
+  const id=page?page.id:"none";
+  const sib=page?[...page.querySelectorAll(":scope > .panel")]:[];
+  return id+":"+Math.max(0,sib.indexOf(panel));
+}
+function setFolded(panel, on, remember){
+  panel.classList.toggle("folded", on);
+  const h=panel.querySelector(":scope > h2");
+  if(h){ h.setAttribute("aria-expanded", on?"false":"true"); }
+  const k=foldKey(panel);
+  if(on) foldedSet.add(k); else foldedSet.delete(k);
+  if(remember!==false) saveFolded();
+  if(!on){
+    /* 開いたときだけ。畳んでいる間は大きさが測れない */
+    try{ layout(); }catch{}
+    try{ dispatchEvent(new Event("resize")); }catch{}
+  }
+}
+function initFolds(){
+  for(const panel of document.querySelectorAll(".panel")){
+    const h=panel.querySelector(":scope > h2");
+    if(!h || h.dataset.foldReady) continue;
+    h.dataset.foldReady="1";
+    h.classList.add("foldable");
+    h.setAttribute("role","button");
+    h.setAttribute("tabindex","0");
+    /* 題名を包んで、印を右端に置けるようにする */
+    const kids=[...h.childNodes];
+    const t=document.createElement("span"); t.className="h2t";
+    for(const c of kids){ if(c.classList&&c.classList.contains("tag")) continue; t.appendChild(c); }
+    const tag=h.querySelector(".tag");
+    h.textContent="";
+    h.appendChild(t);
+    if(tag) h.appendChild(tag);
+    const mark=document.createElement("span");
+    mark.className="fold"; mark.textContent="▾"; mark.setAttribute("aria-hidden","true");
+    h.appendChild(mark);
+    const toggle=()=>setFolded(panel, !panel.classList.contains("folded"));
+    h.addEventListener("click",toggle);
+    h.addEventListener("keydown",(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); } });
+    if(foldedSet.has(foldKey(panel))) setFolded(panel, true, false);
+  }
+}
+addEventListener("DOMContentLoaded", initFolds);
+initFolds();
+
 /* ============ 現場モード / 詳細モード ============
    機能を消さずに、現場で使うものだけに絞って出す。
    隠す対象は data-mode="detail"、指標は core:true で印を付けてある。
@@ -6624,6 +6754,7 @@ $("btnJgCsv").addEventListener("click",()=>{
 });
 
 window.__pitchlab = {
+  get db(){ return db; },   // 動作確認用。表示には使わない
   angle2, smoothedAt, get videoAR(){ return videoAR; },
   get annots(){ return annots; },
   get relBalls(){ return relBalls; },
