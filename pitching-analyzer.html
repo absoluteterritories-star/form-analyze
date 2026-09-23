@@ -1328,21 +1328,23 @@
             (提案の上位3件とは別枠なので、埋もれません)。<br>
             <b>横から撮った動画で出るもの</b><br>
             ① リリース時の膝の角度 — 両ひざの角度を足して<b>270°以上</b>か<br>
-            ② 4分の3フェーズの軸足 — ステップ足のかかとが踏み出し幅の4分の3を通った瞬間に、
-            骨盤・膝の皿・足の中指が<b>一直線</b>か。
-            キャッチャー方向に曲がれば「開きが早い」、2塁方向なら「重心がのこったまま」<br>
-            ③ 腕が地面と<b>平行</b>になっているか<br>
+            ③ <b>最大外旋</b>のときに腕が地面と<b>平行</b>になっているか<br>
             <b>前・後ろから撮った動画で出るもの</b><br>
+            ② 4分の3フェーズの軸足 — 骨盤・膝の皿・足の中指が<b>一直線</b>か。
+            <b>1塁方向(右投手のグラブ側)に折れてはいけません</b><br>
             ④ リリース時の「頭−腰の中心」と「腰の中心−軸足のかかと」の角度が<b>20°以内</b>か<br>
             ⑤ リリース時の手の高さが、両肩を結ぶラインより<b>ボール1個分ほど上</b>か<br>
             <b>⚠️ どこまでが紙の基準か</b><br>
             <b>①の270°・④の20°・⑤の「ボール1個分上」は紙のとおり</b>です。
             ②③の許容幅(±10°・±15°)と、⑤の「ほど」の幅(0.5〜1.5個分)は
             <b>紙に数値が無いので当方で置いた目安</b>です。画面にもそう書いてあります。<br>
-            <b>⚠️ ③の「この場面」</b>がどのコマを指すかは写真から決めきれないので、
-            <b>トップ</b>(肘が最も後ろ・高いコマ)で測っています。別のコマなら変えられます。<br>
-            <b>⚠️ ②の「1塁方向に曲がってはいけない」</b>は左右方向なので、
-            横から撮った動画では測れません(前後から撮ったときの話です)。<br>
+            <b>③の最大外旋のコマ</b>は、<b>トップ〜リリースの間で前腕がいちばん後ろに寝たところ</b>を
+            自動で拾っています(トップが未確定のときは接地から探します)。
+            ただし最大外旋では上腕が体の横(カメラの奥行き方向)を向きがちなので、
+            横から撮ると上腕が短く写り、傾きが実際より<b>急</b>に出ることがあります。<br>
+            <b>②の4分の3の位置</b>は、前後から撮ると足が進んだ距離が奥行きになって測れないため、
+            <b>脚上げ〜接地の時間の75%</b>で代表しています。
+            踏み出しの前進速度はほぼ一定なので、距離の75%とだいたい同じ時刻になります。<br>
             大事なのは「この形にしよう」と意識することではなく、
             <b>この形になってしまうのはなぜだろう? どこをトレーニングしたらよいのかな?</b> と、
             体づくりの面やピッチングの流れ全体を通して考えることです。
@@ -4224,6 +4226,11 @@ let selectedEvent=null;
 const mpSide=(anat)=> mirror ? (anat==="R"?"L":"R") : anat;
 function throwArm(){ return currentPitcher ? currentPitcher.throws : "R"; }
 function strideSideAnat(){ return throwArm()==="R" ? "L" : "R"; }   // 踏み出し脚は投球腕の反対
+/* マウンドからホームを向くと、投手の左が1塁側・右が3塁側。
+   グラブ側(踏み出す足の側)は 右投手=1塁、左投手=3塁。
+   紙が「曲がってはいけない」と書いているのがこのグラブ側。 */
+function openBaseName(){ return throwArm()==="R" ? "1塁" : "3塁"; }
+function backBaseName(){ return throwArm()==="R" ? "3塁" : "1塁"; }
 const IDX={ ankle:{R:L.rAnkle,L:L.lAnkle}, foot:{R:L.rFoot,L:L.lFoot},
             wrist:{R:L.rWrist,L:L.lWrist}, elbow:{R:L.rElbow,L:L.lElbow},
             shoulder:{R:L.rShoulder,L:L.lShoulder} };
@@ -4452,6 +4459,14 @@ function loadDraft(){
    印のないものは詳細モードでだけ出る(消してはいない)。 */
 /* 硬式球の直径。チェックポイント⑤で「ボール何個分」を数えるのに使う */
 const BALL_CM=7.3;
+/* 最大外旋と認める「前腕の寝」の範囲。
+   0°=前腕が真上、90°=真後ろ水平、180°=真下、負=前を向いている。
+   ・下限 20°  … どのコマもこれに届かない区間には最大外旋が入っていない
+   ・上限 135° … これを超えるのは手が肘のほぼ真下。腕を振り上げてくる途中か、
+                 腕が正しく追えていないコマで、最大外旋ではない
+   実測で、イベントがずれた区間から lay=172° のコマを拾ってしまう例が出たため、
+   上限も要る。範囲の外しか無いときは③の数値を出さない。 */
+const MER_MIN_LAY=20, MER_MAX_LAY=135;
 const METRIC_ROWS = [
   { core:true, k:"speed_kmh",  label:"球速",                    unit:"km/h", dec:1 },
   { core:true, k:"stride_ratio",label:"ストライド長",           unit:"%",    dec:1, cm:"stride_cm", side:true },
@@ -4475,8 +4490,8 @@ const METRIC_ROWS = [
   /* ---- いただいた「ピッチングのチェックポイント」 ---- */
   { core:true, k:"knee_sum_rel", label:"① リリース時 両膝角度の和", unit:"°", dec:0, side:true },
   { k:"back_knee_rel", label:"　(内訳) 軸足膝角度",        unit:"°",    dec:0, side:true },
-  { core:true, k:"axis_line_34", label:"② 4分の3での軸足の折れ",   unit:"°",    dec:0, signed:true, side:true },
-  { core:true, k:"arm_horiz_top", label:"③ トップの上腕の傾き",     unit:"°",    dec:0, signed:true, side:true },
+  { core:true, k:"axis_line_34", label:"② 4分の3での軸足の折れ",   unit:"°",    dec:0, signed:true, back:true },
+  { core:true, k:"arm_horiz_top", label:"③ 最大外旋時の上腕の傾き", unit:"°",    dec:0, signed:true, side:true },
   { core:true, k:"tilt_rel",     label:"④ リリース時の体の倒れ",    unit:"°",    dec:0, back:true },
   { core:true, k:"hand_above_ball", label:"⑤ 手の高さ(両肩ラインから)", unit:"個分", dec:1, signed:true, back:true },
 ];
@@ -4622,59 +4637,91 @@ function computeMetricsAll(){
   }
   if(m.knee_rel!=null&&m.back_knee_rel!=null) m.knee_sum_rel=m.knee_rel+m.back_knee_rel;
 
-  /* ============ チェックポイント② 4分の3フェーズの軸足 ============
+  /* ============ チェックポイント② 4分の3フェーズの軸足の折れ ============
      いただいた基準: ステップ足の後ろ側がステップ幅の4分の3を通過する瞬間に、
-     骨盤・膝の皿・足の中指が一直線か。
-     ・キャッチャー方向に曲がっていれば「開きが早い」
-     ・2塁方向に曲がっていれば「重心がのこったまま」
-     ここでは「ステップ足の後ろ側」をかかとで代表し、脚上げ〜接地の進みの75%に
-     達した最初のコマを4分の3フェーズとする。
-     ⚠️ 横からのみ。前後から撮ると、この前後のずれが奥行きになって測れない。
-     ⚠️ 紙にある「1塁方向に曲がってはいけない」は左右方向なので、
-        横から撮った動画では測れない(前後から撮ったときの話)。 */
-  if(isSide()&&events.lift&&events.fp){
-    const hS=(mpSide(stride)==="R")?L.rHeel:L.lHeel;
-    const a0=P2(A.lift,hS), a1=P2(A.fp,hS);
-    if(a0&&a1){
-      const total=D*(a1.x-a0.x);
-      if(total>1e-4){
-        let best=null;
-        for(const fr of smoothSeries){
-          if(fr.t<events.lift.t-1e-6||fr.t>events.fp.t+1e-6) continue;
-          const q=P2(fr.lm,hS); if(!q) continue;
-          if(D*(q.x-a0.x) >= 0.75*total){ best=fr; break; }
-        }
-        if(best){
-          m.t_34=best.t;
-          const hp=P2(best.lm,iHipP), kn=P2(best.lm,iKneeP), toe=P2(best.lm,iToeP);
-          if(hp&&kn&&toe){
-            /* 一直線からの折れ角。まっすぐなら 0 */
-            const bend=180-angle2(hp,kn,toe);
-            /* 膝が線のどちら側に出ているか。+ = キャッチャー方向 */
-            const vx=toe.x-hp.x, vy=toe.y-hp.y;
-            const wx=kn.x-hp.x, wy=kn.y-hp.y;
-            let sign=0;
-            if(Math.abs(vy)>1e-6){ const off=wx-vx*(wy/vy); sign=Math.sign(D*off); }
-            m.axis_line_34=bend*(sign||1);
-            conf.axis34=minVis([best.lm,iHipP],[best.lm,iKneeP],[best.lm,iToeP]);
-          }
-        }
+     骨盤・膝の皿・足の中指が一直線か。1塁方向に曲がってはいけない。
+     ⚠️ 前・後ろからのみ。「1塁/3塁方向に曲がる」は左右方向なので、
+        横から撮ると奥行きになって測れない。
+     ⚠️ 前後から撮ると、足が前に出た「距離」も奥行きになって測れない。
+        そこで4分の3フェーズは、脚上げ〜接地の<時間>の75%の位置で代表する。
+        踏み出しの前進速度はほぼ一定なので、距離の75%とだいたい同じ時刻になる。
+     符号は「グラブ側(開く側)に折れていれば +」。
+     右投手ならグラブ側=1塁側、左投手なら3塁側で、紙が「曲がってはいけない」と
+     言っているのはこちら側。 */
+  if(!isSide()&&events.lift&&events.fp&&events.fp.t>events.lift.t){
+    const tt=events.lift.t+(events.fp.t-events.lift.t)*0.75;
+    let best=null, bd=Infinity;
+    for(const fr of smoothSeries){
+      const d=Math.abs(fr.t-tt); if(d<bd){ bd=d; best=fr; }
+    }
+    if(best){
+      m.t_34=best.t;
+      const hp=P2(best.lm,iHipP), kn=P2(best.lm,iKneeP), toe=P2(best.lm,iToeP);
+      const hipL=P2(best.lm,L.lHip), hipR=P2(best.lm,L.rHip);
+      /* 画面上で「投手の左」がどちら向きか。前から撮れば画面右、後ろからなら画面左。
+         腰の幅がほとんど無いコマ(横向き)は当てにならないので捨てる。 */
+      const width=(hipL&&hipR)?Math.abs(hipL.x-hipR.x):0;
+      if(hp&&kn&&toe&&width>0.02*H){
+        /* 一直線からの折れ角。まっすぐなら 0 */
+        const bend=180-angle2(hp,kn,toe);
+        const toLeftX=Math.sign(hipL.x-hipR.x);           // 投手の左 = 画面のどちら向きか
+        const openX=(mpSide(stride)==="L")?toLeftX:-toLeftX; // グラブ側(踏み出す足の側)
+        /* 膝が股関節→つま先の線のどちら側に出ているか */
+        const vx=toe.x-hp.x, vy=toe.y-hp.y;
+        const wx=kn.x-hp.x, wy=kn.y-hp.y;
+        let sign=0;
+        if(Math.abs(vy)>1e-6){ const off=wx-vx*(wy/vy); sign=Math.sign(off*openX); }
+        m.axis_line_34=bend*(sign||1);
+        conf.axis34=minVis([best.lm,iHipP],[best.lm,iKneeP],[best.lm,iToeP],
+                           [best.lm,L.lHip],[best.lm,L.rHip]);
       }
     }
   }
 
-  /* ============ チェックポイント③ 腕が地面と平行か ============
-     いただいた基準: 「この場面の腕が地面と平行になっているか」。
-     ⚠️ 紙の「この場面」がどのコマかは写真からは決めきれないので、
-        ここでは<トップ>(肘が最も後ろ・高いコマ)で測っている。
-        別のコマを指しているようなら、そこに変えられる。
-     測るのは 肩→肘。+ が肘の方が高い、− が肘が下がっている。
-     ⚠️ 横からのみ。 */
-  if(isSide()&&A.armp){
-    const sh=P2(A.armp,iSh), el=P2(A.armp,iEl);
-    if(sh&&el){
-      m.arm_horiz_top=Math.atan2(sh.y-el.y, Math.abs(el.x-sh.x))*180/Math.PI;
-      conf.armh=minVis([A.armp,iSh],[A.armp,iEl]);
+  /* ============ チェックポイント③ 最大外旋時に腕が地面と平行か ============
+     いただいた基準:「この場面の腕が地面と平行になっているか」。
+     「この場面」= <最大外旋(MER)> と教えていただいた。
+     最大外旋のコマの見つけかた(2D):
+       前腕(肘→手首)がいちばん後ろに寝たコマ。
+       lay = atan2( 後ろ向き成分, 上向き成分 )。真上が0°、真後ろ水平が90°。
+       ⚠️ 探す範囲を<トップ>から始めるのが肝心。接地から探すと、腕を下から
+          振り上げてくる途中(手が肘より下で後ろにある)の lay が 180°近くになり、
+          そこを拾ってしまう。トップが未確定のときは接地から探すが、
+          そのときは「手が肘より極端に下でない」コマだけを見る。
+     測るのは 肩→肘の傾き。+ が肘の方が高い、− が肘が下がっている。
+     ⚠️ 横からのみ。
+     ⚠️ 最大外旋では上腕が体の横(カメラの奥行き方向)を向きがちなので、
+        横から撮ると上腕が短く写り、傾きが実際より<急>に出ることがある。
+        肘が肩のライン上にあるかを見たいときは前・後ろから撮るほうが確か。
+     ※ 保存名 arm_horiz_top はトップで測っていた頃の名残。
+        既に書き出したCSVと列がずれないよう、名前はそのままにしている。 */
+  if(isSide()&&events.rel){
+    const fromTop=!!events.arm;
+    const t0=fromTop?events.arm.t:(events.fp?events.fp.t:(events.lift?events.lift.t:-Infinity));
+    const t1=events.rel.t;
+    let best=null, bestLay=-Infinity, anyLay=-Infinity;
+    for(const fr of smoothSeries){
+      if(fr.t<t0-1e-6||fr.t>t1+1e-6) continue;
+      const el=P2(fr.lm,iEl), wr=P2(fr.lm,iWr); if(!el||!wr) continue;
+      /* トップから探せないときの保険。振り上げ途中の腕を拾わないようにする */
+      if(!fromTop && wr.y > el.y+0.05*H) continue;
+      const lay=Math.atan2(D*(el.x-wr.x), el.y-wr.y)*180/Math.PI;
+      if(lay>anyLay) anyLay=lay;                 // 出せなかった理由を残すため
+      if(lay>MER_MAX_LAY) continue;              // 手が肘のほぼ真下。最大外旋ではない
+      if(lay>bestLay){ bestLay=lay; best=fr; }
+    }
+    /* 範囲(20〜135°)に入るコマが無いなら、その区間に最大外旋は入っていない。
+       イベントの位置がずれているか、腕が写っていないコマばかりということなので、
+       数値を出さない。それらしい角度が出るほうが危ない。 */
+    if(best&&bestLay>=MER_MIN_LAY){
+      m.t_mer=best.t; m.mer_layback=bestLay;
+      const sh=P2(best.lm,iSh), el=P2(best.lm,iEl);
+      if(sh&&el){
+        m.arm_horiz_top=Math.atan2(sh.y-el.y, Math.abs(el.x-sh.x))*180/Math.PI;
+        conf.armh=minVis([best.lm,iSh],[best.lm,iEl],[best.lm,iWr]);
+      }
+    }else if(isFinite(anyLay)){
+      m.mer_layback=anyLay;           // 出さなかった理由を残す(記録には保存しない)
     }
   }
 
@@ -4807,14 +4854,17 @@ const ADVICE_RULES = [
   { key:"axis_line_34", conf:"axis34", title:"② 4分の3で骨盤・膝・つま先を一直線に",
     name:"4分の3での軸足の折れ", unit:"°", dec:0, signed:true, abs:true, hi:10, scale:10, level:"中",
     goal:()=>"一直線(0°)に近づける。ここでは ±10° 以内を目安にしています",
-    why:"膝がキャッチャー方向に曲がっていれば「開きが早い」、2塁方向に曲がっていれば「重心がのこったまま」です。この4分の3のところまで軸足が地面からの力をいかに「長く・広く・強く」得られるかで球の強さが決まってきます。ピッチングドリルが良い練習になります。",
-    basis:"「一直線か」はいただいたチェックポイントのとおりですが、±10° という許容幅は紙に無いため当方で置いた目安です。" },
+    why:(v)=> (v>0
+      ? "膝が"+openBaseName()+"方向に折れています。紙が「曲がってはいけない」と言っているのはこちら側です。"
+      : "膝が"+backBaseName()+"方向に折れています。")
+      + "この4分の3のところまで軸足が地面からの力をいかに「長く・広く・強く」得られるかで球の強さが決まってきます。ピッチングドリルが良い練習になります。",
+    basis:"「一直線か」はいただいたチェックポイントのとおりですが、±10° という許容幅は紙に無いため当方で置いた目安です。4分の3の位置は、脚上げ〜接地の時間の75%で代表しています(前後から撮ると足が進んだ距離は奥行きになって測れないため)。" },
 
-  { key:"arm_horiz_top", conf:"armh", title:"③ 腕を地面と平行に",
-    name:"トップの上腕の傾き", unit:"°", dec:0, signed:true, abs:true, hi:15, scale:15, level:"中",
+  { key:"arm_horiz_top", conf:"armh", title:"③ 最大外旋で腕を地面と平行に",
+    name:"最大外旋時の上腕の傾き", unit:"°", dec:0, signed:true, abs:true, hi:15, scale:15, level:"中",
     goal:()=>"地面と平行(0°)に近づける。ここでは ±15° 以内を目安にしています",
     why:"出来ていない場合は肩の柔軟性が足りないので、肩甲骨の動く範囲を広げるトレーニングを行う必要があります。また、ボールの重さを利用して腕を振る感覚がまだ身についていないこともあります。重たいボールを投げることや巻き付きシャドウピッチングをすることで、腕がしなって振られる感覚を身に着けるといいです。",
-    basis:"「腕が地面と平行か」はいただいたチェックポイントのとおり。⚠️ 紙の「この場面」がどのコマかは決めきれないので、ここでは<トップ>で測っています。±15° の幅も当方で置いた目安です。" },
+    basis:"「最大外旋で腕が地面と平行か」はいただいたチェックポイントのとおり。最大外旋のコマは、トップ〜リリースの間で前腕がいちばん後ろに寝たところを自動で拾っています。±15° の幅は当方で置いた目安です。" },
 
   { key:"tilt_rel", conf:"tilt", title:"④ リリースで体を倒しすぎない",
     name:"リリース時の体の倒れ", unit:"°", dec:0, hi:20, scale:10, level:"高",
@@ -4897,28 +4947,41 @@ function adviceItems(){
    ・紙に無い許容幅(②③、⑤の「ほど」)は当方で置いた目安と明記する
    ・向きが合わないものは、数値ではなく撮り方を出す */
 const CHECK_POINTS = [
-  { n:"①", key:"knee_sum_rel", side:true, title:"リリース時の膝の角度",
+  { n:"①", key:"knee_sum_rel", conf:"bknee", side:true, title:"リリース時の膝の角度",
     crit:"両ひざの角度を足して 270°以上", unit:"°", dec:0,
     ok:(v)=>v>=270, paper:true,
     why:"足りない場合は上半身頼りのフォームだと考えられるので、股関節の柔軟性や下半身のトレーニングで下半身を成長させ、投げる動きの中で下半身を使っていく練習ができると良い。" },
-  { n:"②", key:"axis_line_34", side:true, title:"4分の3フェーズの軸足",
+  { n:"②", key:"axis_line_34", conf:"axis34", side:false, title:"4分の3フェーズの軸足",
     crit:"骨盤・膝の皿・足の中指が一直線(±10°以内を目安)", unit:"°", dec:0, signed:true,
     ok:(v)=>Math.abs(v)<=10, paper:false,
+    naWhy:"膝が1塁方向／3塁方向のどちらに折れたかは左右のずれなので、横から撮ると奥行きになります",
     why:(v)=> (v>0
-      ? "膝がキャッチャー方向に曲がっています＝「開きが早い」。"
-      : "膝が2塁方向に曲がっています＝「重心がのこったまま」。")
+      ? "膝が"+openBaseName()+"方向に折れています。紙が「曲がってはいけない」と言っているのはこちら側です。"
+      : "膝が"+backBaseName()+"方向に折れています。")
       + "この4分の3のところまで軸足が地面からの力をいかに「長く・広く・強く」得られるかで球の強さが決まってくる。ピッチングドリルが良い練習になります。",
-    note:"「一直線か」は紙のとおり。±10° という幅は紙に無いので当方で置いた目安です。" },
-  { n:"③", key:"arm_horiz_top", side:true, title:"腕が地面と平行になっているか",
+    note:()=>`＋が${openBaseName()}側(グラブ側)、−が${backBaseName()}側です。`
+      +"「一直線か」は紙のとおりですが、±10° という幅は紙に無いので当方で置いた目安です。"
+      +"4分の3の位置は<b>脚上げ〜接地の時間の75%</b>で代表しています(前後から撮ると、足が進んだ距離は奥行きになって測れないため)。" },
+  { n:"③", key:"arm_horiz_top", conf:"armh", side:true, title:"最大外旋時に腕が地面と平行になっているか",
     crit:"地面と平行(±15°以内を目安)", unit:"°", dec:0, signed:true,
     ok:(v)=>Math.abs(v)<=15, paper:false,
+    naWhy:"上腕が上がっているか下がっているかは、前後から撮ると体と重なって見分けにくくなります",
+    /* 最大外旋が区間に入っていなかったときは、その理由をそのまま出す */
+    whyNull:(m)=> m.mer_layback==null ? null :
+      `トップ〜リリースの間に<b>最大外旋のコマが見つかりませんでした</b>。
+       この区間で前腕がいちばん寝たところが ${m.mer_layback.toFixed(0)}° で、
+       最大外旋とみなす範囲(${MER_MIN_LAY}〜${MER_MAX_LAY}°)の外でした。
+       ${m.mer_layback>MER_MAX_LAY ? "手が肘のほぼ真下にあるコマばかりです。" : "前腕が前を向いたままです。"}
+       <b>トップとリリースの位置</b>を直すか、<b>投球腕が隠れていないか</b>を確かめてください。
+       それらしい角度が出るほうが危ないので、数値は出していません。`,
     why:"出来ていない場合は肩の柔軟性が足りないので、肩甲骨の動く範囲を広げるトレーニングを行う必要がある。また、ボールの重さを利用して腕を振る感覚がまだ身についていないこともある。重たいボールを投げることや巻き付きシャドウピッチングをすることで、腕がしなって振られる感覚を身に着けるといい。",
-    note:"⚠️ 紙の「この場面」がどのコマかは写真から決めきれないので、<b>トップ</b>(肘が最も後ろ・高いコマ)で測っています。±15° の幅も当方で置いた目安です。別のコマを指しているようなら変えられます。" },
-  { n:"④", key:"tilt_rel", side:false, title:"リリース時の体の倒れ",
+    note:"＋が肘の高いほう、−が肘の下がったほうです。最大外旋のコマは、<b>トップ〜リリースの間で前腕がいちばん後ろに寝たところ</b>を自動で拾っています。±15° の幅は当方で置いた目安です。"
+      +"<br>⚠️ 最大外旋では上腕が体の横(カメラの奥行き方向)を向きがちなので、横から撮ると上腕が短く写り、傾きが実際より<b>急</b>に出ることがあります。" },
+  { n:"④", key:"tilt_rel", conf:"tilt", side:false, title:"リリース時の体の倒れ",
     crit:"「頭−腰の中心」と「腰の中心−軸足のかかと」の角度が 20°以内", unit:"°", dec:0,
     ok:(v)=>v<=20, paper:true,
     why:"股関節や体幹を使いうまく「回転」できているかが分かる。20度より大きくなってしまうときは、頭が(右投手なら)1塁側に倒れすぎることが原因。また、回転を受け止めるステップ足のお尻や太ももが弱く、回転を受け止められないと、スネが1塁方向に倒れて、ヒザが1塁方向に割れてしまう。下半身の強化や股関節の柔軟性を高めるトレーニングが必要。" },
-  { n:"⑤", key:"hand_above_ball", side:false, title:"リリース時の手の高さ",
+  { n:"⑤", key:"hand_above_ball", conf:"handh", side:false, title:"リリース時の手の高さ",
     crit:"両肩を結ぶラインより ボール1個分ほど上(0.5〜1.5個分を目安)", unit:"個分", dec:1, signed:true,
     ok:(v)=>v>=0.5&&v<=1.5, paper:false,
     why:(v)=> (v>1.5
@@ -4942,18 +5005,29 @@ function renderCheckPoints(){
     note.innerHTML=foot; return;
   }
   let okN=0, seen=0;
+  const cf=metrics.conf||{};
   box.innerHTML=CHECK_POINTS.map(c=>{
     const v=m[c.key];
+    const cv=cf[c.conf];
     const wrongView = (c.side && !isSide()) || (!c.side && isSide());
     let judge, cls, body;
     if(wrongView){
       judge=c.side?"横から撮ると出ます":"前後から撮ると出ます"; cls="na";
+      const naWhy=c.naWhy||(c.side?"膝の曲げ伸ばしは矢状面の角度なので、前後から撮ると奥行きになります"
+                                  :"体の左右の倒れと両肩のラインは、横から撮ると重なって見えません");
       body=`<div class="cp-why">この項目は${c.side?"横":"前・後ろ"}から撮った動画でしか測れません。
-        (${c.side?"膝の曲げ伸ばしや前後のずれは、前後から撮ると奥行きになります"
-                 :"体の左右の倒れと両肩のラインは、横から撮ると重なって見えません"})</div>`;
+        (${naWhy})</div>`;
     }else if(v==null||!isFinite(v)){
       judge="測れていません"; cls="na";
-      body=`<div class="cp-why">イベントが未確定か、その関節が写っていないコマです。</div>`;
+      body=`<div class="cp-why">${(c.whyNull&&c.whyNull(m))||"イベントが未確定か、その関節が写っていないコマです。"}</div>`;
+    }else if(cv!=null&&isFinite(cv)&&cv<0.40){
+      /* 関節がほとんど写っていないコマから出した数値は、合否を出さない。
+         提案(ADVICE_RULES)と同じ 0.40 で切る。それらしい数字が出るほうが危ない。 */
+      judge="写りが悪く判定できません"; cls="na";
+      body=`<div class="cp-num"><span class="cp-now">参考値 <b>${(c.signed&&v>0)?"+":""}${v.toFixed(c.dec)} ${c.unit}</b></span>
+          <span class="cp-goal">この関節の写り ${(cv*100).toFixed(0)}%</span></div>
+        <div class="cp-why">この場面でこの関節がほとんど写っていないので、合否は出しません。
+          体が重なっていないか、画面から出ていないかを確かめてください。</div>`;
     }else{
       seen++;
       const good=c.ok(v); if(good) okN++;
@@ -4969,7 +5043,7 @@ function renderCheckPoints(){
       <div class="cp-h"><span class="cp-n">${c.n}</span><span class="cp-t">${c.title}</span>
         <span class="cp-j ${cls}">${judge}</span></div>
       ${body}
-      ${c.note?`<div class="cp-basis">${c.note}</div>`:""}
+      ${c.note?`<div class="cp-basis">${typeof c.note==="function"?c.note():c.note}</div>`:""}
     </div>`;
   }).join("");
   tag.textContent = seen? `${okN}/${seen} 合格` : "--";
@@ -5560,7 +5634,7 @@ const STAT_DEFS = [
   /* ---- いただいた「ピッチングのチェックポイント」 ---- */
   { k:"knee_sum_rel",  label:"① 両膝角度の和",          unit:"°",      dec:0, c:"bknee",    cv:true },
   { k:"axis_line_34",  label:"② 4分の3での軸足の折れ",   unit:"°",      dec:0, c:"axis34",   cv:false, signed:true },
-  { k:"arm_horiz_top", label:"③ トップの上腕の傾き",     unit:"°",      dec:0, c:"armh",     cv:false, signed:true },
+  { k:"arm_horiz_top", label:"③ 最大外旋時の上腕の傾き", unit:"°",      dec:0, c:"armh",     cv:false, signed:true },
   { k:"tilt_rel",      label:"④ リリース時の体の倒れ",    unit:"°",      dec:0, c:"tilt",     cv:true },
   { k:"hand_above_ball",label:"⑤ 手の高さ(ボール何個分)", unit:"個分",   dec:1, c:"handh",    cv:false, signed:true },
 ];
@@ -7071,12 +7145,13 @@ window.__pitchlab = {
   get events(){ return events; },
   get metrics(){ return metrics; },
   get chain(){ return chain; },
-  detectEvents, renderMetrics, buildChain,
+  detectEvents, renderMetrics, renderCheckPoints, buildChain,
   computeAlerts, statsOf, maturityOf, collectValues, releaseSpread, releaseStats, drawRelScatter,
   drawTimeline, drawBlockChart,
   get THR(){ return THR; },
   get pitches(){ return pitcherPitches; },
   get fps(){ return fps; },
+  effectiveDir, throwArm, P2, idxOf, MER_MIN_LAY, MER_MAX_LAY,
 };
 
 /* ============ 起動 ============ */
