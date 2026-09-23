@@ -277,6 +277,22 @@
     color:var(--chalk-dim);margin:0;padding:11px 14px 9px;border-bottom:1px solid var(--panel-line);
     display:flex;justify-content:space-between;align-items:center;gap:8px;}
   .panel h2 .tag{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--amber);letter-spacing:0;}
+  /* ---- チェックポイント ---- */
+  .cp{border-top:1px solid var(--panel-line);padding:10px 14px;}
+  .cp:first-child{border-top:none;}
+  .cp-h{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+  .cp-n{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--chalk-dim);flex:none;}
+  .cp-t{font-size:12.5px;font-weight:700;flex:1 1 auto;min-width:0;}
+  .cp-j{font-family:'JetBrains Mono',monospace;font-size:10.5px;padding:2px 8px;border-radius:9px;flex:none;
+    border:1px solid var(--panel-line);}
+  .cp-j.ok{color:#7fd6a8;border-color:rgba(127,214,168,.45);}
+  .cp-j.ng{color:var(--alert);border-color:rgba(224,90,78,.45);}
+  .cp-j.na{color:var(--chalk-dim);}
+  .cp-num{font-family:'JetBrains Mono',monospace;font-size:11.5px;display:flex;flex-wrap:wrap;gap:4px 12px;margin-bottom:5px;}
+  .cp-now{color:var(--chalk);}
+  .cp-goal{color:var(--amber);}
+  .cp-why{font-size:11.5px;color:var(--chalk-dim);line-height:1.65;}
+  .cp-basis{font-size:10.5px;color:var(--chalk-dim);opacity:.85;margin-top:4px;line-height:1.6;}
   /* ---- 折りたたみ ---- */
   .panel h2.foldable{cursor:pointer;-webkit-user-select:none;user-select:none;}
   .panel h2.foldable:active{background:var(--bg-1);}
@@ -866,6 +882,11 @@
       <!-- ===== 指標 ===== -->
       <div class="tabpage" id="tab-metrics">
         <div class="panel">
+          <h2>ピッチングのチェックポイント <span class="tag" id="cpTag">--</span></h2>
+          <div id="cpList"></div>
+          <div class="legend" id="cpNote"></div>
+        </div>
+        <div class="panel">
           <h2>改善の提案 <span class="tag" id="adviceTag">--</span></h2>
           <div id="adviceList"></div>
           <div class="legend" id="adviceNote"></div>
@@ -1300,6 +1321,33 @@
 
       <!-- ===== 使い方 ===== -->
       <div class="tabpage" id="tab-help">
+        <div class="panel">
+          <h2>ピッチングのチェックポイント(5項目)</h2>
+          <div class="legend">
+            いただいた紙の5項目を、<b>指標</b>タブの専用の欄で毎回すべて判定します
+            (提案の上位3件とは別枠なので、埋もれません)。<br>
+            <b>横から撮った動画で出るもの</b><br>
+            ① リリース時の膝の角度 — 両ひざの角度を足して<b>270°以上</b>か<br>
+            ② 4分の3フェーズの軸足 — ステップ足のかかとが踏み出し幅の4分の3を通った瞬間に、
+            骨盤・膝の皿・足の中指が<b>一直線</b>か。
+            キャッチャー方向に曲がれば「開きが早い」、2塁方向なら「重心がのこったまま」<br>
+            ③ 腕が地面と<b>平行</b>になっているか<br>
+            <b>前・後ろから撮った動画で出るもの</b><br>
+            ④ リリース時の「頭−腰の中心」と「腰の中心−軸足のかかと」の角度が<b>20°以内</b>か<br>
+            ⑤ リリース時の手の高さが、両肩を結ぶラインより<b>ボール1個分ほど上</b>か<br>
+            <b>⚠️ どこまでが紙の基準か</b><br>
+            <b>①の270°・④の20°・⑤の「ボール1個分上」は紙のとおり</b>です。
+            ②③の許容幅(±10°・±15°)と、⑤の「ほど」の幅(0.5〜1.5個分)は
+            <b>紙に数値が無いので当方で置いた目安</b>です。画面にもそう書いてあります。<br>
+            <b>⚠️ ③の「この場面」</b>がどのコマを指すかは写真から決めきれないので、
+            <b>トップ</b>(肘が最も後ろ・高いコマ)で測っています。別のコマなら変えられます。<br>
+            <b>⚠️ ②の「1塁方向に曲がってはいけない」</b>は左右方向なので、
+            横から撮った動画では測れません(前後から撮ったときの話です)。<br>
+            大事なのは「この形にしよう」と意識することではなく、
+            <b>この形になってしまうのはなぜだろう? どこをトレーニングしたらよいのかな?</b> と、
+            体づくりの面やピッチングの流れ全体を通して考えることです。
+          </div>
+        </div>
         <div class="panel">
           <h2>見出しを押すと畳めます</h2>
           <div class="legend">
@@ -4402,6 +4450,8 @@ function loadDraft(){
 /* core:true は「現場モード」でも出す指標。
    単眼・30fps でも安定して測れて、しかも指導が変わるものに絞ってある。
    印のないものは詳細モードでだけ出る(消してはいない)。 */
+/* 硬式球の直径。チェックポイント⑤で「ボール何個分」を数えるのに使う */
+const BALL_CM=7.3;
 const METRIC_ROWS = [
   { core:true, k:"speed_kmh",  label:"球速",                    unit:"km/h", dec:1 },
   { core:true, k:"stride_ratio",label:"ストライド長",           unit:"%",    dec:1, cm:"stride_cm", side:true },
@@ -4422,6 +4472,13 @@ const METRIC_ROWS = [
   { k:"launch_ang", label:"発射角(横から見た打ち出し)",unit:"°",    dec:1, signed:true, side:true },
   { k:"shin_min",   label:"軸足スネ角(最小)",         unit:"°",    dec:0, side:true },
   { core:true, k:"shin_fp",    label:"軸足スネ角(接地時)",       unit:"°",    dec:0, side:true },
+  /* ---- いただいた「ピッチングのチェックポイント」 ---- */
+  { core:true, k:"knee_sum_rel", label:"① リリース時 両膝角度の和", unit:"°", dec:0, side:true },
+  { k:"back_knee_rel", label:"　(内訳) 軸足膝角度",        unit:"°",    dec:0, side:true },
+  { core:true, k:"axis_line_34", label:"② 4分の3での軸足の折れ",   unit:"°",    dec:0, signed:true, side:true },
+  { core:true, k:"arm_horiz_top", label:"③ トップの上腕の傾き",     unit:"°",    dec:0, signed:true, side:true },
+  { core:true, k:"tilt_rel",     label:"④ リリース時の体の倒れ",    unit:"°",    dec:0, back:true },
+  { core:true, k:"hand_above_ball", label:"⑤ 手の高さ(両肩ラインから)", unit:"個分", dec:1, signed:true, back:true },
 ];
 let metrics=null;
 
@@ -4523,6 +4580,7 @@ function computeMetricsAll(){
   const iToeP=IDX.foot[mpSide(pivot)];
   const iKneeS=(mpSide(stride)==="R")?L.rKnee:L.lKnee, iHipS=(mpSide(stride)==="R")?L.rHip:L.lHip;
   const iKneeP=(mpSide(pivot)==="R")?L.rKnee:L.lKnee;
+  const iHipP=(mpSide(pivot)==="R")?L.rHip:L.lHip;
   const iSh=idxOf("shoulder",arm), iEl=idxOf("elbow",arm), iWr=idxOf("wrist",arm);
 
   /* B-1 ストライド長。⚠️ 横からのみ。
@@ -4553,6 +4611,104 @@ function computeMetricsAll(){
   if(isSide()&&A.fp){ m.knee_fp=kneeAt(A.fp); conf.knee_fp=minVis([A.fp,iHipS],[A.fp,iKneeS],[A.fp,iAnkS]); }
   if(isSide()&&A.rel){ m.knee_rel=kneeAt(A.rel); conf.knee_rel=minVis([A.rel,iHipS],[A.rel,iKneeS],[A.rel,iAnkS]); }
   if(m.knee_fp!=null&&m.knee_rel!=null) m.knee_ext=m.knee_rel-m.knee_fp;
+  /* ============ チェックポイント① リリース時の両膝角度の和 ============
+     いただいた基準: 両ひざの角度を足して 270度以上か。
+     足りないと上半身頼りのフォーム。⚠️ 横からのみ(膝の曲げ伸ばしは矢状面) */
+  const kneePAt=(lm)=>{ const h=P2(lm,iHipP), k=P2(lm,iKneeP), a=P2(lm,iAnkP);
+    return (h&&k&&a)?angle2(h,k,a):null; };
+  if(isSide()&&A.rel){
+    m.back_knee_rel=kneePAt(A.rel);
+    conf.bknee=minVis([A.rel,iHipP],[A.rel,iKneeP],[A.rel,iAnkP]);
+  }
+  if(m.knee_rel!=null&&m.back_knee_rel!=null) m.knee_sum_rel=m.knee_rel+m.back_knee_rel;
+
+  /* ============ チェックポイント② 4分の3フェーズの軸足 ============
+     いただいた基準: ステップ足の後ろ側がステップ幅の4分の3を通過する瞬間に、
+     骨盤・膝の皿・足の中指が一直線か。
+     ・キャッチャー方向に曲がっていれば「開きが早い」
+     ・2塁方向に曲がっていれば「重心がのこったまま」
+     ここでは「ステップ足の後ろ側」をかかとで代表し、脚上げ〜接地の進みの75%に
+     達した最初のコマを4分の3フェーズとする。
+     ⚠️ 横からのみ。前後から撮ると、この前後のずれが奥行きになって測れない。
+     ⚠️ 紙にある「1塁方向に曲がってはいけない」は左右方向なので、
+        横から撮った動画では測れない(前後から撮ったときの話)。 */
+  if(isSide()&&events.lift&&events.fp){
+    const hS=(mpSide(stride)==="R")?L.rHeel:L.lHeel;
+    const a0=P2(A.lift,hS), a1=P2(A.fp,hS);
+    if(a0&&a1){
+      const total=D*(a1.x-a0.x);
+      if(total>1e-4){
+        let best=null;
+        for(const fr of smoothSeries){
+          if(fr.t<events.lift.t-1e-6||fr.t>events.fp.t+1e-6) continue;
+          const q=P2(fr.lm,hS); if(!q) continue;
+          if(D*(q.x-a0.x) >= 0.75*total){ best=fr; break; }
+        }
+        if(best){
+          m.t_34=best.t;
+          const hp=P2(best.lm,iHipP), kn=P2(best.lm,iKneeP), toe=P2(best.lm,iToeP);
+          if(hp&&kn&&toe){
+            /* 一直線からの折れ角。まっすぐなら 0 */
+            const bend=180-angle2(hp,kn,toe);
+            /* 膝が線のどちら側に出ているか。+ = キャッチャー方向 */
+            const vx=toe.x-hp.x, vy=toe.y-hp.y;
+            const wx=kn.x-hp.x, wy=kn.y-hp.y;
+            let sign=0;
+            if(Math.abs(vy)>1e-6){ const off=wx-vx*(wy/vy); sign=Math.sign(D*off); }
+            m.axis_line_34=bend*(sign||1);
+            conf.axis34=minVis([best.lm,iHipP],[best.lm,iKneeP],[best.lm,iToeP]);
+          }
+        }
+      }
+    }
+  }
+
+  /* ============ チェックポイント③ 腕が地面と平行か ============
+     いただいた基準: 「この場面の腕が地面と平行になっているか」。
+     ⚠️ 紙の「この場面」がどのコマかは写真からは決めきれないので、
+        ここでは<トップ>(肘が最も後ろ・高いコマ)で測っている。
+        別のコマを指しているようなら、そこに変えられる。
+     測るのは 肩→肘。+ が肘の方が高い、− が肘が下がっている。
+     ⚠️ 横からのみ。 */
+  if(isSide()&&A.armp){
+    const sh=P2(A.armp,iSh), el=P2(A.armp,iEl);
+    if(sh&&el){
+      m.arm_horiz_top=Math.atan2(sh.y-el.y, Math.abs(el.x-sh.x))*180/Math.PI;
+      conf.armh=minVis([A.armp,iSh],[A.armp,iEl]);
+    }
+  }
+
+  /* ============ チェックポイント④ リリース時の体の倒れ ============
+     いただいた基準: 「頭−腰の中心」と「腰の中心−軸足のかかと」の角度が20度以内か。
+     ⚠️ 前・後ろから撮った動画でのみ。紙の説明も「頭が1塁側に倒れすぎる」と
+        左右の倒れの話なので、横からでは測れない。 */
+  if(!isSide()&&A.rel){
+    const nose=P2(A.rel,L.nose), hip=midOf(A.rel,L.lHip,L.rHip);
+    const hlP=(mpSide(pivot)==="R")?L.rHeel:L.lHeel;
+    const heel=P2(A.rel,hlP);
+    if(nose&&hip&&heel){
+      m.tilt_rel=180-angle2(nose,hip,heel);
+      conf.tilt=minVis([A.rel,L.nose],[A.rel,L.lHip],[A.rel,L.rHip],[A.rel,hlP]);
+    }
+  }
+
+  /* ============ チェックポイント⑤ リリース時の手の高さ ============
+     いただいた基準: 両肩を結ぶラインより「ボール1個分ほど上」。
+     高すぎる=腕を振る前のパワー不足で遠心力が弱い。
+     低すぎる=肩甲骨を広く使えていない/疲労。
+     ⚠️ 前・後ろから撮った動画でのみ。横からは両肩が重なって線が引けない。
+     ボール1個 = 直径 7.3cm として数える。 */
+  if(!isSide()&&A.rel){
+    const s1=P2(A.rel,L.lShoulder), s2=P2(A.rel,L.rShoulder), wr=P2(A.rel,iWr);
+    if(s1&&s2&&wr&&Math.abs(s2.x-s1.x)>1e-4){
+      const lineY=s1.y+(s2.y-s1.y)*((wr.x-s1.x)/(s2.x-s1.x));
+      const above=(lineY-wr.y)/H;                 // 身長比。+ が上
+      m.hand_above_sh=above;
+      if(hcm) m.hand_above_ball=above*hcm/BALL_CM;
+      conf.handh=minVis([A.rel,L.lShoulder],[A.rel,L.rShoulder],[A.rel,iWr]);
+    }
+  }
+
   /* C-3 肘 */
   if(A.fp){
     const sh=P2(A.fp,iSh), el=P2(A.fp,iEl), wr=P2(A.fp,iWr);
@@ -4641,6 +4797,38 @@ function computeMetricsAll(){
    ・あくまで一般論。その選手に合う値とは限らない。
      記録がたまったら「再現性」タブの本人のばらつきで見るほうが確か。 */
 const ADVICE_RULES = [
+  /* ---------- いただいた「ピッチングのチェックポイント」 ---------- */
+  { key:"knee_sum_rel", conf:"bknee", title:"① 両膝の角度の和を 270°以上に",
+    name:"リリース時 両膝角度の和", unit:"°", dec:0, lo:270, scale:20, level:"高",
+    goal:()=>"270°以上",
+    why:"足りない場合は上半身頼りのフォームだと考えられます。股関節の柔軟性や下半身のトレーニングで下半身を成長させ、投げる動きの中で下半身を使っていく練習ができると良いです。",
+    basis:"いただいたチェックポイントの基準(270°)をそのまま使っています。" },
+
+  { key:"axis_line_34", conf:"axis34", title:"② 4分の3で骨盤・膝・つま先を一直線に",
+    name:"4分の3での軸足の折れ", unit:"°", dec:0, signed:true, abs:true, hi:10, scale:10, level:"中",
+    goal:()=>"一直線(0°)に近づける。ここでは ±10° 以内を目安にしています",
+    why:"膝がキャッチャー方向に曲がっていれば「開きが早い」、2塁方向に曲がっていれば「重心がのこったまま」です。この4分の3のところまで軸足が地面からの力をいかに「長く・広く・強く」得られるかで球の強さが決まってきます。ピッチングドリルが良い練習になります。",
+    basis:"「一直線か」はいただいたチェックポイントのとおりですが、±10° という許容幅は紙に無いため当方で置いた目安です。" },
+
+  { key:"arm_horiz_top", conf:"armh", title:"③ 腕を地面と平行に",
+    name:"トップの上腕の傾き", unit:"°", dec:0, signed:true, abs:true, hi:15, scale:15, level:"中",
+    goal:()=>"地面と平行(0°)に近づける。ここでは ±15° 以内を目安にしています",
+    why:"出来ていない場合は肩の柔軟性が足りないので、肩甲骨の動く範囲を広げるトレーニングを行う必要があります。また、ボールの重さを利用して腕を振る感覚がまだ身についていないこともあります。重たいボールを投げることや巻き付きシャドウピッチングをすることで、腕がしなって振られる感覚を身に着けるといいです。",
+    basis:"「腕が地面と平行か」はいただいたチェックポイントのとおり。⚠️ 紙の「この場面」がどのコマかは決めきれないので、ここでは<トップ>で測っています。±15° の幅も当方で置いた目安です。" },
+
+  { key:"tilt_rel", conf:"tilt", title:"④ リリースで体を倒しすぎない",
+    name:"リリース時の体の倒れ", unit:"°", dec:0, hi:20, scale:10, level:"高",
+    goal:()=>"20°以内",
+    why:"股関節や体幹を使いうまく「回転」できているかが分かります。20度より大きくなってしまうときは、頭が(右投手なら)1塁側に倒れすぎることが原因です。また、回転を受け止めるステップ足のお尻や太ももが弱く、回転を受け止められないと、スネが1塁方向に倒れて、ヒザが1塁方向に割れてしまいます。下半身の強化や股関節の柔軟性を高めるトレーニングが必要です。",
+    basis:"いただいたチェックポイントの基準(20°以内)をそのまま使っています。" },
+
+  { key:"hand_above_ball", conf:"handh", title:"⑤ 手は両肩のラインよりボール1個分上に",
+    name:"リリース時の手の高さ", unit:"個分", dec:1, signed:true, lo:0.5, hi:1.5, scale:0.5, level:"中",
+    goal:()=>"両肩を結ぶラインより ボール1個分ほど上(ここでは 0.5〜1.5個分を目安にしています)",
+    why:"ボール1個分ほど上にあると、ボールに力が伝わりやすくなります。高すぎる選手は腕を振る前に得られるパワーが足りていないため、遠心力が弱いことが考えられます。逆に低すぎる選手は肩甲骨を広く使えていなかったり、疲労がたまっていることが考えられます。",
+    basis:"「ボール1個分ほど上」はいただいたチェックポイントのとおり。「ほど」の幅(0.5〜1.5個分)は当方で置いた目安です。ボール1個=直径7.3cmとして数えています。" },
+
+
   { key:"knee_ext", title:"前膝を伸ばして支点を作る",
     name:"前膝の伸展量", unit:"°", dec:0, signed:true, lo:10, scale:10, level:"高",
     goal:(v)=> v<=0 ? "まず 0°以上(曲がり続けない)、慣れたら +10°以上" : "+10°以上",
@@ -4677,7 +4865,11 @@ function adviceItems(){
   let seen=0;
   const {m,conf}=metrics;
   const cOf=(k)=>({stride_ratio:conf.stride, knee_fp:conf.knee_fp, knee_rel:conf.knee_rel,
-                   knee_ext:conf.knee_fp, elbow_fp:conf.elbow}[k]);
+                   knee_ext:conf.knee_fp, elbow_fp:conf.elbow,
+                   /* いただいたチェックポイントの5項目 */
+                   knee_sum_rel:conf.bknee, axis_line_34:conf.axis34,
+                   arm_horiz_top:conf.armh, tilt_rel:conf.tilt,
+                   hand_above_ball:conf.handh}[k]);
   const out=[];
   for(const r of ADVICE_RULES){
     if(r.timing && fps<60) continue;
@@ -4698,6 +4890,90 @@ function adviceItems(){
   out.sort((a,b)=>b.score-a.score);
   adviceSeen=seen;
   return out;
+}
+/* ================= いただいたチェックポイント =================
+   紙の5項目をそのまま並べる。提案(上位3件)とは別に、毎回5つとも出す。
+   ・数値の基準が紙にあるもの(①270° ④20° ⑤ボール1個分)は、そのまま
+   ・紙に無い許容幅(②③、⑤の「ほど」)は当方で置いた目安と明記する
+   ・向きが合わないものは、数値ではなく撮り方を出す */
+const CHECK_POINTS = [
+  { n:"①", key:"knee_sum_rel", side:true, title:"リリース時の膝の角度",
+    crit:"両ひざの角度を足して 270°以上", unit:"°", dec:0,
+    ok:(v)=>v>=270, paper:true,
+    why:"足りない場合は上半身頼りのフォームだと考えられるので、股関節の柔軟性や下半身のトレーニングで下半身を成長させ、投げる動きの中で下半身を使っていく練習ができると良い。" },
+  { n:"②", key:"axis_line_34", side:true, title:"4分の3フェーズの軸足",
+    crit:"骨盤・膝の皿・足の中指が一直線(±10°以内を目安)", unit:"°", dec:0, signed:true,
+    ok:(v)=>Math.abs(v)<=10, paper:false,
+    why:(v)=> (v>0
+      ? "膝がキャッチャー方向に曲がっています＝「開きが早い」。"
+      : "膝が2塁方向に曲がっています＝「重心がのこったまま」。")
+      + "この4分の3のところまで軸足が地面からの力をいかに「長く・広く・強く」得られるかで球の強さが決まってくる。ピッチングドリルが良い練習になります。",
+    note:"「一直線か」は紙のとおり。±10° という幅は紙に無いので当方で置いた目安です。" },
+  { n:"③", key:"arm_horiz_top", side:true, title:"腕が地面と平行になっているか",
+    crit:"地面と平行(±15°以内を目安)", unit:"°", dec:0, signed:true,
+    ok:(v)=>Math.abs(v)<=15, paper:false,
+    why:"出来ていない場合は肩の柔軟性が足りないので、肩甲骨の動く範囲を広げるトレーニングを行う必要がある。また、ボールの重さを利用して腕を振る感覚がまだ身についていないこともある。重たいボールを投げることや巻き付きシャドウピッチングをすることで、腕がしなって振られる感覚を身に着けるといい。",
+    note:"⚠️ 紙の「この場面」がどのコマかは写真から決めきれないので、<b>トップ</b>(肘が最も後ろ・高いコマ)で測っています。±15° の幅も当方で置いた目安です。別のコマを指しているようなら変えられます。" },
+  { n:"④", key:"tilt_rel", side:false, title:"リリース時の体の倒れ",
+    crit:"「頭−腰の中心」と「腰の中心−軸足のかかと」の角度が 20°以内", unit:"°", dec:0,
+    ok:(v)=>v<=20, paper:true,
+    why:"股関節や体幹を使いうまく「回転」できているかが分かる。20度より大きくなってしまうときは、頭が(右投手なら)1塁側に倒れすぎることが原因。また、回転を受け止めるステップ足のお尻や太ももが弱く、回転を受け止められないと、スネが1塁方向に倒れて、ヒザが1塁方向に割れてしまう。下半身の強化や股関節の柔軟性を高めるトレーニングが必要。" },
+  { n:"⑤", key:"hand_above_ball", side:false, title:"リリース時の手の高さ",
+    crit:"両肩を結ぶラインより ボール1個分ほど上(0.5〜1.5個分を目安)", unit:"個分", dec:1, signed:true,
+    ok:(v)=>v>=0.5&&v<=1.5, paper:false,
+    why:(v)=> (v>1.5
+      ? "高すぎます。腕を振る前に得られるパワーが足りていないため、遠心力が弱いことが考えられる。"
+      : "低すぎます。肩甲骨を広く使えていなかったり、疲労がたまっていることが考えられる。"),
+    note:"「ボール1個分ほど上」は紙のとおり。「ほど」の幅(0.5〜1.5個分)は当方で置いた目安です。ボール1個=直径7.3cm。" },
+];
+function renderCheckPoints(){
+  const box=$("cpList"), tag=$("cpTag"), note=$("cpNote");
+  if(!box) return;
+  const foot=`いただいた「ピッチングのチェックポイント」をそのまま見ています。<br>
+    大事なのは「この形にしよう」と意識することではなく、
+    <b>この形になってしまうのはなぜだろう? どこをトレーニングしたらよいのかな?</b> と、
+    体づくりの面やピッチングの流れ全体を通して考えることです。<br>
+    <b>緑=紙の基準をそのまま</b>使っている項目(①④と⑤の「1個分上」)、
+    それ以外の許容幅は紙に無いため<b>当方で置いた目安</b>です。`;
+  const m=metrics?metrics.m:null;
+  if(!m){
+    tag.textContent="--";
+    box.innerHTML=`<div class="cp"><div class="cp-why">解析とイベントの確定が終わると、ここに5項目の判定が出ます。</div></div>`;
+    note.innerHTML=foot; return;
+  }
+  let okN=0, seen=0;
+  box.innerHTML=CHECK_POINTS.map(c=>{
+    const v=m[c.key];
+    const wrongView = (c.side && !isSide()) || (!c.side && isSide());
+    let judge, cls, body;
+    if(wrongView){
+      judge=c.side?"横から撮ると出ます":"前後から撮ると出ます"; cls="na";
+      body=`<div class="cp-why">この項目は${c.side?"横":"前・後ろ"}から撮った動画でしか測れません。
+        (${c.side?"膝の曲げ伸ばしや前後のずれは、前後から撮ると奥行きになります"
+                 :"体の左右の倒れと両肩のラインは、横から撮ると重なって見えません"})</div>`;
+    }else if(v==null||!isFinite(v)){
+      judge="測れていません"; cls="na";
+      body=`<div class="cp-why">イベントが未確定か、その関節が写っていないコマです。</div>`;
+    }else{
+      seen++;
+      const good=c.ok(v); if(good) okN++;
+      judge=good?"合格":"要改善"; cls=good?"ok":"ng";
+      const sign=(c.signed&&v>0)?"+":"";
+      body=`<div class="cp-num">
+          <span class="cp-now">いま <b>${sign}${v.toFixed(c.dec)} ${c.unit}</b></span>
+          <span class="cp-goal">基準 ${c.crit}</span>
+        </div>`
+        + (good?"":`<div class="cp-why">${typeof c.why==="function"?c.why(v):c.why}</div>`);
+    }
+    return `<div class="cp">
+      <div class="cp-h"><span class="cp-n">${c.n}</span><span class="cp-t">${c.title}</span>
+        <span class="cp-j ${cls}">${judge}</span></div>
+      ${body}
+      ${c.note?`<div class="cp-basis">${c.note}</div>`:""}
+    </div>`;
+  }).join("");
+  tag.textContent = seen? `${okN}/${seen} 合格` : "--";
+  note.innerHTML=foot;
 }
 function renderAdvice(){
   const box=$("adviceList"), tag=$("adviceTag"), note=$("adviceNote");
@@ -4759,7 +5035,7 @@ function renderMetrics(){
     $("metricsTag").textContent="--";
     list.innerHTML=`<span class="k" style="grid-column:span 2;">解析とイベントの確定が必要です</span>`;
     $("metricsNote").textContent="";
-    renderAdvice();
+    renderCheckPoints(); renderAdvice();
     return;
   }
   const {m,conf,resMs}=metrics;
@@ -4821,7 +5097,7 @@ function renderMetrics(){
   if(lowc.length) warns.push(`検出信頼度が低い項目があります(${lowc.join(", ")})。⚠印の値は参考程度に`);
   $("metricsNote").innerHTML=warns.length?warns.map(w=>"・"+w).join("<br>"):
     "すべて平滑化後の骨格から、等方座標・身長比で算出しています。";
-  drawTimeline(); renderRepeat(); renderAdvice();
+  drawTimeline(); renderRepeat(); renderCheckPoints(); renderAdvice();
 }
 $("speedKmh").addEventListener("input",()=>{ renderMetrics(); if(isChainVisible()) drawChain(); });
 
@@ -5281,6 +5557,12 @@ const STAT_DEFS = [
   { k:"rel_side",     label:"リリースサイド (RPX)",    unit:"身長比",  dec:3, c:"relside",  cv:false, signed:true },
   { k:"launch_ang",   label:"発射角",                  unit:"°",      dec:1, c:null,       cv:false, signed:true },
   { k:"shin_min",     label:"軸足スネ角(最小)",        unit:"°",      dec:0, c:"shin",     cv:false },
+  /* ---- いただいた「ピッチングのチェックポイント」 ---- */
+  { k:"knee_sum_rel",  label:"① 両膝角度の和",          unit:"°",      dec:0, c:"bknee",    cv:true },
+  { k:"axis_line_34",  label:"② 4分の3での軸足の折れ",   unit:"°",      dec:0, c:"axis34",   cv:false, signed:true },
+  { k:"arm_horiz_top", label:"③ トップの上腕の傾き",     unit:"°",      dec:0, c:"armh",     cv:false, signed:true },
+  { k:"tilt_rel",      label:"④ リリース時の体の倒れ",    unit:"°",      dec:0, c:"tilt",     cv:true },
+  { k:"hand_above_ball",label:"⑤ 手の高さ(ボール何個分)", unit:"個分",   dec:1, c:"handh",    cv:false, signed:true },
 ];
 let pitcherPitches=[];
 
@@ -6036,6 +6318,7 @@ const CSV_COLS=["date","session_id","pitch_no","pitcher_name","height_cm","throw
   "slow_factor","calibrated","speed_kmh","stride_ratio","stride_cm","pelvis_disp","pelvis_vel",
   "knee_fp","knee_rel","knee_ext","elbow_fp","trunk_fp","trunk_rel",
   "t_fp_arm_ms","t_fp_rel_ms","t_arm_rel_ms",
+  "knee_sum_rel","back_knee_rel","axis_line_34","arm_horiz_top","tilt_rel","hand_above_sh","hand_above_ball",
   "view_mode",
   "rel_height_ratio","rel_height_cm","rel_ext_ratio","rel_ext_cm",
   "rel_side_ratio","rel_side_cm","launch_ang_deg","launch_ang_se_deg","launch_ang_pts",
@@ -6068,6 +6351,9 @@ function pitchToRow(p, pitcher){
     knee_fp:m.knee_fp, knee_rel:m.knee_rel, knee_ext:m.knee_ext, elbow_fp:m.elbow_fp,
     trunk_fp:m.trunk_fp, trunk_rel:m.trunk_rel,
     t_fp_arm_ms:m.t_fp_arm, t_fp_rel_ms:m.t_fp_rel, t_arm_rel_ms:m.t_arm_rel,
+    knee_sum_rel:m.knee_sum_rel, back_knee_rel:m.back_knee_rel,
+    axis_line_34:m.axis_line_34, arm_horiz_top:m.arm_horiz_top,
+    tilt_rel:m.tilt_rel, hand_above_sh:m.hand_above_sh, hand_above_ball:m.hand_above_ball,
     rel_height_ratio:m.rel_height, rel_height_cm:m.rel_height_cm,
     rel_ext_ratio:m.rel_ext, rel_ext_cm:m.rel_ext_cm,
     view_mode:viewMode,
