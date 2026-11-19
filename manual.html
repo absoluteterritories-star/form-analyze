@@ -131,6 +131,11 @@
   li{margin-bottom:6px;}
   strong{font-weight:700;}
   a{color:var(--sky);}
+  /* 文章の中のリンクは指で押すには細い。
+     行の高さを変えずに、押せる範囲だけ上下に広げる(余白ぶんを負の余白で戻す)。
+     目次は行が詰まっているので、広げる量を控えめにする。 */
+  p a, td a, dd a{padding:8px 3px; margin:-8px -3px;}
+  li a{padding:5px 3px; margin:-5px -3px;}
   hr{border:0; border-top:1px solid var(--line-soft); margin:40px 0;}
 
   /* ---- チップ ---- */
@@ -1004,6 +1009,7 @@
     </tbody>
   </table></div>
   <p><strong>主に見るのは「直近10本との差」</strong>です。全体平均との差は副次的に併記しています。</p>
+  <p><strong>この本数は、指標ごとに数えます。</strong>撮る向きによって出ない指標があるので（横からしか出ないもの、前・後ろからしか出ないもの）、全体で10本あっても、その指標は2本しか無いということが起こります。<strong>その指標が5本に届いていないうちは、差の欄が「--」のまま</strong>になります。何本目かは「再現性」タブの一覧の <strong>n</strong> の列で確かめられます。</p>
 
   <div class="note">
     <span class="lbl">アラートのしきい値は、必ず自分で調整してください</span>
